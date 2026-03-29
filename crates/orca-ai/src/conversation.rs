@@ -171,8 +171,12 @@ impl<B: LlmBackend> ConversationEngine<B> {
         context: &ClusterContext,
     ) -> anyhow::Result<&AlertConversation> {
         // Inject as a system message, then get AI's updated analysis
-        self.operator_reply(conversation_id, &format!("[System update] {update}"), context)
-            .await
+        self.operator_reply(
+            conversation_id,
+            &format!("[System update] {update}"),
+            context,
+        )
+        .await
     }
 
     /// Mark an alert as remediated (auto-fix was applied).

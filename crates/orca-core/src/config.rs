@@ -295,7 +295,13 @@ vendor = "nvidia"
 vram_min = 40000
 "#;
         let config: ServicesConfig = toml::from_str(toml).unwrap();
-        let gpu = config.service[0].resources.as_ref().unwrap().gpu.as_ref().unwrap();
+        let gpu = config.service[0]
+            .resources
+            .as_ref()
+            .unwrap()
+            .gpu
+            .as_ref()
+            .unwrap();
         assert_eq!(gpu.count, 1);
         assert_eq!(gpu.vendor.as_deref(), Some("nvidia"));
     }

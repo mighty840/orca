@@ -1,7 +1,11 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "orca", about = "Container + Wasm orchestrator with AI ops", version)]
+#[command(
+    name = "orca",
+    about = "Container + Wasm orchestrator with AI ops",
+    version
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -228,8 +232,7 @@ async fn main() -> anyhow::Result<()> {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 
@@ -256,7 +259,13 @@ async fn main() -> anyhow::Result<()> {
                     .resources
                     .as_ref()
                     .and_then(|r| r.gpu.as_ref())
-                    .map(|g| format!(" [GPU: {}x{}]", g.count, g.vendor.as_deref().unwrap_or("any")))
+                    .map(|g| {
+                        format!(
+                            " [GPU: {}x{}]",
+                            g.count,
+                            g.vendor.as_deref().unwrap_or("any")
+                        )
+                    })
                     .unwrap_or_default();
                 println!("  {} ({:?}){}", svc.name, svc.runtime, gpu_tag);
             }

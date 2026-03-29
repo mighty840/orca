@@ -80,7 +80,10 @@ struct Usage {
 #[async_trait]
 impl LlmBackend for OpenAiCompatibleBackend {
     async fn chat(&self, messages: &[ChatMessage]) -> anyhow::Result<ChatResponse> {
-        let url = format!("{}/v1/chat/completions", self.endpoint.trim_end_matches('/'));
+        let url = format!(
+            "{}/v1/chat/completions",
+            self.endpoint.trim_end_matches('/')
+        );
 
         let mut req = self.client.post(&url).json(&ChatRequest {
             model: &self.model,

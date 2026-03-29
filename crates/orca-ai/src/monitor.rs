@@ -66,7 +66,10 @@ impl<B: LlmBackend> AiMonitor<B> {
                     .any(|c| c.service == svc.name);
 
                 if !already_tracking {
-                    info!("Opening alert conversation for {}: no running replicas", svc.name);
+                    info!(
+                        "Opening alert conversation for {}: no running replicas",
+                        svc.name
+                    );
                     engine
                         .open_alert(
                             &svc.name,
@@ -97,7 +100,10 @@ impl<B: LlmBackend> AiMonitor<B> {
                             &format!(
                                 "Service '{}' has restarted {} times in the last 24 hours. \
                                  Currently {}/{} replicas are running.",
-                                svc.name, svc.restart_count_24h, svc.replicas_running, svc.replicas_desired
+                                svc.name,
+                                svc.restart_count_24h,
+                                svc.replicas_running,
+                                svc.replicas_desired
                             ),
                             ctx,
                         )
@@ -113,7 +119,10 @@ impl<B: LlmBackend> AiMonitor<B> {
                     .any(|c| c.service == svc.name);
 
                 if !already_tracking {
-                    info!("Opening alert conversation for {}: high error rate", svc.name);
+                    info!(
+                        "Opening alert conversation for {}: high error rate",
+                        svc.name
+                    );
                     engine
                         .open_alert(
                             &svc.name,
@@ -134,37 +143,36 @@ impl<B: LlmBackend> AiMonitor<B> {
         // Check nodes for GPU issues
         for node in &ctx.nodes {
             for gpu in &node.gpu_summary {
-                if let Some(temp) = gpu.temperature {
-                    if temp > 90.0 {
-                        let alert_name = format!("node-{}-gpu-{}", node.id, gpu.index);
-                        let already_tracking = engine
-                            .active_conversations()
-                            .iter()
-                            .any(|c| c.service == alert_name);
+                if let Some(temp) = gpu.temperature
+                    && temp > 90.0
+                {
+                    let alert_name = format!("node-{}-gpu-{}", node.id, gpu.index);
+                    let already_tracking = engine
+                        .active_conversations()
+                        .iter()
+                        .any(|c| c.service == alert_name);
 
-                        if !already_tracking {
-                            info!("Opening alert conversation for GPU thermal: {alert_name}");
-                            engine
-                                .open_alert(
-                                    &alert_name,
-                                    AlertSeverity::Warning,
-                                    &format!(
-                                        "GPU {} on node {} ({}) temperature is {:.0}C (>90C threshold). \
-                                         Utilization: {:.0}%, VRAM: {}/{}MB",
-                                        gpu.index, node.id, gpu.model, temp,
-                                        gpu.utilization, gpu.vram_used_mb, gpu.vram_total_mb
-                                    ),
-                                    ctx,
-                                )
-                                .await?;
-                        }
+                    if !already_tracking {
+                        info!("Opening alert conversation for GPU thermal: {alert_name}");
+                        engine
+                            .open_alert(
+                                &alert_name,
+                                AlertSeverity::Warning,
+                                &format!(
+                                    "GPU {} on node {} ({}) temperature is {:.0}C (>90C threshold). \
+                                     Utilization: {:.0}%, VRAM: {}/{}MB",
+                                    gpu.index, node.id, gpu.model, temp,
+                                    gpu.utilization, gpu.vram_used_mb, gpu.vram_total_mb
+                                ),
+                                ctx,
+                            )
+                            .await?;
                     }
                 }
 
                 // GPU VRAM nearly full
                 if gpu.vram_total_mb > 0 {
-                    let usage_pct =
-                        (gpu.vram_used_mb as f64 / gpu.vram_total_mb as f64) * 100.0;
+                    let usage_pct = (gpu.vram_used_mb as f64 / gpu.vram_total_mb as f64) * 100.0;
                     if usage_pct > 95.0 {
                         let alert_name = format!("node-{}-gpu-{}-vram", node.id, gpu.index);
                         let already_tracking = engine
@@ -180,8 +188,11 @@ impl<B: LlmBackend> AiMonitor<B> {
                                     &format!(
                                         "GPU {} on node {} VRAM is {:.0}% full ({}/{}MB). \
                                          Workloads may OOM.",
-                                        gpu.index, node.id, usage_pct,
-                                        gpu.vram_used_mb, gpu.vram_total_mb
+                                        gpu.index,
+                                        node.id,
+                                        usage_pct,
+                                        gpu.vram_used_mb,
+                                        gpu.vram_total_mb
                                     ),
                                     ctx,
                                 )
@@ -193,23 +204,18 @@ impl<B: LlmBackend> AiMonitor<B> {
         }
 
         // Update existing conversations with fresh context
-        let active_ids: Vec<_> = engine
-            .active_conversations()
-            .iter()
-            .map(|c| c.id)
-            .collect();
+        let active_ids: Vec<_> = engine.active_conversations().iter().map(|c| c.id).collect();
 
         for id in active_ids {
             // Check if the issue self-resolved
             if let Some(conv) = engine.get_conversation(id) {
                 let svc_name = conv.service.clone();
-                if let Some(svc) = ctx.services.iter().find(|s| s.name == svc_name) {
-                    if svc.replicas_running == svc.replicas_desired
-                        && svc.error_count_1h == 0
-                        && svc.restart_count_24h < 3
-                    {
-                        engine.mark_remediated(id, "Issue self-resolved — metrics returned to normal");
-                    }
+                if let Some(svc) = ctx.services.iter().find(|s| s.name == svc_name)
+                    && svc.replicas_running == svc.replicas_desired
+                    && svc.error_count_1h == 0
+                    && svc.restart_count_24h < 3
+                {
+                    engine.mark_remediated(id, "Issue self-resolved — metrics returned to normal");
                 }
             }
         }

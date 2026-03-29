@@ -11,17 +11,12 @@ pub type ConversationId = Uuid;
 
 // -- Runtime --
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RuntimeKind {
+    #[default]
     Container,
     Wasm,
-}
-
-impl Default for RuntimeKind {
-    fn default() -> Self {
-        Self::Container
-    }
 }
 
 // -- GPU --
