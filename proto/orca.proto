@@ -1,0 +1,140 @@
+syntax = "proto3";
+package orca;
+
+// -- Agent ↔ Control Plane communication --
+
+service AgentService {
+  // Agent registers with control plane on startup
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // Agent sends periodic heartbeats with resource stats
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+
+  // Agent reports workload status changes
+  rpc ReportStatus(StatusReport) returns (StatusResponse);
+}
+
+service ControlService {
+  // Control plane tells agent to create/start/stop/remove workloads
+  rpc RunWorkload(WorkloadCommand) returns (WorkloadResult);
+
+  // Control plane requests logs from agent
+  rpc StreamLogs(LogRequest) returns (stream LogChunk);
+
+  // Control plane requests exec inside a workload
+  rpc Exec(ExecRequest) returns (ExecResponse);
+}
+
+// -- Messages --
+
+message RegisterRequest {
+  string node_id = 1;
+  string address = 2;
+  map<string, string> labels = 3;
+  ResourceInfo resources = 4;
+}
+
+message RegisterResponse {
+  bool accepted = 1;
+  string cluster_name = 2;
+  // Workloads the agent should be running (reconciliation on join)
+  repeated WorkloadSpec assigned_workloads = 3;
+}
+
+message HeartbeatRequest {
+  string node_id = 1;
+  ResourceInfo resources = 2;
+  repeated WorkloadInstanceStatus workloads = 3;
+}
+
+message HeartbeatResponse {
+  // Commands to execute (scale up/down, new deploys, etc.)
+  repeated WorkloadCommand commands = 1;
+}
+
+message StatusReport {
+  string node_id = 1;
+  string workload_id = 2;
+  string status = 3; // pending, running, stopped, failed, completed
+  string message = 4;
+}
+
+message StatusResponse {}
+
+message WorkloadCommand {
+  enum Action {
+    CREATE = 0;
+    START = 1;
+    STOP = 2;
+    REMOVE = 3;
+  }
+  Action action = 1;
+  WorkloadSpec spec = 2;
+  string workload_id = 3;
+}
+
+message WorkloadResult {
+  bool success = 1;
+  string workload_id = 2;
+  string message = 3;
+}
+
+message WorkloadSpec {
+  string name = 1;
+  string runtime = 2; // "container" or "wasm"
+  string image = 3;   // container image or wasm module ref
+  uint32 port = 4;
+  string domain = 5;
+  string health_path = 6;
+  map<string, string> env = 7;
+  ResourceLimits resources = 8;
+  VolumeSpec volume = 9;
+  repeated string triggers = 10;
+}
+
+message ResourceInfo {
+  double cpu_cores = 1;
+  uint64 memory_bytes = 2;
+  double cpu_used = 3;
+  uint64 memory_used = 4;
+}
+
+message ResourceLimits {
+  string memory = 1;
+  double cpu = 2;
+}
+
+message VolumeSpec {
+  string path = 1;
+  string size = 2;
+}
+
+message WorkloadInstanceStatus {
+  string workload_id = 1;
+  string name = 2;
+  string status = 3;
+  string health = 4;
+}
+
+message LogRequest {
+  string workload_id = 1;
+  uint64 tail = 2;
+  bool follow = 3;
+  bool timestamps = 4;
+}
+
+message LogChunk {
+  bytes data = 1;
+  string timestamp = 2;
+}
+
+message ExecRequest {
+  string workload_id = 1;
+  repeated string command = 2;
+}
+
+message ExecResponse {
+  int32 exit_code = 1;
+  bytes stdout = 2;
+  bytes stderr = 3;
+}

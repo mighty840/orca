@@ -1,0 +1,14 @@
+[package]
+name = "orca-proxy"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+orca-core = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+# pingora will be added when proxy milestone begins
+# pingora = { workspace = true }

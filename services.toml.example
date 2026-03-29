@@ -1,0 +1,92 @@
+# -- Container workload --
+[[service]]
+name = "api"
+image = "ghcr.io/myorg/api:latest"
+replicas = 3
+port = 8080
+health = "/healthz"
+domain = "api.example.com"
+
+[service.env]
+DATABASE_URL = "${secrets.db_url}"
+
+[service.resources]
+memory = "256Mi"
+cpu = 0.5
+
+[service.deploy]
+strategy = "rolling"
+max_unavailable = 1
+
+# -- GPU workload (LLM inference) --
+[[service]]
+name = "llm-inference"
+image = "vllm/vllm-openai:latest"
+replicas = 1
+port = 8000
+domain = "llm.example.com"
+health = "/health"
+
+[service.env]
+MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+TENSOR_PARALLEL_SIZE = "1"
+
+[service.resources]
+memory = "32Gi"
+cpu = 8.0
+
+[service.resources.gpu]
+count = 1
+vendor = "nvidia"
+vram_min = 24000
+
+# -- GPU workload (image generation) --
+[[service]]
+name = "comfyui"
+image = "ghcr.io/myorg/comfyui:latest"
+replicas = 1
+port = 8188
+
+[service.resources]
+memory = "16Gi"
+cpu = 4.0
+
+[service.resources.gpu]
+count = 1
+vendor = "nvidia"
+model = "RTX4090"
+
+[service.volume]
+path = "/workspace/models"
+size = "100Gi"
+
+# -- Wasm workload (HTTP trigger) --
+[[service]]
+name = "edge-functions"
+runtime = "wasm"
+module = "oci://ghcr.io/myorg/edge:latest"
+triggers = ["http:/api/edge/*"]
+replicas = "auto"
+
+[service.env]
+API_KEY = "${secrets.edge_key}"
+
+# -- Database (pinned to node with volume) --
+[[service]]
+name = "postgres"
+image = "postgres:16"
+port = 5432
+
+[service.volume]
+path = "/var/lib/postgresql/data"
+size = "10Gi"
+
+[service.placement]
+labels = { zone = "eu-1" }
+
+# -- Wasm cron job --
+[[service]]
+name = "daily-report"
+runtime = "wasm"
+module = "./jobs/report.wasm"
+triggers = ["cron:0 9 * * *"]

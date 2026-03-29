@@ -1,0 +1,17 @@
+[package]
+name = "orca-ai"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+orca-core = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+async-trait = { workspace = true }

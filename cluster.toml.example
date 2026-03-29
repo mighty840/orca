@@ -1,0 +1,56 @@
+[cluster]
+name = "my-cluster"
+domain = "example.com"
+acme_email = "ops@example.com"
+log_level = "info"
+
+# Single-node setup — just omit the [[node]] sections and orca runs everything locally.
+# Multi-node — list your nodes below. The first node to run `orca server` becomes the leader.
+
+# [[node]]
+# address = "10.0.0.1"
+# labels = { zone = "eu-1", role = "general" }
+#
+# [[node]]
+# address = "10.0.0.2"
+# labels = { zone = "eu-1", role = "general" }
+
+# GPU node — declare GPUs so the scheduler can place GPU workloads
+# [[node]]
+# address = "10.0.0.3"
+# labels = { zone = "eu-1", role = "gpu" }
+#
+# [[node.gpus]]
+# vendor = "nvidia"
+# count = 2
+# model = "A100"
+
+# -- AI Operations Assistant --
+# Enables: `orca ask`, conversational alerts, smart import analysis, log summarization.
+# Works with any OpenAI-compatible API (LiteLLM, Ollama, vLLM, OpenAI, etc.)
+
+# [ai]
+# provider = "litellm"
+# endpoint = "https://llm.example.com"
+# model = "qwen3-30b"
+# api_key = "${secrets.ai_api_key}"
+#
+# [ai.alerts]
+# enabled = true
+# analysis_interval_secs = 60
+#
+# [ai.alerts.channels]
+# slack = "https://hooks.slack.com/services/..."
+# webhook = "https://my-pagerduty-webhook/..."
+#
+# [ai.auto_remediate]
+# restart_crashed = true
+# scale_on_pressure = false
+# rollback_on_failure = false
+
+# [observability]
+# otlp_endpoint = "https://signoz.example.com"
+#
+# [observability.alerts]
+# webhook = "https://hooks.slack.com/..."
+# email = "ops@example.com"

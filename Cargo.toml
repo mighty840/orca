@@ -1,0 +1,74 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/orca-core",
+    "crates/orca-ai",
+    "crates/orca-agent",
+    "crates/orca-control",
+    "crates/orca-cli",
+    "crates/orca-tui",
+    "crates/orca-web",
+    "crates/orca-proxy",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0"
+repository = "https://github.com/sharang/orca"
+
+[workspace.dependencies]
+# Shared across crates
+orca-core = { path = "crates/orca-core" }
+orca-ai = { path = "crates/orca-ai" }
+orca-proxy = { path = "crates/orca-proxy" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Serialization & config
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# HTTP & gRPC
+axum = { version = "0.8", features = ["ws"] }
+tonic = "0.13"
+prost = "0.13"
+tower = "0.5"
+reqwest = { version = "0.12", features = ["json"] }
+
+# Consensus & storage
+openraft = { version = "0.9", features = ["serde"] }
+redb = "2"
+
+# Container runtime
+bollard = "0.18"
+
+# Wasm runtime
+wasmtime = { version = "29", features = ["component-model"] }
+wasmtime-wasi = "29"
+
+# Proxy
+pingora = "0.4"
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+opentelemetry = "0.28"
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Misc
+uuid = { version = "1", features = ["v7", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+async-trait = "0.1"

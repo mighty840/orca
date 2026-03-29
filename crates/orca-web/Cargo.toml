@@ -1,0 +1,15 @@
+[package]
+name = "orca-web"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+orca-core = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+clap = { workspace = true }
+# Dioxus will be added when the UI milestone begins
+# dioxus = { version = "0.6", features = ["fullstack", "router"] }
