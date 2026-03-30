@@ -1,4 +1,5 @@
 /target
+**/target
 *.swp
 *.swo
 .env
