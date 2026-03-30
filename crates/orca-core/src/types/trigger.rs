@@ -36,3 +36,54 @@ impl From<Trigger> for String {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn try_from_http() {
+        let t = Trigger::try_from("http:/api/health".to_string()).unwrap();
+        assert!(matches!(t, Trigger::Http(r) if r == "/api/health"));
+    }
+
+    #[test]
+    fn try_from_cron() {
+        let t = Trigger::try_from("cron:0 * * * *".to_string()).unwrap();
+        assert!(matches!(t, Trigger::Cron(c) if c == "0 * * * *"));
+    }
+
+    #[test]
+    fn try_from_queue() {
+        let t = Trigger::try_from("queue:my-topic".to_string()).unwrap();
+        assert!(matches!(t, Trigger::Queue(q) if q == "my-topic"));
+    }
+
+    #[test]
+    fn try_from_event() {
+        let t = Trigger::try_from("event:deploy.*".to_string()).unwrap();
+        assert!(matches!(t, Trigger::Event(e) if e == "deploy.*"));
+    }
+
+    #[test]
+    fn try_from_invalid_returns_err() {
+        let result = Trigger::try_from("bad:input".to_string());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("invalid trigger format"));
+    }
+
+    #[test]
+    fn round_trip_string_trigger_string() {
+        let inputs = vec![
+            "http:/index",
+            "cron:*/5 * * * *",
+            "queue:jobs",
+            "event:node.down",
+        ];
+        for input in inputs {
+            let trigger = Trigger::try_from(input.to_string()).unwrap();
+            let back: String = trigger.into();
+            assert_eq!(back, input);
+        }
+    }
+}

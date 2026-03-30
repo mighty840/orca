@@ -81,3 +81,42 @@ pub struct LogsQuery {
 fn default_tail() -> u64 {
     100
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn logs_query_default_tail_is_100() {
+        let q: LogsQuery = serde_json::from_str("{}").unwrap();
+        assert_eq!(q.tail, 100);
+        assert!(!q.follow);
+    }
+
+    #[test]
+    fn deploy_request_serialization_roundtrip() {
+        let req = DeployRequest {
+            services: vec![ServiceConfig {
+                name: "web".into(),
+                runtime: RuntimeKind::Container,
+                image: Some("nginx:latest".into()),
+                module: None,
+                replicas: crate::types::Replicas::Fixed(2),
+                port: Some(80),
+                domain: Some("example.com".into()),
+                health: Some("/healthz".into()),
+                env: Default::default(),
+                resources: None,
+                volume: None,
+                deploy: None,
+                placement: None,
+                triggers: vec![],
+                assets: None,
+            }],
+        };
+        let json = serde_json::to_string(&req).unwrap();
+        let back: DeployRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.services.len(), 1);
+        assert_eq!(back.services[0].name, "web");
+    }
+}

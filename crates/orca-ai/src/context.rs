@@ -141,3 +141,61 @@ impl ClusterContext {
         out
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gpu_summary_from_converts_bytes_to_mb() {
+        let stats = GpuStats {
+            index: 0,
+            utilization: 75.0,
+            vram_used: 4 * 1024 * 1024 * 1024,  // 4 GiB in bytes
+            vram_total: 8 * 1024 * 1024 * 1024, // 8 GiB in bytes
+            temperature: Some(65.0),
+            power_watts: None,
+        };
+        let summary = GpuSummary::from(&stats);
+        assert_eq!(summary.vram_used_mb, 4096);
+        assert_eq!(summary.vram_total_mb, 8192);
+        assert_eq!(summary.index, 0);
+        assert!((summary.utilization - 75.0).abs() < f64::EPSILON);
+        assert_eq!(summary.temperature, Some(65.0));
+    }
+
+    #[test]
+    fn test_cluster_context_system_prompt_contains_sections() {
+        let ctx = ClusterContext {
+            cluster_name: "test-cluster".to_string(),
+            nodes: vec![NodeSummary {
+                id: "node-1".to_string(),
+                address: "10.0.0.1".to_string(),
+                status: "healthy".to_string(),
+                cpu_percent: 42.0,
+                memory_percent: 60.0,
+                gpu_summary: vec![],
+            }],
+            services: vec![ServiceSummary {
+                name: "api".to_string(),
+                runtime: "container".to_string(),
+                replicas_running: 2,
+                replicas_desired: 3,
+                status: "degraded".to_string(),
+                uses_gpu: false,
+                recent_logs: vec![],
+                error_count_1h: 5,
+                restart_count_24h: 1,
+            }],
+            recent_events: vec!["node-1 joined".to_string()],
+            active_alerts: vec![],
+        };
+        let prompt = ctx.to_system_prompt();
+        assert!(prompt.contains("test-cluster"));
+        assert!(prompt.contains("## Nodes"));
+        assert!(prompt.contains("## Services"));
+        assert!(prompt.contains("## Recent Events"));
+        assert!(prompt.contains("node-1"));
+        assert!(prompt.contains("api"));
+    }
+}

@@ -94,3 +94,69 @@ impl ServiceState {
             .count() as u32
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    use orca_core::config::ServiceConfig;
+    use orca_core::runtime::WorkloadHandle;
+    use orca_core::types::{Replicas, WorkloadStatus};
+
+    fn minimal_config(replicas: Replicas) -> ServiceConfig {
+        ServiceConfig {
+            name: "test-svc".to_string(),
+            runtime: Default::default(),
+            image: Some("nginx:latest".to_string()),
+            module: None,
+            replicas,
+            port: Some(8080),
+            domain: None,
+            health: None,
+            env: HashMap::new(),
+            resources: None,
+            volume: None,
+            deploy: None,
+            placement: None,
+            triggers: Vec::new(),
+            assets: None,
+        }
+    }
+
+    fn make_instance(status: WorkloadStatus) -> InstanceState {
+        InstanceState {
+            handle: WorkloadHandle {
+                runtime_id: "test-id".to_string(),
+                name: "test-instance".to_string(),
+                metadata: HashMap::new(),
+            },
+            status,
+            host_port: None,
+        }
+    }
+
+    #[test]
+    fn from_config_fixed_sets_desired_replicas() {
+        let state = ServiceState::from_config(minimal_config(Replicas::Fixed(3)));
+        assert_eq!(state.desired_replicas, 3);
+    }
+
+    #[test]
+    fn from_config_auto_defaults_to_one() {
+        let state = ServiceState::from_config(minimal_config(Replicas::Auto));
+        assert_eq!(state.desired_replicas, 1);
+    }
+
+    #[test]
+    fn running_count_with_mixed_statuses() {
+        let mut state = ServiceState::from_config(minimal_config(Replicas::Fixed(4)));
+        state.instances = vec![
+            make_instance(WorkloadStatus::Running),
+            make_instance(WorkloadStatus::Stopped),
+            make_instance(WorkloadStatus::Running),
+            make_instance(WorkloadStatus::Failed),
+        ];
+        assert_eq!(state.running_count(), 2);
+    }
+}

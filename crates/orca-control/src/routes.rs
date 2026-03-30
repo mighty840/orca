@@ -106,3 +106,54 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
             .collect(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    use orca_core::config::ServiceConfig;
+    use orca_core::types::Replicas;
+
+    fn minimal_config(image: Option<String>, module: Option<String>) -> ServiceConfig {
+        ServiceConfig {
+            name: "test-svc".to_string(),
+            runtime: Default::default(),
+            image,
+            module,
+            replicas: Replicas::Fixed(1),
+            port: Some(8080),
+            domain: Some("test.example.com".to_string()),
+            health: None,
+            env: HashMap::new(),
+            resources: None,
+            volume: None,
+            deploy: None,
+            placement: None,
+            triggers: Vec::new(),
+            assets: None,
+        }
+    }
+
+    #[test]
+    fn config_to_spec_with_image() {
+        let config = minimal_config(Some("nginx:latest".to_string()), None);
+        let spec = service_config_to_spec(&config).unwrap();
+        assert_eq!(spec.name, "test-svc");
+        assert_eq!(spec.image, "nginx:latest");
+        assert_eq!(spec.port, Some(8080));
+        assert_eq!(spec.domain.as_deref(), Some("test.example.com"));
+    }
+
+    #[test]
+    fn config_to_spec_errors_without_image_or_module() {
+        let config = minimal_config(None, None);
+        let result = service_config_to_spec(&config);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("no image or module"),
+            "unexpected error: {err_msg}"
+        );
+    }
+}

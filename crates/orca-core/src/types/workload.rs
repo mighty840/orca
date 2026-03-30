@@ -124,3 +124,20 @@ pub struct ResourceStats {
     pub gpu_stats: Vec<GpuStats>,
     pub timestamp: DateTime<Utc>,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replicas_default_is_fixed_one() {
+        let r = Replicas::default();
+        assert!(matches!(r, Replicas::Fixed(1)));
+    }
+
+    #[test]
+    fn runtime_kind_default_is_container() {
+        let k = RuntimeKind::default();
+        assert!(matches!(k, RuntimeKind::Container));
+    }
+}

@@ -42,4 +42,38 @@ mod tests {
         assert!(path_matches("/*", "/anything"));
         assert!(path_matches("/*", "/"));
     }
+
+    #[test]
+    fn test_find_matching_trigger_returns_first_match() {
+        let triggers = vec![
+            WasmTrigger {
+                pattern: "/api/edge/*".into(),
+                runtime_id: "wasm-1".into(),
+                service_name: "edge-a".into(),
+            },
+            WasmTrigger {
+                pattern: "/api/edge/*".into(),
+                runtime_id: "wasm-2".into(),
+                service_name: "edge-b".into(),
+            },
+        ];
+        let matched = find_matching_trigger(&triggers, "/api/edge/foo").unwrap();
+        assert_eq!(matched.runtime_id, "wasm-1");
+    }
+
+    #[test]
+    fn test_find_matching_trigger_no_match_returns_none() {
+        let triggers = vec![WasmTrigger {
+            pattern: "/api/edge/*".into(),
+            runtime_id: "wasm-1".into(),
+            service_name: "edge-a".into(),
+        }];
+        assert!(find_matching_trigger(&triggers, "/other/path").is_none());
+    }
+
+    #[test]
+    fn test_find_matching_trigger_empty_list_returns_none() {
+        let triggers: Vec<WasmTrigger> = vec![];
+        assert!(find_matching_trigger(&triggers, "/any/path").is_none());
+    }
 }
