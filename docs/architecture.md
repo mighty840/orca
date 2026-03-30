@@ -176,6 +176,41 @@ Each node runs an instance of `orca-proxy` (based on Cloudflare's `pingora`):
 - **Service mesh** — inter-service traffic routed via proxy, mTLS between nodes
 - **Wasm-aware** — HTTP requests to Wasm workloads go directly to the in-process Wasm runtime (no container networking overhead)
 
+### Cross-Provider Networking (NetBird)
+
+Orca nodes can span multiple cloud providers (Hetzner, AWS, home lab, etc.) by
+using [NetBird](https://netbird.io) for WireGuard-based mesh networking. This is
+the same pattern used with Coolify today.
+
+```
+┌─ Hetzner ──────┐    ┌─ AWS ───────────┐    ┌─ Home Lab ──────┐
+│  Node 1        │    │  Node 2         │    │  Node 3          │
+│  orca agent    │◄──►│  orca agent     │◄──►│  orca agent      │
+│  netbird       │    │  netbird        │    │  netbird          │
+└────────────────┘    └─────────────────┘    └──────────────────┘
+        ▲                     ▲                       ▲
+        └─────── WireGuard encrypted tunnel ──────────┘
+                    (via NetBird coordination)
+```
+
+Orca bootstraps networking automatically:
+1. `orca init` generates or imports a NetBird setup key
+2. `orca join` on each node installs and configures NetBird
+3. Nodes discover each other via NetBird's management plane
+4. All inter-node gRPC and proxy traffic flows over the WireGuard mesh
+5. No manual VPN setup, firewall rules, or port forwarding needed
+
+Configuration:
+```toml
+[cluster]
+name = "signalops"
+
+[cluster.network]
+provider = "netbird"                    # or "manual" for pre-existing VPN
+setup_key = "${secrets.netbird_key}"    # NetBird setup key
+management_url = "https://api.netbird.io"  # or self-hosted
+```
+
 ### Scheduler
 
 The scheduler decides where to place workloads:
@@ -439,9 +474,10 @@ email = "ops@signalops.com"
 ### M2: Multi-node (weeks 6-8)
 - [ ] `orca-control`: Raft consensus (openraft)
 - [ ] Node join/leave protocol
-- [ ] Scheduler (bin-packing + Wasm-aware)
+- [ ] Scheduler (bin-packing + Wasm-aware + GPU-aware)
 - [ ] gRPC agent ↔ control plane communication
-- **Goal**: Orchestrate across 2-5 nodes
+- [ ] NetBird integration for cross-provider WireGuard mesh networking
+- **Goal**: Orchestrate across 2-5 nodes, even across different cloud providers
 
 ### M3: UI Layer (weeks 9-11)
 - [ ] `orca-tui`: Dashboard, service list, log viewer

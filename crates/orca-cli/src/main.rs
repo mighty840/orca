@@ -207,12 +207,30 @@ enum WebhookAction {
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,hyper=warn,reqwest=warn".into()),
-        )
-        .init();
+    // Set up structured logging — console + optional file output for crash analysis.
+    // Set ORCA_LOG_FILE=path to also log to a file in JSON format.
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "info,hyper=warn,reqwest=warn".into());
+
+    if let Ok(log_path) = std::env::var("ORCA_LOG_FILE") {
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .expect("failed to open log file");
+        let file_layer = tracing_subscriber::fmt::layer()
+            .json()
+            .with_writer(std::sync::Mutex::new(file));
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer())
+            .with(file_layer)
+            .init();
+    } else {
+        tracing_subscriber::fmt().with_env_filter(env_filter).init();
+    };
 
     match cli.command {
         // ========== SERVER ==========
@@ -259,7 +277,7 @@ async fn main() -> anyhow::Result<()> {
                         println!("  + {name}");
                     }
                     for err in &resp.errors {
-                        eprintln!("  ! {err}");
+                        tracing::warn!("Deploy error: {err}");
                     }
                     println!(
                         "Deployed: {}, Errors: {}",
@@ -268,8 +286,8 @@ async fn main() -> anyhow::Result<()> {
                     );
                 }
                 Err(e) => {
-                    eprintln!("Deploy failed: {e}");
-                    eprintln!("Is `orca server` running?");
+                    tracing::error!("Deploy failed: {e}");
+                    tracing::error!("Is `orca server` running?");
                     std::process::exit(1);
                 }
             }
@@ -304,8 +322,8 @@ async fn main() -> anyhow::Result<()> {
                     }
                 }
                 Err(e) => {
-                    eprintln!("Failed to get status: {e}");
-                    eprintln!("Is `orca server` running?");
+                    tracing::error!("Failed to get status: {e}");
+                    tracing::error!("Is `orca server` running?");
                     std::process::exit(1);
                 }
             }
@@ -326,7 +344,7 @@ async fn main() -> anyhow::Result<()> {
                 match client.logs(&service, tail).await {
                     Ok(logs) => print!("{logs}"),
                     Err(e) => {
-                        eprintln!("Failed to get logs for '{service}': {e}");
+                        tracing::error!("Failed to get logs for '{service}': {e}");
                         std::process::exit(1);
                     }
                 }
@@ -341,7 +359,7 @@ async fn main() -> anyhow::Result<()> {
                     println!("Scaled {} to {} replicas", resp.service, resp.replicas);
                 }
                 Err(e) => {
-                    eprintln!("Failed to scale '{service}': {e}");
+                    tracing::error!("Failed to scale '{service}': {e}");
                     std::process::exit(1);
                 }
             }
