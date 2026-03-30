@@ -8,25 +8,26 @@ use orca_core::config::ClusterConfig;
 use orca_core::runtime::Runtime;
 use tracing::info;
 
-use crate::state::{AppState, SharedRouteTable};
+use crate::state::{AppState, SharedRouteTable, SharedWasmTriggers};
 
-/// Start the orca control plane (API server) with a shared route table.
-///
-/// The route table is shared with the reverse proxy so both can
-/// read/write the same routing state.
+/// Start the orca control plane (API server).
 ///
 /// # Errors
 ///
 /// Returns an error if the server fails to bind or encounters a fatal error.
 pub async fn run_server(
     cluster_config: ClusterConfig,
-    runtime: Arc<dyn Runtime>,
+    container_runtime: Arc<dyn Runtime>,
+    wasm_runtime: Option<Arc<orca_agent::wasm::WasmRuntime>>,
     route_table: SharedRouteTable,
+    wasm_triggers: SharedWasmTriggers,
 ) -> anyhow::Result<()> {
-    let state = Arc::new(AppState::with_shared_routes(
+    let state = Arc::new(AppState::new(
         cluster_config.clone(),
-        runtime,
+        container_runtime,
+        wasm_runtime,
         route_table,
+        wasm_triggers,
     ));
     let app = api::router(state.clone());
 

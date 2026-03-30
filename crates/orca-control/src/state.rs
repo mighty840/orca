@@ -9,8 +9,7 @@ use orca_core::config::{ClusterConfig, ServiceConfig};
 use orca_core::runtime::{Runtime, WorkloadHandle};
 use orca_core::types::{Replicas, WorkloadStatus};
 
-// Re-export RouteTarget for convenience
-pub use orca_proxy::RouteTarget;
+pub use orca_proxy::{RouteTarget, SharedWasmTriggers, WasmTrigger};
 
 /// Shared route table type, compatible with [`orca_proxy::run_proxy`].
 pub type SharedRouteTable = Arc<RwLock<HashMap<String, Vec<RouteTarget>>>>;
@@ -19,12 +18,16 @@ pub type SharedRouteTable = Arc<RwLock<HashMap<String, Vec<RouteTarget>>>>;
 pub struct AppState {
     /// Cluster configuration.
     pub cluster_config: ClusterConfig,
-    /// The container/wasm runtime.
-    pub runtime: Arc<dyn Runtime>,
+    /// Container runtime (Docker).
+    pub container_runtime: Arc<dyn Runtime>,
+    /// Wasm runtime (wasmtime).
+    pub wasm_runtime: Option<Arc<orca_agent::wasm::WasmRuntime>>,
     /// Current service state, keyed by service name.
     pub services: RwLock<HashMap<String, ServiceState>>,
-    /// Routing table shared with the reverse proxy.
+    /// Routing table for container workloads, shared with the reverse proxy.
     pub route_table: SharedRouteTable,
+    /// Wasm HTTP triggers, shared with the reverse proxy.
+    pub wasm_triggers: SharedWasmTriggers,
 }
 
 /// State of a deployed service.
@@ -45,32 +48,26 @@ pub struct InstanceState {
     pub handle: WorkloadHandle,
     /// Current status.
     pub status: WorkloadStatus,
-    /// Host port mapped to the container's primary port.
+    /// Host port mapped to the container's primary port (containers only).
     pub host_port: Option<u16>,
 }
 
 impl AppState {
-    /// Create a new state with a fresh route table.
-    pub fn new(cluster_config: ClusterConfig, runtime: Arc<dyn Runtime>) -> Self {
-        Self {
-            cluster_config,
-            runtime,
-            services: RwLock::new(HashMap::new()),
-            route_table: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-
-    /// Create with a shared route table (for sharing with the proxy).
-    pub fn with_shared_routes(
+    /// Create with shared route table and Wasm triggers (for sharing with the proxy).
+    pub fn new(
         cluster_config: ClusterConfig,
-        runtime: Arc<dyn Runtime>,
+        container_runtime: Arc<dyn Runtime>,
+        wasm_runtime: Option<Arc<orca_agent::wasm::WasmRuntime>>,
         route_table: SharedRouteTable,
+        wasm_triggers: SharedWasmTriggers,
     ) -> Self {
         Self {
             cluster_config,
-            runtime,
+            container_runtime,
+            wasm_runtime,
             services: RwLock::new(HashMap::new()),
             route_table,
+            wasm_triggers,
         }
     }
 }
@@ -80,7 +77,7 @@ impl ServiceState {
     pub fn from_config(config: ServiceConfig) -> Self {
         let desired_replicas = match &config.replicas {
             Replicas::Fixed(n) => *n,
-            Replicas::Auto => 1, // Default to 1 in M0
+            Replicas::Auto => 1,
         };
         Self {
             config,

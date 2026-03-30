@@ -488,7 +488,9 @@ email = "ops@signalops.com"
 ### M4: Production Ready (weeks 12-14)
 - [ ] `orca import coolify` migration tool
 - [ ] `orca import docker-compose`
-- [ ] Secrets management (encrypted in Raft state)
+- [ ] Secrets management (Infisical-style: encrypted, versioned, env-scoped, auditable)
+- [ ] `orca secrets set/get/list/history/rollback` with per-environment scoping
+- [ ] `orca secrets import` from .env, Infisical, Coolify
 - [ ] Git-push deploy (webhook + built-in receiver)
 - [ ] Health checks + auto-restart + rollback
 - **Goal**: Migrate real workloads from Coolify

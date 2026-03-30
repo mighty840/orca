@@ -241,27 +241,65 @@ async fn main() -> anyhow::Result<()> {
                 cluster_config.cluster.name, cluster_config.cluster.api_port, proxy_port,
             );
 
-            // Create container runtime
-            let runtime = Arc::new(orca_agent::docker::ContainerRuntime::new()?);
+            // Create runtimes
+            let container_runtime = Arc::new(orca_agent::docker::ContainerRuntime::new()?);
+            let wasm_runtime = match orca_agent::wasm::WasmRuntime::new() {
+                Ok(r) => {
+                    info!("Wasm runtime initialized (wasmtime)");
+                    Some(Arc::new(r))
+                }
+                Err(e) => {
+                    tracing::warn!("Wasm runtime unavailable: {e}");
+                    None
+                }
+            };
 
-            // Shared route table: same Arc used by both control plane and proxy
+            // Shared state: route table + wasm triggers
             let route_table = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+            let wasm_triggers: orca_proxy::SharedWasmTriggers =
+                Arc::new(tokio::sync::RwLock::new(Vec::new()));
 
-            // Spawn proxy (shares route table with control plane)
+            // Build Wasm invoker callback for the proxy
+            let wasm_invoker: Option<orca_proxy::WasmInvoker> = wasm_runtime.as_ref().map(|wr| {
+                let wr = wr.clone();
+                Arc::new(
+                    move |runtime_id: String, method: String, path: String, body: String| {
+                        let wr = wr.clone();
+                        Box::pin(async move {
+                            wr.invoke_http(&runtime_id, &method, &path, &body)
+                                .await
+                                .map_err(|e| e.to_string())
+                        }) as orca_proxy::WasmInvokeFuture
+                    },
+                ) as orca_proxy::WasmInvoker
+            });
+
+            // Spawn proxy (shares route table and wasm triggers with control plane)
             let proxy_routes = route_table.clone();
+            let proxy_triggers = wasm_triggers.clone();
             tokio::spawn(async move {
-                if let Err(e) = orca_proxy::run_proxy(proxy_routes, proxy_port).await {
+                if let Err(e) =
+                    orca_proxy::run_proxy(proxy_routes, proxy_triggers, wasm_invoker, proxy_port)
+                        .await
+                {
                     tracing::error!("Proxy error: {e}");
                 }
             });
 
             // Run the API server (blocks until shutdown)
-            let runtime_for_cleanup = runtime.clone();
-            orca_control::run_server(cluster_config, runtime, route_table).await?;
+            let container_runtime_cleanup = container_runtime.clone();
+            orca_control::run_server(
+                cluster_config,
+                container_runtime,
+                wasm_runtime,
+                route_table,
+                wasm_triggers,
+            )
+            .await?;
 
             // Graceful cleanup
             info!("Shutting down, cleaning up containers...");
-            runtime_for_cleanup.cleanup_all().await;
+            container_runtime_cleanup.cleanup_all().await;
             info!("Shutdown complete");
         }
 

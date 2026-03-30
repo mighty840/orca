@@ -124,9 +124,24 @@ async fn logs(
     };
 
     let handle = instance.handle.clone();
+    let runtime_kind = svc.config.runtime;
     drop(services); // Release lock before async IO
 
-    match state.runtime.logs(&handle, &opts).await {
+    let runtime: &dyn orca_core::runtime::Runtime = match runtime_kind {
+        orca_core::types::RuntimeKind::Container => state.container_runtime.as_ref(),
+        orca_core::types::RuntimeKind::Wasm => match &state.wasm_runtime {
+            Some(r) => r.as_ref(),
+            None => {
+                return (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Wasm runtime not available".to_string(),
+                )
+                    .into_response();
+            }
+        },
+    };
+
+    match runtime.logs(&handle, &opts).await {
         Ok(stream) => {
             use tokio::io::AsyncReadExt;
             // For non-follow mode, read all and return as text
