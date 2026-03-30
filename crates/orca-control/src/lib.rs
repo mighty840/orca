@@ -1,5 +1,6 @@
 pub mod api;
 pub mod proto;
+pub mod raft;
 pub mod reconciler;
 pub(crate) mod routes;
 pub mod scheduler;
