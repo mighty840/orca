@@ -83,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Join { address } => {
             handlers::join::handle_join(&address, None, std::collections::HashMap::new()).await?;
         }
-        Command::Tui => handlers::ops::handle_tui(),
+        Command::Tui => handlers::ops::handle_tui(&cli.api),
         Command::Web { port } => handlers::ops::handle_web(port).await?,
     }
 

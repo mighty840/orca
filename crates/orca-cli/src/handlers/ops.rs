@@ -147,8 +147,20 @@ pub fn handle_rollback(service: String) {
     println!("Rollback for '{service}' not yet implemented (M4).");
 }
 
-pub fn handle_tui() {
-    println!("TUI not yet implemented (M3).");
+pub fn handle_tui(api: &str) {
+    // Launch orca-tui as a subprocess, or tell user to run it
+    let status = std::process::Command::new("orca-tui")
+        .arg("--api")
+        .arg(api)
+        .status();
+    match status {
+        Ok(s) if s.success() => {}
+        Ok(s) => tracing::error!("TUI exited with: {s}"),
+        Err(_) => {
+            println!("orca-tui binary not found. Install with:");
+            println!("  cargo install --git https://github.com/mighty840/orca.git --bin orca-tui");
+        }
+    }
 }
 
 pub async fn handle_web(port: u16) -> anyhow::Result<()> {
