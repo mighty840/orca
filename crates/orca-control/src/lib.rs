@@ -1,5 +1,6 @@
 pub mod api;
 pub mod reconciler;
+pub(crate) mod routes;
 pub mod state;
 
 use std::sync::Arc;

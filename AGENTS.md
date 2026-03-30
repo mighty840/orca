@@ -161,6 +161,12 @@ pub fn calculate_total(items: &[Item], tax_rate: f64) -> Result<f64, Calculation
 - **NEVER** log sensitive information (passwords, tokens, PII)
 - Use `secrecy` crate for sensitive data types
 
+## File Size
+
+- **MUST** keep files under 250 lines. Split into submodules when a file grows beyond this.
+- When splitting `foo.rs` into a directory, create `foo/mod.rs` that re-exports all public items.
+- External `use` paths must not change after a split.
+
 ## Version Control
 
 - **MUST** write clear, descriptive commit messages
@@ -186,6 +192,8 @@ pub fn calculate_total(items: &[Item], tax_rate: f64) -> Result<f64, Calculation
 - [ ] All public items have doc comments
 - [ ] No commented-out code or debug statements
 - [ ] No hardcoded credentials
+- [ ] No file exceeds 250 lines
+- [ ] New functions have unit tests in `#[cfg(test)] mod tests`
 
 ---
 
