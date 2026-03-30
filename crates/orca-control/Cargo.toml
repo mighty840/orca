@@ -23,7 +23,18 @@ uuid = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
 tokio-util = { version = "0.7", features = ["io"] }
+tonic = { workspace = true }
+prost = { workspace = true }
+openraft = { workspace = true }
+redb = { workspace = true }
+reqwest = { workspace = true }
+
+[build-dependencies]
+tonic-build = "0.13"
 
 [dev-dependencies]
 http-body-util = "0.1"
 tower = { workspace = true, features = ["util"] }
+
+[dev-dependencies.tempfile]
+version = "3"

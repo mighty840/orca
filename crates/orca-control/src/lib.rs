@@ -1,7 +1,10 @@
 pub mod api;
+pub mod proto;
 pub mod reconciler;
 pub(crate) mod routes;
+pub mod scheduler;
 pub mod state;
+pub mod store;
 
 use std::sync::Arc;
 
