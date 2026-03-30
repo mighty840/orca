@@ -1,0 +1,2 @@
+cargo:rustc-link-lib=static=wit_bindgen_cabi_realloc0_41_0
+cargo:rustc-link-search=native=/home/sharang/workspace/orca/examples/wasm-hello/target/wasm32-unknown-unknown/release/build/wit-bindgen-rt-75dfe14b398e89b2/out

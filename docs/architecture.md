@@ -461,7 +461,7 @@ email = "ops@signalops.com"
 ### M0: Foundation (weeks 1-3)
 - [ ] `orca-core`: Config parsing, types, Runtime trait
 - [ ] `orca-agent`: Single-node container runtime (bollard)
-- [ ] `orca-cli`: `orca deploy`, `orca status`, `orca logs`
+- [ ] `orca-cli`: `orca deploy`, `orca status`, `orca logs`, `orca stop`, `orca top`
 - [ ] `orca-proxy`: Basic reverse proxy with auto-TLS
 - **Goal**: Replace docker-compose for local/single-server use
 

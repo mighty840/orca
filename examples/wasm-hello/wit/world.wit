@@ -1,0 +1,5 @@
+package orca:handler;
+
+world handler {
+    export handle: func(method: string, path: string, body: string) -> string;
+}
