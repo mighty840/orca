@@ -1703,6 +1703,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "mallorca"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "orca-agent",
+ "orca-ai",
+ "orca-control",
+ "orca-core",
+ "orca-proxy",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1876,7 +1895,7 @@ dependencies = [
 
 [[package]]
 name = "orca-agent"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1897,7 +1916,7 @@ dependencies = [
 
 [[package]]
 name = "orca-ai"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1913,27 +1932,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "orca-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "orca-agent",
- "orca-ai",
- "orca-control",
- "orca-core",
- "orca-proxy",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "orca-control"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1955,7 +1955,7 @@ dependencies = [
 
 [[package]]
 name = "orca-core"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1971,7 +1971,7 @@ dependencies = [
 
 [[package]]
 name = "orca-proxy"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "http-body-util",
@@ -1987,7 +1987,7 @@ dependencies = [
 
 [[package]]
 name = "orca-tui"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2002,7 +2002,7 @@ dependencies = [
 
 [[package]]
 name = "orca-web"
-version = "0.1.0"
+version = "0.0.1"
 dependencies = [
  "anyhow",
  "clap",

@@ -5,14 +5,14 @@ members = [
     "crates/orca-ai",
     "crates/orca-agent",
     "crates/orca-control",
-    "crates/orca-cli",
+    "crates/orca-cli",  # published as "mallorca" on crates.io
     "crates/orca-tui",
     "crates/orca-web",
     "crates/orca-proxy",
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.0.1"
 edition = "2024"
 license = "AGPL-3.0"
 repository = "https://github.com/mighty840/orca"
@@ -22,9 +22,9 @@ categories = ["command-line-utilities"]
 
 [workspace.dependencies]
 # Shared across crates
-orca-core = { path = "crates/orca-core" }
-orca-ai = { path = "crates/orca-ai" }
-orca-proxy = { path = "crates/orca-proxy" }
+orca-core = { path = "crates/orca-core", version = "0.0.1" }
+orca-ai = { path = "crates/orca-ai", version = "0.0.1" }
+orca-proxy = { path = "crates/orca-proxy", version = "0.0.1" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

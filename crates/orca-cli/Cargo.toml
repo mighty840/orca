@@ -1,8 +1,8 @@
 [package]
-name = "orca-cli"
+name = "mallorca"
 version.workspace = true
 edition.workspace = true
-description = "CLI binary for the orca container and Wasm orchestrator"
+description = "Container + Wasm orchestrator with AI ops — fills the gap between Coolify and Kubernetes"
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
@@ -14,8 +14,8 @@ path = "src/main.rs"
 [dependencies]
 orca-core = { workspace = true }
 orca-ai = { workspace = true }
-orca-agent = { path = "../orca-agent" }
-orca-control = { path = "../orca-control" }
+orca-agent = { path = "../orca-agent", version = "0.0.1" }
+orca-control = { path = "../orca-control", version = "0.0.1" }
 orca-proxy = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
