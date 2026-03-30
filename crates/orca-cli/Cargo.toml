@@ -17,6 +17,7 @@ orca-ai = { workspace = true }
 orca-agent = { path = "../orca-agent", version = "0.0.2" }
 orca-control = { path = "../orca-control", version = "0.0.2" }
 orca-proxy = { workspace = true }
+orca-tui = { path = "../orca-tui" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

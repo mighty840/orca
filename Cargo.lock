@@ -1891,6 +1891,7 @@ dependencies = [
  "orca-control",
  "orca-core",
  "orca-proxy",
+ "orca-tui",
  "reqwest",
  "serde",
  "serde_json",
@@ -2224,7 +2225,6 @@ name = "orca-tui"
 version = "0.0.2"
 dependencies = [
  "anyhow",
- "clap",
  "crossterm",
  "orca-core",
  "ratatui",

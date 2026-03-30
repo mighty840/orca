@@ -79,11 +79,14 @@ async fn main() -> anyhow::Result<()> {
         Command::Webhooks { action } => handlers::ops::handle_webhooks(action),
         Command::Nodes { gpus } => handlers::ops::handle_nodes(gpus, cli.api).await?,
         Command::Gpus => handlers::ops::handle_gpus(),
+        Command::Stop { service } => {
+            handlers::ops::handle_stop(service, cli.api).await?;
+        }
         Command::Rollback { service } => handlers::ops::handle_rollback(service),
         Command::Join { address } => {
             handlers::join::handle_join(&address, None, std::collections::HashMap::new()).await?;
         }
-        Command::Tui => handlers::ops::handle_tui(&cli.api),
+        Command::Tui => handlers::ops::handle_tui(&cli.api).await?,
         Command::Web { port } => handlers::ops::handle_web(port).await?,
     }
 

@@ -45,6 +45,12 @@ pub enum Command {
         replicas: u32,
     },
 
+    /// Stop a service or all services
+    Stop {
+        /// Service name (omit for all services)
+        service: Option<String>,
+    },
+
     /// Rollback a service to previous version
     Rollback {
         /// Service name

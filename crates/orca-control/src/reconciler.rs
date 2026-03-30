@@ -148,6 +148,40 @@ async fn create_and_start_instance(
     })
 }
 
+/// Stop a service: scale to 0 and remove from state.
+pub async fn stop(state: &AppState, service_name: &str) -> anyhow::Result<()> {
+    // Scale to 0 first (stops all containers)
+    scale(state, service_name, 0).await?;
+    // Remove from services map
+    let mut services = state.services.write().await;
+    services.remove(service_name);
+    // Remove from route table
+    let mut routes = state.route_table.write().await;
+    routes.retain(|_, targets| {
+        targets.retain(|t| t.service_name != service_name);
+        !targets.is_empty()
+    });
+    // Remove wasm triggers
+    let mut triggers = state.wasm_triggers.write().await;
+    triggers.retain(|t| t.service_name != service_name);
+    tracing::info!("Stopped and removed service: {service_name}");
+    Ok(())
+}
+
+/// Stop all services.
+pub async fn stop_all(state: &AppState) -> anyhow::Result<()> {
+    let names: Vec<String> = {
+        let services = state.services.read().await;
+        services.keys().cloned().collect()
+    };
+    for name in &names {
+        if let Err(e) = stop(state, name).await {
+            tracing::error!("Failed to stop {name}: {e}");
+        }
+    }
+    Ok(())
+}
+
 /// Scale a specific service to the given replica count.
 pub async fn scale(state: &AppState, service_name: &str, replicas: u32) -> anyhow::Result<()> {
     let config = {

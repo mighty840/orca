@@ -94,4 +94,24 @@ impl OrcaClient {
             .error_for_status()?;
         Ok(resp.json().await?)
     }
+
+    /// Stop a specific service.
+    pub async fn stop(&self, service: &str) -> anyhow::Result<()> {
+        self.client
+            .delete(format!("{}/api/v1/services/{service}", self.base_url))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
+    /// Stop all services.
+    pub async fn stop_all(&self) -> anyhow::Result<()> {
+        self.client
+            .post(format!("{}/api/v1/stop", self.base_url))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
 }

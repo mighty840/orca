@@ -1,6 +1,21 @@
 use crate::client::OrcaClient;
 use crate::commands::{AlertsAction, ImportSource, SecretsAction, WebhookAction};
 
+pub async fn handle_stop(service: Option<String>, api: String) -> anyhow::Result<()> {
+    let client = OrcaClient::new(api);
+    match service {
+        Some(name) => {
+            client.stop(&name).await?;
+            println!("Stopped service: {name}");
+        }
+        None => {
+            client.stop_all().await?;
+            println!("Stopped all services.");
+        }
+    }
+    Ok(())
+}
+
 pub async fn handle_logs(
     service: String,
     tail: u64,
@@ -147,20 +162,8 @@ pub fn handle_rollback(service: String) {
     println!("Rollback for '{service}' not yet implemented (M4).");
 }
 
-pub fn handle_tui(api: &str) {
-    // Launch orca-tui as a subprocess, or tell user to run it
-    let status = std::process::Command::new("orca-tui")
-        .arg("--api")
-        .arg(api)
-        .status();
-    match status {
-        Ok(s) if s.success() => {}
-        Ok(s) => tracing::error!("TUI exited with: {s}"),
-        Err(_) => {
-            println!("orca-tui binary not found. Install with:");
-            println!("  cargo install --git https://github.com/mighty840/orca.git --bin orca-tui");
-        }
-    }
+pub async fn handle_tui(api: &str) -> anyhow::Result<()> {
+    orca_tui::run_tui(api).await
 }
 
 pub async fn handle_web(port: u16) -> anyhow::Result<()> {

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use tracing::error;
 
@@ -27,6 +27,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/v1/status", get(status))
         .route("/api/v1/services/{name}/logs", get(logs))
         .route("/api/v1/services/{name}/scale", post(scale))
+        .route("/api/v1/services/{name}", delete(stop_service))
+        .route("/api/v1/stop", post(stop_all))
         .route("/api/v1/cluster/info", get(cluster_handlers::cluster_info))
         .route(
             "/api/v1/cluster/register",
@@ -208,6 +210,39 @@ async fn scale(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("scale failed: {e}"),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// Stop a specific service.
+async fn stop_service(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    match reconciler::stop(&state, &name).await {
+        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"stopped": name}))).into_response(),
+        Err(e) => {
+            error!("Failed to stop {name}: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("stop failed: {e}"),
+            )
+                .into_response()
+        }
+    }
+}
+
+/// Stop all services.
+async fn stop_all(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match reconciler::stop_all(&state).await {
+        Ok(()) => Json(serde_json::json!({"stopped": "all"})).into_response(),
+        Err(e) => {
+            error!("Failed to stop all: {e}");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("stop failed: {e}"),
             )
                 .into_response()
         }
