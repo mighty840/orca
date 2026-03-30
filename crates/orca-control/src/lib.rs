@@ -1,4 +1,5 @@
 pub mod api;
+pub mod cluster_state;
 pub mod proto;
 pub mod raft;
 pub mod reconciler;

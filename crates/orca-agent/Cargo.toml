@@ -18,6 +18,7 @@ tracing = { workspace = true }
 bollard = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
+reqwest = { workspace = true }
 uuid = { workspace = true }
 wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }

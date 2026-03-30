@@ -4,4 +4,4 @@ mod kv;
 mod types;
 
 pub use kv::ClusterStore;
-pub use types::{Assignment, RaftEntry, RaftSnapshot};
+pub use types::{Assignment, NodeEntry, RaftEntry, RaftSnapshot};
