@@ -2,6 +2,10 @@
 name = "orca-cli"
 version.workspace = true
 edition.workspace = true
+description = "CLI binary for the orca container and Wasm orchestrator"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [[bin]]
 name = "orca"

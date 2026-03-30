@@ -2,6 +2,10 @@
 name = "orca-agent"
 version.workspace = true
 edition.workspace = true
+description = "Container (Docker) and Wasm (wasmtime) runtime implementations"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [dependencies]
 orca-core = { workspace = true }

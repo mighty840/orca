@@ -2,6 +2,10 @@
 name = "orca-ai"
 version.workspace = true
 edition.workspace = true
+description = "AI operations assistant with conversational alerts and LLM-powered diagnostics"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [dependencies]
 orca-core = { workspace = true }

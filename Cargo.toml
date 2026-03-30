@@ -15,7 +15,10 @@ members = [
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0"
-repository = "https://github.com/sharang/orca"
+repository = "https://github.com/mighty840/orca"
+authors = ["Sharang <sharang@meghsakha.com>"]
+keywords = ["orchestrator", "container", "wasm", "docker", "kubernetes"]
+categories = ["command-line-utilities"]
 
 [workspace.dependencies]
 # Shared across crates

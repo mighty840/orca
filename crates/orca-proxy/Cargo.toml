@@ -2,6 +2,10 @@
 name = "orca-proxy"
 version.workspace = true
 edition.workspace = true
+description = "Reverse proxy with HTTP routing and Wasm trigger dispatch"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [dependencies]
 orca-core = { workspace = true }

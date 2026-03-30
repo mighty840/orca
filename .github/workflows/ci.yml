@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Check, Lint, Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy -- -D warnings
+      - name: Unit & integration tests
+        run: cargo test
+      - name: Check file sizes
+        run: |
+          over=$(find crates -name "*.rs" -exec wc -l {} + | sort -rn | awk '$1 > 250 && $2 != "total" {print}')
+          if [ -n "$over" ]; then
+            echo "Files over 250 lines:"
+            echo "$over"
+            exit 1
+          fi
+
+  e2e:
+    name: E2E Tests (nightly)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build
+      - name: E2E tests
+        run: ORCA_E2E=1 cargo test -- --ignored
+        env:
+          ORCA_E2E: "1"

@@ -20,8 +20,8 @@ pub struct AppState {
     pub cluster_config: ClusterConfig,
     /// Container runtime (Docker).
     pub container_runtime: Arc<dyn Runtime>,
-    /// Wasm runtime (wasmtime).
-    pub wasm_runtime: Option<Arc<orca_agent::wasm::WasmRuntime>>,
+    /// Wasm runtime (wasmtime). Trait object to avoid coupling to concrete type.
+    pub wasm_runtime: Option<Arc<dyn Runtime>>,
     /// Current service state, keyed by service name.
     pub services: RwLock<HashMap<String, ServiceState>>,
     /// Routing table for container workloads, shared with the reverse proxy.
@@ -57,7 +57,7 @@ impl AppState {
     pub fn new(
         cluster_config: ClusterConfig,
         container_runtime: Arc<dyn Runtime>,
-        wasm_runtime: Option<Arc<orca_agent::wasm::WasmRuntime>>,
+        wasm_runtime: Option<Arc<dyn Runtime>>,
         route_table: SharedRouteTable,
         wasm_triggers: SharedWasmTriggers,
     ) -> Self {

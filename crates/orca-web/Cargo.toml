@@ -2,6 +2,10 @@
 name = "orca-web"
 version.workspace = true
 edition.workspace = true
+description = "Web dashboard for orca cluster management"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [dependencies]
 orca-core = { workspace = true }

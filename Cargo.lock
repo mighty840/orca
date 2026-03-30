@@ -1940,7 +1940,6 @@ dependencies = [
  "axum",
  "chrono",
  "http-body-util",
- "orca-agent",
  "orca-core",
  "orca-proxy",
  "serde",

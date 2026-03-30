@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use tracing::info;
 
+/// Handle the `orca server` command.
 pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> {
     let cluster_config = orca_core::config::ClusterConfig::load(config.as_ref())?;
     info!(
@@ -28,7 +29,7 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
     let wasm_triggers: orca_proxy::SharedWasmTriggers =
         Arc::new(tokio::sync::RwLock::new(Vec::new()));
 
-    // Build Wasm invoker callback for the proxy
+    // Build Wasm invoker callback for the proxy (needs concrete WasmRuntime)
     let wasm_invoker: Option<orca_proxy::WasmInvoker> = wasm_runtime.as_ref().map(|wr| {
         let wr = wr.clone();
         Arc::new(
@@ -43,7 +44,11 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
         ) as orca_proxy::WasmInvoker
     });
 
-    // Spawn proxy (shares route table and wasm triggers with control plane)
+    // Cast concrete WasmRuntime to dyn Runtime for the control plane
+    let wasm_as_trait: Option<Arc<dyn orca_core::runtime::Runtime>> =
+        wasm_runtime.map(|wr| wr as Arc<dyn orca_core::runtime::Runtime>);
+
+    // Spawn proxy
     let proxy_routes = route_table.clone();
     let proxy_triggers = wasm_triggers.clone();
     tokio::spawn(async move {
@@ -59,7 +64,7 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
     orca_control::run_server(
         cluster_config,
         container_runtime,
-        wasm_runtime,
+        wasm_as_trait,
         route_table,
         wasm_triggers,
     )

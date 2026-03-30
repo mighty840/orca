@@ -2,6 +2,10 @@
 name = "orca-core"
 version.workspace = true
 edition.workspace = true
+description = "Core types, configuration, Runtime trait, and error types for the orca orchestrator"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [dependencies]
 serde = { workspace = true }

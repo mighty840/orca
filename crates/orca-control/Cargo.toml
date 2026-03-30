@@ -2,10 +2,13 @@
 name = "orca-control"
 version.workspace = true
 edition.workspace = true
+description = "Control plane: API server, reconciler, and cluster state management"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
 
 [dependencies]
 orca-core = { workspace = true }
-orca-agent = { path = "../orca-agent" }
 orca-proxy = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }

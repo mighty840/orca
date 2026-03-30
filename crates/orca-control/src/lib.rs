@@ -19,7 +19,7 @@ use crate::state::{AppState, SharedRouteTable, SharedWasmTriggers};
 pub async fn run_server(
     cluster_config: ClusterConfig,
     container_runtime: Arc<dyn Runtime>,
-    wasm_runtime: Option<Arc<orca_agent::wasm::WasmRuntime>>,
+    wasm_runtime: Option<Arc<dyn Runtime>>,
     route_table: SharedRouteTable,
     wasm_triggers: SharedWasmTriggers,
 ) -> anyhow::Result<()> {
