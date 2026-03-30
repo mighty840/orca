@@ -121,10 +121,6 @@ pub fn handle_rollback(service: String) {
     println!("Rollback for '{service}' not yet implemented (M4).");
 }
 
-pub fn handle_join(address: String) {
-    println!("Joining cluster at {address}... (M2)");
-}
-
 pub fn handle_tui() {
     println!("TUI not yet implemented (M3).");
 }

@@ -80,7 +80,9 @@ async fn main() -> anyhow::Result<()> {
         Command::Nodes { gpus } => handlers::ops::handle_nodes(gpus),
         Command::Gpus => handlers::ops::handle_gpus(),
         Command::Rollback { service } => handlers::ops::handle_rollback(service),
-        Command::Join { address } => handlers::ops::handle_join(address),
+        Command::Join { address } => {
+            handlers::join::handle_join(&address, None, std::collections::HashMap::new()).await?;
+        }
         Command::Tui => handlers::ops::handle_tui(),
         Command::Web { port } => handlers::ops::handle_web(port).await?,
     }
