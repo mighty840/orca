@@ -105,12 +105,38 @@ pub fn handle_webhooks(action: WebhookAction) {
     }
 }
 
-pub fn handle_nodes(gpus: bool) {
-    if gpus {
-        println!("No nodes with GPUs registered.");
-    } else {
-        println!("No nodes registered (single-node mode).");
+pub async fn handle_nodes(_gpus: bool, api: String) -> anyhow::Result<()> {
+    let client = reqwest::Client::new();
+    match client
+        .get(format!("{}/api/v1/cluster/info", api.trim_end_matches('/')))
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            let json: serde_json::Value = resp.json().await?;
+            println!("Cluster: {}", json["cluster_name"]);
+            let nodes = json["nodes"].as_array();
+            if let Some(nodes) = nodes {
+                if nodes.is_empty() {
+                    println!("No nodes registered.");
+                } else {
+                    let header = format!("{:<20} {:<25} {:<10}", "NODE ID", "ADDRESS", "STATUS");
+                    println!("{header}");
+                    for n in nodes {
+                        println!(
+                            "{:<20} {:<25} {:<10}",
+                            n["node_id"], n["address"], n["last_heartbeat"]
+                        );
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            tracing::error!("Failed to get cluster info: {e}");
+            tracing::error!("Is `orca server` running?");
+        }
     }
+    Ok(())
 }
 
 pub fn handle_gpus() {

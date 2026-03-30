@@ -77,7 +77,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Secrets { action } => handlers::ops::handle_secrets(action),
         Command::Import { source } => handlers::ops::handle_import(source),
         Command::Webhooks { action } => handlers::ops::handle_webhooks(action),
-        Command::Nodes { gpus } => handlers::ops::handle_nodes(gpus),
+        Command::Nodes { gpus } => handlers::ops::handle_nodes(gpus, cli.api).await?,
         Command::Gpus => handlers::ops::handle_gpus(),
         Command::Rollback { service } => handlers::ops::handle_rollback(service),
         Command::Join { address } => {
