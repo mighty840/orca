@@ -1,4 +1,11 @@
+mod client;
+
+use std::sync::Arc;
+
 use clap::{Parser, Subcommand};
+use tracing::info;
+
+use client::OrcaClient;
 
 #[derive(Parser)]
 #[command(
@@ -17,25 +24,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Initialize a new cluster
-    Init {
-        /// Path to cluster.toml
-        #[arg(short, long, default_value = "cluster.toml")]
-        config: String,
-    },
-
-    /// Start the orca server (control plane + agent)
+    /// Start the orca server (control plane + agent + proxy)
     Server {
         /// Path to cluster.toml
         #[arg(short, long, default_value = "cluster.toml")]
         config: String,
-    },
-
-    /// Start as agent only (join existing cluster)
-    Agent {
-        /// Control plane address to join
-        #[arg(long)]
-        join: String,
+        /// Proxy port for HTTP traffic
+        #[arg(long, default_value = "80")]
+        proxy_port: u16,
     },
 
     /// Deploy services from config
@@ -144,32 +140,17 @@ enum Command {
 enum AlertsAction {
     /// List active alert conversations
     List {
-        /// Show all (including resolved/dismissed)
         #[arg(short, long)]
         all: bool,
     },
     /// View an alert conversation
-    View {
-        /// Alert conversation ID
-        id: String,
-    },
+    View { id: String },
     /// Reply to an alert conversation
-    Reply {
-        /// Alert conversation ID
-        id: String,
-        /// Your message
-        message: Vec<String>,
-    },
+    Reply { id: String, message: Vec<String> },
     /// Dismiss an alert
-    Dismiss {
-        /// Alert conversation ID
-        id: String,
-    },
+    Dismiss { id: String },
     /// Apply the AI's suggested fix for an alert
-    Fix {
-        /// Alert conversation ID
-        id: String,
-    },
+    Fix { id: String },
 }
 
 #[derive(Subcommand)]
@@ -191,19 +172,15 @@ enum SecretsAction {
 enum ImportSource {
     /// Import from a docker-compose.yml
     DockerCompose {
-        /// Path to docker-compose.yml
         #[arg(default_value = "docker-compose.yml")]
         file: String,
-        /// Use AI to analyze and optimize the import
         #[arg(long)]
         analyze: bool,
     },
     /// Import from a Coolify installation
     Coolify {
-        /// Path to Coolify data directory
         #[arg(default_value = "/data/coolify")]
         path: String,
-        /// Use AI to analyze and optimize the import
         #[arg(long)]
         analyze: bool,
     },
@@ -232,138 +209,202 @@ async fn main() -> anyhow::Result<()> {
 
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info,hyper=warn,reqwest=warn".into()),
         )
         .init();
 
     match cli.command {
-        Command::Init { config } => {
-            tracing::info!("Initializing cluster from {config}");
-            println!("orca: cluster initialized from {config}");
+        // ========== SERVER ==========
+        Command::Server { config, proxy_port } => {
+            let cluster_config = orca_core::config::ClusterConfig::load(config.as_ref())?;
+            info!(
+                "Starting orca server '{}' (API: {}, Proxy: {})",
+                cluster_config.cluster.name, cluster_config.cluster.api_port, proxy_port,
+            );
+
+            // Create container runtime
+            let runtime = Arc::new(orca_agent::docker::ContainerRuntime::new()?);
+
+            // Shared route table: same Arc used by both control plane and proxy
+            let route_table = Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+
+            // Spawn proxy (shares route table with control plane)
+            let proxy_routes = route_table.clone();
+            tokio::spawn(async move {
+                if let Err(e) = orca_proxy::run_proxy(proxy_routes, proxy_port).await {
+                    tracing::error!("Proxy error: {e}");
+                }
+            });
+
+            // Run the API server (blocks until shutdown)
+            let runtime_for_cleanup = runtime.clone();
+            orca_control::run_server(cluster_config, runtime, route_table).await?;
+
+            // Graceful cleanup
+            info!("Shutting down, cleaning up containers...");
+            runtime_for_cleanup.cleanup_all().await;
+            info!("Shutdown complete");
         }
-        Command::Server { config } => {
-            tracing::info!("Starting orca server from {config}");
-            println!("orca: server starting...");
-            tokio::signal::ctrl_c().await?;
-        }
-        Command::Agent { join } => {
-            tracing::info!("Starting agent, joining {join}");
-            tokio::signal::ctrl_c().await?;
-        }
+
+        // ========== DEPLOY ==========
         Command::Deploy { file } => {
-            tracing::info!("Deploying from {file}");
             let config = orca_core::config::ServicesConfig::load(file.as_ref())?;
-            println!("orca: deploying {} services", config.service.len());
-            for svc in &config.service {
-                let gpu_tag = svc
-                    .resources
-                    .as_ref()
-                    .and_then(|r| r.gpu.as_ref())
-                    .map(|g| {
-                        format!(
-                            " [GPU: {}x{}]",
-                            g.count,
-                            g.vendor.as_deref().unwrap_or("any")
-                        )
-                    })
-                    .unwrap_or_default();
-                println!("  {} ({:?}){}", svc.name, svc.runtime, gpu_tag);
+            let client = OrcaClient::new(cli.api);
+
+            println!("Deploying {} services...", config.service.len());
+            match client.deploy(&config).await {
+                Ok(resp) => {
+                    for name in &resp.deployed {
+                        println!("  + {name}");
+                    }
+                    for err in &resp.errors {
+                        eprintln!("  ! {err}");
+                    }
+                    println!(
+                        "Deployed: {}, Errors: {}",
+                        resp.deployed.len(),
+                        resp.errors.len()
+                    );
+                }
+                Err(e) => {
+                    eprintln!("Deploy failed: {e}");
+                    eprintln!("Is `orca server` running?");
+                    std::process::exit(1);
+                }
             }
         }
+
+        // ========== STATUS ==========
         Command::Status => {
-            println!("orca: cluster status (not yet connected)");
+            let client = OrcaClient::new(cli.api);
+            match client.status().await {
+                Ok(resp) => {
+                    println!("Cluster: {}", resp.cluster_name);
+                    println!();
+                    if resp.services.is_empty() {
+                        println!("No services deployed.");
+                    } else {
+                        let header = format!(
+                            "{:<20} {:<12} {:<10} {:<10} {:<20}",
+                            "SERVICE", "RUNTIME", "REPLICAS", "STATUS", "DOMAIN"
+                        );
+                        println!("{header}");
+                        for svc in &resp.services {
+                            println!(
+                                "{:<20} {:<12} {}/{:<7} {:<10} {}",
+                                svc.name,
+                                format!("{:?}", svc.runtime).to_lowercase(),
+                                svc.running_replicas,
+                                svc.desired_replicas,
+                                svc.status,
+                                svc.domain.as_deref().unwrap_or("-")
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Failed to get status: {e}");
+                    eprintln!("Is `orca server` running?");
+                    std::process::exit(1);
+                }
+            }
         }
+
+        // ========== LOGS ==========
         Command::Logs {
             service,
             tail,
-            follow,
+            follow: _,
             summarize,
         } => {
+            let client = OrcaClient::new(cli.api);
             if summarize {
-                println!("orca: summarizing logs for {service} using AI...");
-                // TODO: fetch logs → feed to AI → print summary
+                println!("AI log summarization not yet connected.");
+                println!("Configure [ai] in cluster.toml to enable.");
             } else {
-                tracing::info!("Streaming logs for {service} (tail={tail}, follow={follow})");
+                match client.logs(&service, tail).await {
+                    Ok(logs) => print!("{logs}"),
+                    Err(e) => {
+                        eprintln!("Failed to get logs for '{service}': {e}");
+                        std::process::exit(1);
+                    }
+                }
             }
         }
+
+        // ========== SCALE ==========
         Command::Scale { service, replicas } => {
-            println!("orca: scaling {service} to {replicas} replicas");
-        }
-        Command::Rollback { service } => {
-            println!("orca: rolling back {service}");
+            let client = OrcaClient::new(cli.api);
+            match client.scale(&service, replicas).await {
+                Ok(resp) => {
+                    println!("Scaled {} to {} replicas", resp.service, resp.replicas);
+                }
+                Err(e) => {
+                    eprintln!("Failed to scale '{service}': {e}");
+                    std::process::exit(1);
+                }
+            }
         }
 
-        // -- AI commands --
+        // ========== AI ==========
         Command::Ask { question } => {
             let q = question.join(" ");
-            println!("orca ai: asking about cluster...\n");
-            println!("Q: {q}");
-            println!();
-            // TODO: build ClusterContext, send to AI, stream response
-            println!("(AI backend not yet connected — configure [ai] in cluster.toml)");
+            println!("Q: {q}\n");
+            println!("AI backend not yet connected. Configure [ai] in cluster.toml.");
         }
         Command::Generate { description } => {
             let desc = description.join(" ");
-            println!("orca ai: generating config for: {desc}\n");
-            // TODO: send description to AI, get back TOML config
-            println!("(AI backend not yet connected — configure [ai] in cluster.toml)");
+            println!("Generating config for: {desc}\n");
+            println!("AI backend not yet connected. Configure [ai] in cluster.toml.");
         }
+
+        // ========== ALERTS ==========
         Command::Alerts { action } => match action {
             AlertsAction::List { all } => {
-                if all {
-                    println!("orca: all alert conversations (none yet)");
-                } else {
-                    println!("orca: active alert conversations (none yet)");
-                }
+                let scope = if all { "all" } else { "active" };
+                println!("No {scope} alert conversations.");
             }
-            AlertsAction::View { id } => {
-                println!("orca: viewing alert conversation {id}");
-            }
+            AlertsAction::View { id } => println!("Alert {id}: not yet connected."),
             AlertsAction::Reply { id, message } => {
                 let msg = message.join(" ");
-                println!("orca: replying to alert {id}: {msg}");
+                println!("Reply to alert {id}: {msg}");
             }
-            AlertsAction::Dismiss { id } => {
-                println!("orca: dismissing alert {id}");
-            }
-            AlertsAction::Fix { id } => {
-                println!("orca: applying AI-suggested fix for alert {id}");
-                // TODO: get the suggested_command from the alert, confirm, execute
-            }
+            AlertsAction::Dismiss { id } => println!("Dismissed alert {id}."),
+            AlertsAction::Fix { id } => println!("Applying fix for alert {id}..."),
         },
 
-        // -- GPU commands --
-        Command::Gpus => {
-            println!("orca: GPU status across cluster");
-            println!("  (no nodes with GPUs registered yet)");
-            // TODO: query nodes for GPU info, display table
-        }
+        // ========== GPU ==========
+        Command::Gpus => println!("No GPU nodes registered."),
         Command::Nodes { gpus } => {
             if gpus {
-                println!("orca: nodes with GPU details (none registered yet)");
+                println!("No nodes with GPUs registered.");
             } else {
-                println!("orca: nodes (none registered yet)");
+                println!("No nodes registered (single-node mode).");
             }
         }
 
+        // ========== OTHER ==========
+        Command::Rollback { service } => {
+            println!("Rollback for '{service}' not yet implemented (M4).")
+        }
         Command::Secrets { action } => match action {
-            SecretsAction::Set { key, .. } => println!("orca: secret '{key}' set"),
-            SecretsAction::Remove { key } => println!("orca: secret '{key}' removed"),
-            SecretsAction::List => println!("orca: (no secrets yet)"),
-            SecretsAction::Import { file } => println!("orca: importing secrets from {file}"),
+            SecretsAction::Set { key, .. } => println!("Secret '{key}' set."),
+            SecretsAction::Remove { key } => println!("Secret '{key}' removed."),
+            SecretsAction::List => println!("No secrets configured."),
+            SecretsAction::Import { file } => println!("Importing secrets from {file}..."),
         },
         Command::Import { source } => match source {
             ImportSource::DockerCompose { file, analyze } => {
-                println!("orca: importing from docker-compose at {file}");
+                println!("Importing from docker-compose: {file}");
                 if analyze {
-                    println!("orca ai: analyzing import for optimizations...");
-                    // TODO: AI suggests wasm conversions, resource sizing, etc.
+                    println!("AI analysis not yet connected.");
                 }
             }
             ImportSource::Coolify { path, analyze } => {
-                println!("orca: importing from Coolify at {path}");
+                println!("Importing from Coolify: {path}");
                 if analyze {
-                    println!("orca ai: analyzing import for optimizations...");
+                    println!("AI analysis not yet connected.");
                 }
             }
         },
@@ -373,19 +414,15 @@ async fn main() -> anyhow::Result<()> {
                 service,
                 branch,
             } => {
-                println!("orca: webhook added for {repo} -> {service} (branch: {branch})");
+                println!("Webhook added: {repo} -> {service} (branch: {branch})");
             }
-            WebhookAction::List => println!("orca: (no webhooks yet)"),
-            WebhookAction::Remove { id } => println!("orca: webhook {id} removed"),
+            WebhookAction::List => println!("No webhooks configured."),
+            WebhookAction::Remove { id } => println!("Webhook {id} removed."),
         },
-        Command::Join { address } => {
-            println!("orca: joining cluster at {address}");
-        }
-        Command::Tui => {
-            println!("orca: launching TUI...");
-        }
+        Command::Join { address } => println!("Joining cluster at {address}... (M2)"),
+        Command::Tui => println!("TUI not yet implemented (M3)."),
         Command::Web { port } => {
-            println!("orca: web dashboard at http://127.0.0.1:{port}");
+            println!("Web dashboard at http://127.0.0.1:{port} (M3)");
             tokio::signal::ctrl_c().await?;
         }
     }

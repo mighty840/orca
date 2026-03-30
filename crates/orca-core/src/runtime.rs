@@ -1,3 +1,6 @@
+//! Core runtime abstraction for workload execution.
+
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::time::Duration;
 
@@ -12,24 +15,33 @@ use crate::types::{ResourceStats, WorkloadSpec, WorkloadStatus};
 pub struct WorkloadHandle {
     /// Runtime-specific identifier (container ID, Wasm instance ID, etc.)
     pub runtime_id: String,
-    /// Human-friendly name
+    /// Human-friendly name.
     pub name: String,
+    /// Runtime-specific metadata (e.g., host_port, container_ip).
+    pub metadata: HashMap<String, String>,
 }
 
 /// Options for log retrieval.
 #[derive(Debug, Clone, Default)]
 pub struct LogOpts {
+    /// Follow log output (stream).
     pub follow: bool,
+    /// Number of recent lines to return.
     pub tail: Option<u64>,
+    /// Only return logs since this timestamp.
     pub since: Option<chrono::DateTime<chrono::Utc>>,
+    /// Include timestamps in log output.
     pub timestamps: bool,
 }
 
 /// Result of executing a command inside a workload.
 #[derive(Debug)]
 pub struct ExecResult {
+    /// Process exit code.
     pub exit_code: i32,
+    /// Standard output bytes.
     pub stdout: Vec<u8>,
+    /// Standard error bytes.
     pub stderr: Vec<u8>,
 }
 
@@ -65,4 +77,19 @@ pub trait Runtime: Send + Sync + 'static {
 
     /// Get current resource usage stats.
     async fn stats(&self, handle: &WorkloadHandle) -> Result<ResourceStats>;
+
+    /// Resolve the host-accessible port for a workload after it has been started.
+    ///
+    /// Returns `None` if the runtime does not expose ports or the workload has no port mapping.
+    /// Default implementation returns `None`.
+    async fn resolve_host_port(
+        &self,
+        handle: &WorkloadHandle,
+        _container_port: u16,
+    ) -> Result<Option<u16>> {
+        Ok(handle
+            .metadata
+            .get("host_port")
+            .and_then(|p| p.parse().ok()))
+    }
 }

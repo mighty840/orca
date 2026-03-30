@@ -10,5 +10,7 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
-# pingora will be added when proxy milestone begins
-# pingora = { workspace = true }
+hyper = { version = "1", features = ["http1", "server", "client"] }
+hyper-util = { version = "0.1", features = ["tokio", "http1", "client-legacy"] }
+http-body-util = "0.1"
+reqwest = { workspace = true }

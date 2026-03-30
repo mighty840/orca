@@ -5,18 +5,15 @@ edition.workspace = true
 
 [dependencies]
 orca-core = { workspace = true }
-orca-proxy = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 bollard = { workspace = true }
-wasmtime = { workspace = true }
-wasmtime-wasi = { workspace = true }
-tonic = { workspace = true }
-prost = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
 uuid = { workspace = true }
-clap = { workspace = true }
+futures-util = "0.3"
+tokio-util = { version = "0.7", features = ["io"] }

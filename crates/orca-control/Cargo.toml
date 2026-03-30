@@ -5,19 +5,18 @@ edition.workspace = true
 
 [dependencies]
 orca-core = { workspace = true }
+orca-agent = { path = "../orca-agent" }
+orca-proxy = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 axum = { workspace = true }
-tonic = { workspace = true }
-prost = { workspace = true }
 tower = { workspace = true }
-openraft = { workspace = true }
-redb = { workspace = true }
+tower-http = { version = "0.6", features = ["cors", "trace"] }
 uuid = { workspace = true }
 chrono = { workspace = true }
-clap = { workspace = true }
+async-trait = { workspace = true }
+tokio-util = { version = "0.7", features = ["io"] }
