@@ -28,6 +28,21 @@ pub struct AppState {
     pub route_table: SharedRouteTable,
     /// Wasm HTTP triggers, shared with the reverse proxy.
     pub wasm_triggers: SharedWasmTriggers,
+    /// Registered cluster nodes (M2 in-memory, will move to Raft store).
+    pub registered_nodes: RwLock<HashMap<u64, RegisteredNode>>,
+}
+
+/// A node registered in the cluster.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RegisteredNode {
+    /// Node ID.
+    pub node_id: u64,
+    /// Node address (ip:port).
+    pub address: String,
+    /// Node labels.
+    pub labels: HashMap<String, String>,
+    /// Last heartbeat time.
+    pub last_heartbeat: chrono::DateTime<chrono::Utc>,
 }
 
 /// State of a deployed service.
@@ -68,6 +83,7 @@ impl AppState {
             services: RwLock::new(HashMap::new()),
             route_table,
             wasm_triggers,
+            registered_nodes: RwLock::new(HashMap::new()),
         }
     }
 }

@@ -15,6 +15,7 @@ use orca_core::api_types::{
 };
 use orca_core::types::WorkloadStatus;
 
+use crate::cluster_handlers;
 use crate::reconciler;
 use crate::state::AppState;
 
@@ -26,6 +27,15 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/v1/status", get(status))
         .route("/api/v1/services/{name}/logs", get(logs))
         .route("/api/v1/services/{name}/scale", post(scale))
+        .route("/api/v1/cluster/info", get(cluster_handlers::cluster_info))
+        .route(
+            "/api/v1/cluster/register",
+            post(cluster_handlers::register_node),
+        )
+        .route(
+            "/api/v1/cluster/heartbeat",
+            post(cluster_handlers::heartbeat),
+        )
         .with_state(state)
 }
 
