@@ -110,6 +110,9 @@ pub enum Command {
     Join {
         /// Address of an existing cluster node
         address: String,
+        /// Cluster token for authentication
+        #[arg(long)]
+        token: String,
         /// Run in the background as a daemon
         #[arg(short, long)]
         daemon: bool,
@@ -117,6 +120,9 @@ pub enum Command {
         #[arg(long)]
         setup_key: Option<String>,
     },
+
+    /// Show the cluster token
+    Token,
 
     /// Launch the TUI dashboard
     Tui,

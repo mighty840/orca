@@ -12,12 +12,20 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
             orca_core::config::ClusterConfig::default()
         }
     };
+    // Auto-generate cluster token if none configured
+    let mut cluster_config = cluster_config;
+    if cluster_config.api_tokens.is_empty() {
+        let token = ensure_cluster_token();
+        cluster_config.api_tokens = vec![token.clone()];
+        println!("Cluster token: {token}");
+        println!("Use this to join nodes: orca join <this-ip>:6880 --token {token}");
+    }
+
     info!(
         "Starting orca server '{}' (API: {}, Proxy: {})",
         cluster_config.cluster.name, cluster_config.cluster.api_port, proxy_port,
     );
 
-    // Setup NetBird mesh if configured
     setup_netbird(&cluster_config).await;
 
     // Create runtimes
@@ -135,4 +143,64 @@ async fn setup_netbird(config: &orca_core::config::ClusterConfig) {
     if let Ok(Some(ip)) = nb.get_ip() {
         info!("NetBird mesh IP: {ip}");
     }
+}
+
+/// Token file path.
+fn token_path() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| ".".into())
+        .join(".orca/cluster.token")
+}
+
+/// Load or generate a cluster token.
+fn ensure_cluster_token() -> String {
+    let path = token_path();
+    if path.exists()
+        && let Ok(token) = std::fs::read_to_string(&path)
+    {
+        let token = token.trim().to_string();
+        if !token.is_empty() {
+            return token;
+        }
+    }
+    // Generate new token
+    let token = format!("{:x}{:x}", rand::random::<u64>(), rand::random::<u64>());
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&path, &token);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    token
+}
+
+/// Show the cluster token.
+pub fn show_token() {
+    let path = token_path();
+    if path.exists() {
+        if let Ok(token) = std::fs::read_to_string(&path) {
+            println!("{}", token.trim());
+        }
+    } else {
+        println!("No cluster token found. Start the server first.");
+    }
+}
+
+/// Read token from file, env var, or CLI flag.
+pub fn read_token(flag: Option<&str>) -> Option<String> {
+    if let Some(t) = flag {
+        return Some(t.to_string());
+    }
+    if let Ok(t) = std::env::var("ORCA_TOKEN") {
+        return Some(t);
+    }
+    let path = token_path();
+    std::fs::read_to_string(path)
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
 }

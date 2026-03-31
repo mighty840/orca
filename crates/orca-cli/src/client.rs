@@ -9,85 +9,76 @@ use orca_core::config::ServicesConfig;
 pub struct OrcaClient {
     base_url: String,
     client: reqwest::Client,
+    token: Option<String>,
 }
 
 impl OrcaClient {
-    /// Create a new client pointing at the given API base URL.
+    /// Create a new client. Auto-reads token from `~/.orca/cluster.token` or `ORCA_TOKEN`.
     pub fn new(base_url: String) -> Self {
+        let token = crate::handlers::server::read_token(None);
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             client: reqwest::Client::new(),
+            token,
         }
     }
 
-    /// Deploy services to the cluster.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the API request fails.
+    fn auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if let Some(t) = &self.token {
+            req.bearer_auth(t)
+        } else {
+            req
+        }
+    }
+
+    fn url(&self, path: &str) -> String {
+        format!("{}{path}", self.base_url)
+    }
+
     pub async fn deploy(&self, config: &ServicesConfig) -> anyhow::Result<DeployResponse> {
         let req = DeployRequest {
             services: config.service.clone(),
         };
         let resp = self
-            .client
-            .post(format!("{}/api/v1/deploy", self.base_url))
+            .auth(self.client.post(self.url("/api/v1/deploy")))
             .json(&req)
             .send()
             .await?;
-
         if !resp.status().is_success() && resp.status().as_u16() != 206 {
             let status = resp.status();
             let body = resp.text().await.unwrap_or_default();
             anyhow::bail!("deploy failed (HTTP {status}): {body}");
         }
-
         Ok(resp.json().await?)
     }
 
-    /// Get cluster and service status.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the API request fails.
     pub async fn status(&self) -> anyhow::Result<StatusResponse> {
         let resp = self
-            .client
-            .get(format!("{}/api/v1/status", self.base_url))
+            .auth(self.client.get(self.url("/api/v1/status")))
             .send()
             .await?
             .error_for_status()?;
         Ok(resp.json().await?)
     }
 
-    /// Get logs for a service.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the API request fails or the service is not found.
     pub async fn logs(&self, service: &str, tail: u64) -> anyhow::Result<String> {
         let resp = self
-            .client
-            .get(format!(
-                "{}/api/v1/services/{service}/logs?tail={tail}&follow=false",
-                self.base_url
-            ))
+            .auth(self.client.get(self.url(&format!(
+                "/api/v1/services/{service}/logs?tail={tail}&follow=false"
+            ))))
             .send()
             .await?
             .error_for_status()?;
         Ok(resp.text().await?)
     }
 
-    /// Scale a service to the given replica count.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the API request fails.
     pub async fn scale(&self, service: &str, replicas: u32) -> anyhow::Result<ScaleResponse> {
         let req = ScaleRequest { replicas };
         let resp = self
-            .client
-            .post(format!("{}/api/v1/services/{service}/scale", self.base_url))
+            .auth(
+                self.client
+                    .post(self.url(&format!("/api/v1/services/{service}/scale"))),
+            )
             .json(&req)
             .send()
             .await?
@@ -95,33 +86,30 @@ impl OrcaClient {
         Ok(resp.json().await?)
     }
 
-    /// Stop a specific service.
     pub async fn stop(&self, service: &str) -> anyhow::Result<()> {
-        self.client
-            .delete(format!("{}/api/v1/services/{service}", self.base_url))
-            .send()
-            .await?
-            .error_for_status()?;
+        self.auth(
+            self.client
+                .delete(self.url(&format!("/api/v1/services/{service}"))),
+        )
+        .send()
+        .await?
+        .error_for_status()?;
         Ok(())
     }
 
-    /// Rollback a service to its previous deploy.
     pub async fn rollback(&self, service: &str) -> anyhow::Result<()> {
-        self.client
-            .post(format!(
-                "{}/api/v1/services/{service}/rollback",
-                self.base_url
-            ))
-            .send()
-            .await?
-            .error_for_status()?;
+        self.auth(
+            self.client
+                .post(self.url(&format!("/api/v1/services/{service}/rollback"))),
+        )
+        .send()
+        .await?
+        .error_for_status()?;
         Ok(())
     }
 
-    /// Stop all services.
     pub async fn stop_all(&self) -> anyhow::Result<()> {
-        self.client
-            .post(format!("{}/api/v1/stop", self.base_url))
+        self.auth(self.client.post(self.url("/api/v1/stop")))
             .send()
             .await?
             .error_for_status()?;

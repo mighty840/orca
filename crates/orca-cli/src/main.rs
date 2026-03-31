@@ -94,8 +94,10 @@ async fn main() -> anyhow::Result<()> {
         Command::Rollback { service } => {
             handlers::ops::handle_rollback(service, cli.api).await?;
         }
+        Command::Token => handlers::server::show_token(),
         Command::Join {
             address,
+            token,
             daemon,
             setup_key,
         } => {
@@ -104,6 +106,8 @@ async fn main() -> anyhow::Result<()> {
                 handlers::daemon::daemonize(&args)?;
                 return Ok(());
             }
+            // SAFETY: single-threaded at this point, before tokio runtime starts work
+            unsafe { std::env::set_var("ORCA_TOKEN", &token) };
             handlers::join::handle_join(
                 &address,
                 None,
