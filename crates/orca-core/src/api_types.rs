@@ -105,6 +105,8 @@ mod tests {
                 port: Some(80),
                 domain: Some("example.com".into()),
                 health: Some("/healthz".into()),
+                readiness: None,
+                liveness: None,
                 env: Default::default(),
                 resources: None,
                 volume: None,

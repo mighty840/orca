@@ -20,6 +20,10 @@ pub struct WorkloadSpec {
     /// Path routes under the domain (e.g., ["/api/*"]).
     pub routes: Vec<String>,
     pub health: Option<String>,
+    /// Readiness probe config.
+    pub readiness: Option<crate::config::ProbeConfig>,
+    /// Liveness probe config.
+    pub liveness: Option<crate::config::ProbeConfig>,
     pub env: std::collections::HashMap<String, String>,
     pub resources: Option<ResourceLimits>,
     pub volume: Option<VolumeSpec>,

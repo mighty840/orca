@@ -10,10 +10,11 @@ use crate::error::{OrcaError, Result};
 
 pub use crate::backup::{BackupConfig, BackupTarget};
 pub use ai::{AiAlertConfig, AiConfig, AlertDeliveryChannels, AutoRemediateConfig};
+pub use cluster::NetworkConfig;
 pub use cluster::{
     AlertChannelConfig, ClusterConfig, ClusterMeta, NodeConfig, NodeGpuConfig, ObservabilityConfig,
 };
-pub use service::{ServiceConfig, ServicesConfig};
+pub use service::{ProbeConfig, ServiceConfig, ServicesConfig};
 
 // -- Load methods --
 

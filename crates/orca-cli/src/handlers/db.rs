@@ -75,6 +75,8 @@ async fn handle_create(
         domain: None,
         routes: vec![],
         health,
+        readiness: None,
+        liveness: None,
         env,
         resources: None,
         volume: Some(VolumeSpec {

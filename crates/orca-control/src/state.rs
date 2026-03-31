@@ -146,6 +146,8 @@ mod tests {
             port: Some(8080),
             domain: None,
             health: None,
+            readiness: None,
+            liveness: None,
             env: HashMap::new(),
             resources: None,
             volume: None,

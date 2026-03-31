@@ -37,14 +37,10 @@ pub(crate) async fn update_container_routes(state: &AppState, config: &ServiceCo
         .iter()
         .filter(|i| i.status == WorkloadStatus::Running)
         .filter_map(|i| {
-            // Use host port (reliable) with container IP as fallback
-            let address = if let Some(port) = i.host_port {
-                Some(format!("127.0.0.1:{port}"))
-            } else if let Some(addr) = &i.container_address {
-                Some(addr.clone())
-            } else {
-                None
-            };
+            let address = i
+                .host_port
+                .map(|port| format!("127.0.0.1:{port}"))
+                .or_else(|| i.container_address.clone());
             address.map(|addr| RouteTarget {
                 address: addr,
                 service_name: config.name.clone(),
@@ -118,6 +114,8 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
         domain: config.domain.clone(),
         routes: config.routes.clone(),
         health: config.health.clone(),
+        readiness: config.readiness.clone(),
+        liveness: config.liveness.clone(),
         env: config.env.clone(),
         resources: config.resources.clone(),
         volume: config.volume.clone(),
@@ -152,6 +150,8 @@ mod tests {
             port: Some(8080),
             domain: Some("test.example.com".to_string()),
             health: None,
+            readiness: None,
+            liveness: None,
             env: HashMap::new(),
             resources: None,
             volume: None,

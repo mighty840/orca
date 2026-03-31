@@ -131,7 +131,7 @@ pub(crate) async fn reconcile_service(
     Ok(())
 }
 
-/// Create and start a single workload instance.
+/// Create, start, and wait for a workload instance to be ready.
 async fn create_and_start_instance(
     runtime: &dyn Runtime,
     spec: &WorkloadSpec,
@@ -149,7 +149,6 @@ async fn create_and_start_instance(
         None
     };
 
-    // Resolve container IP on Docker network for direct proxy routing
     let container_address = if let Some(port) = spec.port {
         let network = super::routes::service_network_name(spec);
         runtime
@@ -161,6 +160,21 @@ async fn create_and_start_instance(
         None
     };
 
+    // Wait for container to be ready before registering routes.
+    // Uses readiness probe if configured, falls back to health path, then port check.
+    if let Some(port) = host_port {
+        let addr = format!("127.0.0.1:{port}");
+        let (path, delay) = if let Some(probe) = &spec.readiness {
+            (probe.path.as_str(), probe.initial_delay_secs)
+        } else {
+            (spec.health.as_deref().unwrap_or("/"), 2)
+        };
+        if delay > 0 {
+            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+        }
+        wait_for_ready(&addr, path).await;
+    }
+
     Ok(InstanceState {
         handle,
         status: WorkloadStatus::Running,
@@ -168,6 +182,29 @@ async fn create_and_start_instance(
         container_address,
         health: orca_core::types::HealthState::Unknown,
     })
+}
+
+/// Wait for a container to accept connections before registering routes.
+async fn wait_for_ready(addr: &str, path: &str) {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .no_proxy()
+        .build()
+        .unwrap();
+    let url = format!("http://{addr}{path}");
+
+    for attempt in 1..=30 {
+        match client.get(&url).send().await {
+            Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => {
+                tracing::debug!("Container ready at {addr} (attempt {attempt})");
+                return;
+            }
+            _ => {
+                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            }
+        }
+    }
+    tracing::warn!("Container at {addr} not ready after 15s, registering route anyway");
 }
 
 // stop, stop_all, redeploy, rollback, scale moved to operations.rs

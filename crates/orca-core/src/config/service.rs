@@ -6,6 +6,40 @@ use crate::types::{
     DeployStrategy, PlacementConstraint, Replicas, ResourceLimits, RuntimeKind, VolumeSpec,
 };
 
+/// Probe configuration for readiness/liveness checks.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProbeConfig {
+    /// HTTP path to probe (e.g., "/healthz").
+    pub path: String,
+    /// Port to probe (defaults to service port).
+    pub port: Option<u16>,
+    /// Seconds between probes (default: 10).
+    #[serde(default = "default_probe_interval")]
+    pub interval_secs: u64,
+    /// Seconds to wait for response (default: 3).
+    #[serde(default = "default_probe_timeout")]
+    pub timeout_secs: u64,
+    /// Failures before action (default: 3).
+    #[serde(default = "default_probe_failures")]
+    pub failure_threshold: u32,
+    /// Seconds to wait before first probe (default: 5).
+    #[serde(default = "default_initial_delay")]
+    pub initial_delay_secs: u64,
+}
+
+fn default_probe_interval() -> u64 {
+    10
+}
+fn default_probe_timeout() -> u64 {
+    3
+}
+fn default_probe_failures() -> u32 {
+    3
+}
+fn default_initial_delay() -> u64 {
+    5
+}
+
 /// Services configuration (`services.toml`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServicesConfig {
@@ -33,8 +67,12 @@ pub struct ServiceConfig {
     /// Default: ["/*"] (catch-all).
     #[serde(default)]
     pub routes: Vec<String>,
-    /// Health check path (e.g., "/healthz").
+    /// Health check path (e.g., "/healthz"). Legacy shorthand for liveness probe.
     pub health: Option<String>,
+    /// Readiness probe: container must pass before receiving traffic.
+    pub readiness: Option<ProbeConfig>,
+    /// Liveness probe: container is restarted if this fails.
+    pub liveness: Option<ProbeConfig>,
     #[serde(default)]
     pub env: HashMap<String, String>,
     pub resources: Option<ResourceLimits>,
