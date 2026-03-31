@@ -42,8 +42,12 @@ pub fn daemonize(args: &[String]) -> Result<()> {
         .filter(|a| *a != "--daemon" && *a != "-d")
         .collect();
 
+    // Preserve the current working directory so the child finds cluster.toml
+    let cwd = std::env::current_dir().context("could not determine working directory")?;
+
     let child = Command::new(exe)
         .args(&filtered_args)
+        .current_dir(&cwd)
         .stdout(std::process::Stdio::from(log_file))
         .stderr(std::process::Stdio::from(log_stderr))
         .stdin(std::process::Stdio::null())
