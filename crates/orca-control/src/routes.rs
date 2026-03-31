@@ -37,11 +37,13 @@ pub(crate) async fn update_container_routes(state: &AppState, config: &ServiceCo
         .iter()
         .filter(|i| i.status == WorkloadStatus::Running)
         .filter_map(|i| {
-            // Prefer container network IP (direct routing) over host port
-            let address = if let Some(addr) = &i.container_address {
+            // Use host port (reliable) with container IP as fallback
+            let address = if let Some(port) = i.host_port {
+                Some(format!("127.0.0.1:{port}"))
+            } else if let Some(addr) = &i.container_address {
                 Some(addr.clone())
             } else {
-                i.host_port.map(|port| format!("127.0.0.1:{port}"))
+                None
             };
             address.map(|addr| RouteTarget {
                 address: addr,
