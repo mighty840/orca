@@ -172,7 +172,12 @@ async fn serve_loop(
     acme_manager: Option<AcmeManager>,
 ) -> anyhow::Result<()> {
     let counter = Arc::new(AtomicUsize::new(0));
-    let client = Arc::new(reqwest::Client::new());
+    let client = Arc::new(
+        reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("failed to build HTTP client"),
+    );
     let acme = acme_manager.map(Arc::new);
 
     loop {
