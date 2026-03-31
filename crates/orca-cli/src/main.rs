@@ -82,11 +82,19 @@ async fn main() -> anyhow::Result<()> {
         Command::Stop { service } => {
             handlers::ops::handle_stop(service, cli.api).await?;
         }
-        Command::Rollback { service } => handlers::ops::handle_rollback(service),
+        Command::Rollback { service } => {
+            handlers::ops::handle_rollback(service, cli.api).await?;
+        }
         Command::Join { address } => {
             handlers::join::handle_join(&address, None, std::collections::HashMap::new()).await?;
         }
         Command::Backup { action } => handlers::backup::handle_backup(action),
+        Command::Cleanup => {
+            handlers::cleanup::handle_cleanup().await?;
+        }
+        Command::Db { action } => {
+            handlers::db::handle_db(action, cli.api).await?;
+        }
         Command::Tui => handlers::ops::handle_tui(&cli.api).await?,
         Command::Web { port } => handlers::ops::handle_web(port).await?,
     }

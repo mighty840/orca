@@ -105,6 +105,19 @@ impl OrcaClient {
         Ok(())
     }
 
+    /// Rollback a service to its previous deploy.
+    pub async fn rollback(&self, service: &str) -> anyhow::Result<()> {
+        self.client
+            .post(format!(
+                "{}/api/v1/services/{service}/rollback",
+                self.base_url
+            ))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
     /// Stop all services.
     pub async fn stop_all(&self) -> anyhow::Result<()> {
         self.client

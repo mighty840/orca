@@ -124,6 +124,15 @@ pub enum Command {
         #[command(subcommand)]
         action: BackupAction,
     },
+
+    /// Clean up unused Docker resources
+    Cleanup,
+
+    /// Create a database service
+    Db {
+        #[command(subcommand)]
+        action: DbAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -187,6 +196,22 @@ pub enum BackupAction {
         /// Backup identifier (filename)
         id: String,
     },
+}
+
+#[derive(Subcommand)]
+pub enum DbAction {
+    /// Create a new database service
+    Create {
+        /// Database type: postgres, mysql, redis, mongodb
+        db_type: String,
+        /// Service name
+        name: String,
+        /// Database password (auto-generated if omitted)
+        #[arg(long)]
+        password: Option<String>,
+    },
+    /// List running database services
+    List,
 }
 
 #[derive(Subcommand)]

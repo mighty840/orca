@@ -2,6 +2,7 @@ pub mod api_types;
 pub mod backup;
 pub mod config;
 pub mod error;
+pub mod notifications;
 pub mod runtime;
 pub mod secrets;
 pub mod testing;

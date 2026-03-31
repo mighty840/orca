@@ -5,6 +5,7 @@
 
 mod handler;
 mod routing;
+pub mod tls;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -65,10 +66,16 @@ pub async fn run_proxy(
     wasm_triggers: SharedWasmTriggers,
     wasm_invoker: Option<WasmInvoker>,
     port: u16,
+    tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
 ) -> anyhow::Result<()> {
     let addr = format!("0.0.0.0:{port}");
     let listener = TcpListener::bind(&addr).await?;
-    info!("Reverse proxy listening on {addr}");
+    let proto = if tls_acceptor.is_some() {
+        "HTTPS"
+    } else {
+        "HTTP"
+    };
+    info!("Reverse proxy listening on {addr} ({proto})");
 
     let counter = Arc::new(AtomicUsize::new(0));
     let client = Arc::new(reqwest::Client::new());
@@ -88,8 +95,8 @@ pub async fn run_proxy(
         let counter = counter.clone();
         let client = client.clone();
 
+        let tls = tls_acceptor.clone();
         tokio::spawn(async move {
-            let io = TokioIo::new(stream);
             let service = service_fn(move |req: Request<Incoming>| {
                 let routes = routes.clone();
                 let triggers = triggers.clone();
@@ -102,8 +109,21 @@ pub async fn run_proxy(
                 }
             });
 
-            if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
-                debug!("Proxy connection error from {peer}: {e}");
+            if let Some(acceptor) = tls {
+                match acceptor.accept(stream).await {
+                    Ok(tls_stream) => {
+                        let io = TokioIo::new(tls_stream);
+                        if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
+                            debug!("TLS proxy error from {peer}: {e}");
+                        }
+                    }
+                    Err(e) => debug!("TLS handshake failed from {peer}: {e}"),
+                }
+            } else {
+                let io = TokioIo::new(stream);
+                if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
+                    debug!("Proxy connection error from {peer}: {e}");
+                }
             }
         });
     }

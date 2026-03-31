@@ -1,33 +1,119 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fmt::Write;
 use std::path::{Path, PathBuf};
+
+/// Default master key path.
+fn default_master_key_path() -> PathBuf {
+    dirs_or_home().join("master.key")
+}
+
+/// Returns `~/.orca` or falls back to current dir.
+fn dirs_or_home() -> PathBuf {
+    std::env::var("HOME")
+        .map(|h| PathBuf::from(h).join(".orca"))
+        .unwrap_or_else(|_| PathBuf::from(".orca"))
+}
+
+/// XOR `data` with a repeating `key`.
+fn xor_bytes(data: &[u8], key: &[u8]) -> Vec<u8> {
+    if key.is_empty() {
+        return data.to_vec();
+    }
+    data.iter()
+        .enumerate()
+        .map(|(i, b)| b ^ key[i % key.len()])
+        .collect()
+}
+
+/// Hex-encode bytes to a string.
+fn base64_encode(data: &[u8]) -> String {
+    let mut s = String::with_capacity(data.len() * 2);
+    for b in data {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
+
+/// Hex-decode a string to bytes.
+fn base64_decode(hex: &str) -> Vec<u8> {
+    (0..hex.len())
+        .step_by(2)
+        .filter_map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
+        .collect()
+}
+
+/// Load or generate the master key at the given path.
+fn load_or_create_key(path: &Path) -> Result<Vec<u8>> {
+    if path.exists() {
+        std::fs::read(path).context("failed to read master key")
+    } else {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).context("failed to create key directory")?;
+        }
+        let mut key = vec![0u8; 32];
+        use std::io::Read;
+        std::fs::File::open("/dev/urandom")
+            .context("failed to open /dev/urandom")?
+            .read_exact(&mut key)
+            .context("failed to read random bytes")?;
+        std::fs::write(path, &key).context("failed to write master key")?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o600);
+            std::fs::set_permissions(path, perms).context("failed to set key permissions")?;
+        }
+        Ok(key)
+    }
+}
 
 /// Simple file-backed secret store.
 ///
 /// Secrets are stored as a JSON file with restrictive file permissions (0600).
-/// Encryption will be added in a future milestone.
+/// Values are XOR-encrypted with a master key to prevent plaintext exposure.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SecretStore {
     #[serde(skip)]
     path: PathBuf,
+    #[serde(skip)]
+    master_key: Vec<u8>,
     secrets: HashMap<String, String>,
 }
 
 impl SecretStore {
     /// Open an existing secrets file or create a new empty one.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        Self::open_with_key(path, &default_master_key_path())
+    }
+
+    /// Open with a specific master key path (useful for testing).
+    pub fn open_with_key(path: impl AsRef<Path>, key_path: &Path) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
+        let master_key = load_or_create_key(key_path)?;
 
         if path.exists() {
             let data = std::fs::read_to_string(&path).context("failed to read secrets file")?;
             let mut store: SecretStore =
                 serde_json::from_str(&data).context("failed to parse secrets file")?;
             store.path = path;
+            store.master_key = master_key.clone();
+            // Decrypt values in memory
+            store.secrets = store
+                .secrets
+                .into_iter()
+                .map(|(k, v)| {
+                    let encrypted = base64_decode(&v);
+                    let decrypted = xor_bytes(&encrypted, &master_key);
+                    (k, String::from_utf8_lossy(&decrypted).to_string())
+                })
+                .collect();
             Ok(store)
         } else {
             let store = SecretStore {
                 path,
+                master_key,
                 secrets: HashMap::new(),
             };
             store.save()?;
@@ -72,12 +158,24 @@ impl SecretStore {
     }
 
     /// Persist secrets to disk with restrictive permissions.
+    /// Values are XOR-encrypted with the master key before serialization.
     fn save(&self) -> Result<()> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent).context("failed to create secrets directory")?;
         }
 
-        let data = serde_json::to_string_pretty(&self).context("failed to serialize secrets")?;
+        // Encrypt values for serialization
+        let encrypted_secrets: HashMap<String, String> = self
+            .secrets
+            .iter()
+            .map(|(k, v)| {
+                let encrypted = xor_bytes(v.as_bytes(), &self.master_key);
+                (k.clone(), base64_encode(&encrypted))
+            })
+            .collect();
+
+        let on_disk = serde_json::json!({ "secrets": encrypted_secrets });
+        let data = serde_json::to_string_pretty(&on_disk).context("failed to serialize secrets")?;
         std::fs::write(&self.path, &data).context("failed to write secrets file")?;
 
         // Set file permissions to 0600 on Unix
@@ -124,93 +222,5 @@ impl SecretStore {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashMap;
-
-    fn temp_store() -> (SecretStore, tempfile::TempDir) {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("secrets.json");
-        let store = SecretStore::open(&path).unwrap();
-        (store, dir)
-    }
-
-    #[test]
-    fn set_and_get() {
-        let (mut store, _dir) = temp_store();
-        store.set("DB_PASS", "hunter2").unwrap();
-        assert_eq!(store.get("DB_PASS"), Some("hunter2"));
-        assert_eq!(store.get("MISSING"), None);
-    }
-
-    #[test]
-    fn set_overwrites() {
-        let (mut store, _dir) = temp_store();
-        store.set("KEY", "v1").unwrap();
-        store.set("KEY", "v2").unwrap();
-        assert_eq!(store.get("KEY"), Some("v2"));
-    }
-
-    #[test]
-    fn remove_secret() {
-        let (mut store, _dir) = temp_store();
-        store.set("KEY", "val").unwrap();
-        assert!(store.remove("KEY").unwrap());
-        assert!(!store.remove("KEY").unwrap());
-        assert_eq!(store.get("KEY"), None);
-    }
-
-    #[test]
-    fn list_keys_sorted() {
-        let (mut store, _dir) = temp_store();
-        store.set("BETA", "2").unwrap();
-        store.set("ALPHA", "1").unwrap();
-        store.set("GAMMA", "3").unwrap();
-        assert_eq!(store.list(), vec!["ALPHA", "BETA", "GAMMA"]);
-    }
-
-    #[test]
-    fn resolve_env_replaces_patterns() {
-        let (mut store, _dir) = temp_store();
-        store.set("DB_PASS", "s3cret").unwrap();
-        store.set("API_KEY", "abc123").unwrap();
-
-        let mut env = HashMap::new();
-        env.insert(
-            "DATABASE_URL".into(),
-            "postgres://user:${secrets.DB_PASS}@db/app".into(),
-        );
-        env.insert("KEY".into(), "${secrets.API_KEY}".into());
-        env.insert("PLAIN".into(), "no-secrets-here".into());
-        env.insert("UNKNOWN".into(), "${secrets.MISSING}".into());
-
-        let resolved = store.resolve_env(&env);
-        assert_eq!(resolved["DATABASE_URL"], "postgres://user:s3cret@db/app");
-        assert_eq!(resolved["KEY"], "abc123");
-        assert_eq!(resolved["PLAIN"], "no-secrets-here");
-        assert_eq!(resolved["UNKNOWN"], "${secrets.MISSING}");
-    }
-
-    #[test]
-    fn persistence_across_opens() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("secrets.json");
-
-        {
-            let mut store = SecretStore::open(&path).unwrap();
-            store.set("PERSIST", "yes").unwrap();
-        }
-
-        let store2 = SecretStore::open(&path).unwrap();
-        assert_eq!(store2.get("PERSIST"), Some("yes"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn file_permissions_are_600() {
-        use std::os::unix::fs::PermissionsExt;
-        let (store, _dir) = temp_store();
-        let meta = std::fs::metadata(&store.path).unwrap();
-        assert_eq!(meta.permissions().mode() & 0o777, 0o600);
-    }
-}
+#[path = "store_tests.rs"]
+mod tests;

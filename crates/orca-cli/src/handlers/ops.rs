@@ -204,8 +204,11 @@ pub fn handle_gpus() {
     println!("No GPU nodes registered.");
 }
 
-pub fn handle_rollback(service: String) {
-    println!("Rollback for '{service}' not yet implemented (M4).");
+pub async fn handle_rollback(service: String, api: String) -> anyhow::Result<()> {
+    let client = OrcaClient::new(api);
+    client.rollback(&service).await?;
+    println!("Rolled back service: {service}");
+    Ok(())
 }
 
 pub async fn handle_tui(api: &str) -> anyhow::Result<()> {

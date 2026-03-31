@@ -53,7 +53,8 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
     let proxy_triggers = wasm_triggers.clone();
     tokio::spawn(async move {
         if let Err(e) =
-            orca_proxy::run_proxy(proxy_routes, proxy_triggers, wasm_invoker, proxy_port).await
+            orca_proxy::run_proxy(proxy_routes, proxy_triggers, wasm_invoker, proxy_port, None)
+                .await
         {
             tracing::error!("Proxy error: {e}");
         }

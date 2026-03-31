@@ -34,6 +34,10 @@ pub struct AppState {
     pub registered_nodes: RwLock<HashMap<u64, RegisteredNode>>,
     /// Webhook configurations for push-triggered deploys.
     pub webhooks: WebhookStore,
+    /// API bearer tokens for authentication (empty = allow all).
+    pub api_tokens: Vec<String>,
+    /// Deploy history for rollback support.
+    pub deploy_history: RwLock<crate::deploy_history::DeployHistory>,
 }
 
 /// A node registered in the cluster.
@@ -82,6 +86,7 @@ impl AppState {
         route_table: SharedRouteTable,
         wasm_triggers: SharedWasmTriggers,
     ) -> Self {
+        let api_tokens = cluster_config.api_tokens.clone();
         Self {
             cluster_config,
             container_runtime,
@@ -91,6 +96,8 @@ impl AppState {
             wasm_triggers,
             registered_nodes: RwLock::new(HashMap::new()),
             webhooks: crate::webhook::new_store(),
+            api_tokens,
+            deploy_history: RwLock::new(crate::deploy_history::DeployHistory::new()),
         }
     }
 }

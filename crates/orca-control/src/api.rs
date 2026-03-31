@@ -1,5 +1,3 @@
-//! REST API server for the orca control plane.
-
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -15,6 +13,7 @@ use orca_core::api_types::{
 };
 use orca_core::types::WorkloadStatus;
 
+use crate::auth::auth_middleware;
 use crate::cluster_handlers;
 use crate::reconciler;
 use crate::state::AppState;
@@ -28,10 +27,15 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/v1/status", get(status))
         .route("/api/v1/services/{name}/logs", get(logs))
         .route("/api/v1/services/{name}/scale", post(scale))
+        .route("/api/v1/services/{name}/rollback", post(rollback))
         .route("/api/v1/services/{name}", delete(stop_service))
         .route("/api/v1/stop", post(stop_all))
         .merge(webhook::webhook_router())
         .merge(cluster_handlers::cluster_router())
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
         .with_state(state)
 }
 
@@ -184,23 +188,19 @@ async fn logs(
     }
 }
 
-/// Scale a service to the requested replica count.
 async fn scale(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
     Json(req): Json<ScaleRequest>,
 ) -> impl IntoResponse {
     match reconciler::scale(&state, &name, req.replicas).await {
-        Ok(()) => (
-            StatusCode::OK,
-            Json(ScaleResponse {
-                service: name,
-                replicas: req.replicas,
-            }),
-        )
-            .into_response(),
+        Ok(()) => Json(ScaleResponse {
+            service: name,
+            replicas: req.replicas,
+        })
+        .into_response(),
         Err(e) => {
-            error!("Failed to scale {name}: {e}");
+            error!("scale {name} failed: {e}");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("scale failed: {e}"),
@@ -210,33 +210,38 @@ async fn scale(
     }
 }
 
-/// Stop a specific service.
+async fn rollback(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    ok_or_500(
+        reconciler::rollback(&state, &name).await,
+        &format!("rollback {name}"),
+    )
+}
+
 async fn stop_service(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> impl IntoResponse {
-    match reconciler::stop(&state, &name).await {
-        Ok(()) => (StatusCode::OK, Json(serde_json::json!({"stopped": name}))).into_response(),
-        Err(e) => {
-            error!("Failed to stop {name}: {e}");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("stop failed: {e}"),
-            )
-                .into_response()
-        }
-    }
+    ok_or_500(
+        reconciler::stop(&state, &name).await,
+        &format!("stop {name}"),
+    )
 }
 
-/// Stop all services.
 async fn stop_all(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    match reconciler::stop_all(&state).await {
-        Ok(()) => Json(serde_json::json!({"stopped": "all"})).into_response(),
+    ok_or_500(reconciler::stop_all(&state).await, "stop all")
+}
+
+fn ok_or_500(result: anyhow::Result<()>, op: &str) -> axum::response::Response {
+    match result {
+        Ok(()) => Json(serde_json::json!({"ok": op})).into_response(),
         Err(e) => {
-            error!("Failed to stop all: {e}");
+            error!("{op} failed: {e}");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("stop failed: {e}"),
+                format!("{op} failed: {e}"),
             )
                 .into_response()
         }

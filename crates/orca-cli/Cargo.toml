@@ -27,3 +27,5 @@ tracing-subscriber = { workspace = true }
 clap = { workspace = true }
 reqwest = { workspace = true }
 hostname = "0.4"
+bollard = { workspace = true }
+dirs-next = "2"

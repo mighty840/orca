@@ -17,6 +17,9 @@ pub struct ClusterConfig {
     pub ai: Option<AiConfig>,
     #[serde(default)]
     pub backup: Option<BackupConfig>,
+    /// API bearer tokens for authentication. Empty = allow all requests.
+    #[serde(default)]
+    pub api_tokens: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
