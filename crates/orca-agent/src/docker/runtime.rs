@@ -65,6 +65,28 @@ impl ContainerRuntime {
         Ok(())
     }
 
+    /// Get a container's IP address on a specific Docker network.
+    pub async fn get_container_ip(
+        &self,
+        container_id: &str,
+        network: &str,
+    ) -> Result<Option<String>> {
+        let info = self
+            .docker
+            .inspect_container(container_id, None::<InspectContainerOptions>)
+            .await
+            .map_err(|e| OrcaError::Runtime(format!("inspect failed: {e}")))?;
+
+        let ip = info
+            .network_settings
+            .and_then(|ns| ns.networks)
+            .and_then(|nets| nets.get(network).cloned())
+            .and_then(|net| net.ip_address)
+            .filter(|ip| !ip.is_empty());
+
+        Ok(ip)
+    }
+
     /// Inspect a container and return its assigned host port for the primary port.
     pub async fn get_host_port(
         &self,

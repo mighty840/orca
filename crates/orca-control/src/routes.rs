@@ -5,6 +5,16 @@ use tracing::info;
 use orca_core::config::ServiceConfig;
 use orca_core::types::{WorkloadSpec, WorkloadStatus};
 
+/// Derive the Docker network name for a workload spec.
+pub(crate) fn service_network_name(spec: &WorkloadSpec) -> String {
+    if let Some(net) = &spec.network {
+        format!("orca-{net}")
+    } else {
+        let prefix = spec.name.split('-').next().unwrap_or(&spec.name);
+        format!("orca-{prefix}")
+    }
+}
+
 use crate::state::{AppState, WasmTrigger};
 use orca_proxy::RouteTarget;
 
@@ -19,15 +29,24 @@ pub(crate) async fn update_container_routes(state: &AppState, config: &ServiceCo
         return;
     };
 
+    // Build route path pattern from config
+    let path_pattern = config.routes.first().cloned();
+
     let targets: Vec<RouteTarget> = svc
         .instances
         .iter()
         .filter(|i| i.status == WorkloadStatus::Running)
         .filter_map(|i| {
-            i.host_port.map(|port| RouteTarget {
-                address: format!("127.0.0.1:{port}"),
+            // Prefer container network IP (direct routing) over host port
+            let address = if let Some(addr) = &i.container_address {
+                Some(addr.clone())
+            } else {
+                i.host_port.map(|port| format!("127.0.0.1:{port}"))
+            };
+            address.map(|addr| RouteTarget {
+                address: addr,
                 service_name: config.name.clone(),
-                path_pattern: None,
+                path_pattern: path_pattern.clone(),
             })
         })
         .collect();

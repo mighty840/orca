@@ -232,4 +232,17 @@ impl Runtime for ContainerRuntime {
     ) -> Result<Option<u16>> {
         self.get_host_port(&handle.runtime_id, container_port).await
     }
+
+    async fn resolve_container_address(
+        &self,
+        handle: &WorkloadHandle,
+        container_port: u16,
+        network: &str,
+    ) -> Result<Option<String>> {
+        if let Some(ip) = self.get_container_ip(&handle.runtime_id, network).await? {
+            Ok(Some(format!("{ip}:{container_port}")))
+        } else {
+            Ok(None)
+        }
+    }
 }

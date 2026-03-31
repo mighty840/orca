@@ -149,10 +149,23 @@ async fn create_and_start_instance(
         None
     };
 
+    // Resolve container IP on Docker network for direct proxy routing
+    let container_address = if let Some(port) = spec.port {
+        let network = super::routes::service_network_name(spec);
+        runtime
+            .resolve_container_address(&handle, port, &network)
+            .await
+            .ok()
+            .flatten()
+    } else {
+        None
+    };
+
     Ok(InstanceState {
         handle,
         status: WorkloadStatus::Running,
         host_port,
+        container_address,
         health: orca_core::types::HealthState::Unknown,
     })
 }

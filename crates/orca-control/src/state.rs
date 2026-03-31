@@ -73,6 +73,8 @@ pub struct InstanceState {
     pub status: WorkloadStatus,
     /// Host port mapped to the container's primary port (containers only).
     pub host_port: Option<u16>,
+    /// Container address on Docker network (ip:port) for direct proxy routing.
+    pub container_address: Option<String>,
     /// Health check state.
     pub health: HealthState,
 }
@@ -168,6 +170,7 @@ mod tests {
             },
             status,
             host_port: None,
+            container_address: None,
             health: HealthState::Unknown,
         }
     }

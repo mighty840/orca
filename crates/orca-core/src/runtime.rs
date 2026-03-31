@@ -92,4 +92,18 @@ pub trait Runtime: Send + Sync + 'static {
             .get("host_port")
             .and_then(|p| p.parse().ok()))
     }
+
+    /// Resolve the container's network address (ip:port) on its Docker network.
+    ///
+    /// This allows the proxy to route directly to the container IP
+    /// without going through host port mappings.
+    /// Returns `None` if not applicable (e.g., Wasm workloads).
+    async fn resolve_container_address(
+        &self,
+        _handle: &WorkloadHandle,
+        _container_port: u16,
+        _network: &str,
+    ) -> Result<Option<String>> {
+        Ok(None)
+    }
 }
