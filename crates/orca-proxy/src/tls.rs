@@ -1,14 +1,14 @@
 //! TLS configuration for the reverse proxy.
 //!
 //! Supports: self-signed certs (auto-generated), user-provided certs,
-//! and ACME/Let's Encrypt via certbot.
+//! and ACME/Let's Encrypt via `instant-acme` (zero-config auto-TLS).
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::acme::AcmeManager;
 
@@ -21,11 +21,10 @@ pub enum TlsMode {
     SelfSigned,
     /// User-provided certificate and key files.
     Custom { cert_path: String, key_path: String },
-    /// ACME/Let's Encrypt via certbot.
+    /// ACME/Let's Encrypt via `instant-acme` — fully automatic.
     ///
-    /// The proxy serves HTTP-01 challenges on port 80. Certificates are
-    /// provisioned via `orca certs provision <domain>` (which calls certbot)
-    /// and cached in `cache_dir`.
+    /// The proxy serves HTTP-01 challenges on port 80 and provisions certs
+    /// automatically when a domain is configured.
     Acme {
         /// Email for the Let's Encrypt account registration.
         email: String,
@@ -38,8 +37,8 @@ pub enum TlsMode {
 /// Create a TLS acceptor based on the configured mode.
 ///
 /// For `TlsMode::Acme`, pass the primary `domain` to load certs for.
-/// Returns `None` if no certs are cached yet (proxy will serve HTTP only
-/// until `orca certs provision` is run).
+/// Returns `None` if no certs are cached yet (they will be provisioned
+/// automatically when the proxy starts).
 pub fn create_tls_acceptor(mode: &TlsMode) -> anyhow::Result<Option<TlsAcceptor>> {
     create_tls_acceptor_for_domain(mode, None)
 }
@@ -94,21 +93,21 @@ pub fn create_tls_acceptor_for_domain(
             let manager = AcmeManager::new(email.clone(), cache);
 
             let Some(domain) = domain else {
-                warn!(
-                    "ACME mode requires a domain — serving HTTP only until certs are provisioned"
-                );
+                // No domain specified — ACME will auto-provision when domains
+                // are registered and the proxy starts.
+                info!("ACME mode: certs will be auto-provisioned on startup");
                 return Ok(None);
             };
 
             match manager.tls_acceptor_for(domain)? {
                 Some(acceptor) => {
-                    info!(domain, "Loaded ACME certificate");
+                    info!(domain, "Loaded cached ACME certificate");
                     Ok(Some(acceptor))
                 }
                 None => {
-                    warn!(
+                    info!(
                         domain,
-                        "No ACME certs found — run `orca certs provision {domain}`"
+                        "No cached ACME cert — will auto-provision on startup"
                     );
                     Ok(None)
                 }

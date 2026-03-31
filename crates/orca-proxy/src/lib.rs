@@ -2,6 +2,7 @@
 //!
 //! Routes HTTP traffic by `Host` header to container backends (round-robin),
 //! and by path pattern to Wasm component invocations via a callback.
+//! Supports automatic TLS via ACME/Let's Encrypt (Caddy-style zero-config).
 
 pub mod acme;
 mod handler;
@@ -19,7 +20,7 @@ use hyper::service::service_fn;
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use acme::AcmeManager;
 use handler::{handle_acme_challenge, handle_request};
@@ -62,11 +63,8 @@ pub type SharedWasmTriggers = Arc<RwLock<Vec<WasmTrigger>>>;
 
 /// Run the reverse proxy on the given port.
 ///
-/// Routes by Host header to container backends, and by path pattern to Wasm components.
-///
-/// # Errors
-///
-/// Returns an error if the proxy fails to bind to the port.
+/// Routes by Host header to container backends, and by path pattern to Wasm
+/// components.
 pub async fn run_proxy(
     route_table: Arc<RwLock<HashMap<String, Vec<RouteTarget>>>>,
     wasm_triggers: SharedWasmTriggers,
@@ -84,6 +82,88 @@ pub async fn run_proxy(
     };
     info!("Reverse proxy listening on {addr} ({proto})");
 
+    serve_loop(listener, route_table, wasm_triggers, wasm_invoker, tls_acceptor, acme_manager)
+        .await
+}
+
+/// Run HTTP on port 80 (for ACME challenges + redirect) and HTTPS on port 443.
+///
+/// Automatically provisions certs for all given domains via Let's Encrypt.
+pub async fn run_proxy_with_acme(
+    route_table: Arc<RwLock<HashMap<String, Vec<RouteTarget>>>>,
+    wasm_triggers: SharedWasmTriggers,
+    wasm_invoker: Option<WasmInvoker>,
+    acme_manager: AcmeManager,
+    domains: Vec<String>,
+) -> anyhow::Result<()> {
+    let provider = acme_manager.provider();
+
+    // Provision certs for all domains (spawned so HTTP-01 challenges can be
+    // served concurrently on port 80).
+    let acme_mgr = acme_manager.clone();
+    let routes_clone = route_table.clone();
+    let triggers_clone = wasm_triggers.clone();
+    let invoker_clone = wasm_invoker.clone();
+
+    // Start HTTP on port 80 first (needed for ACME challenge validation)
+    let http_handle = tokio::spawn({
+        let acme = acme_mgr.clone();
+        let routes = routes_clone.clone();
+        let triggers = triggers_clone.clone();
+        let invoker = invoker_clone.clone();
+        async move {
+            if let Err(e) = run_proxy(routes, triggers, invoker, 80, None, Some(acme)).await {
+                error!("HTTP listener failed: {e}");
+            }
+        }
+    });
+
+    // Provision certs then start HTTPS
+    let https_handle = tokio::spawn(async move {
+        // Small delay to let HTTP listener start
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+        for domain in &domains {
+            info!(domain = %domain, "Auto-provisioning TLS certificate");
+            match provider.ensure_cert(domain).await {
+                Ok(acceptor) => {
+                    info!(domain = %domain, "TLS cert ready, starting HTTPS");
+                    let routes = routes_clone.clone();
+                    let triggers = triggers_clone.clone();
+                    let invoker = invoker_clone.clone();
+                    let acme = acme_mgr.clone();
+                    // Start HTTPS with the first successful cert
+                    if let Err(e) =
+                        run_proxy(routes, triggers, invoker, 443, Some(acceptor), Some(acme)).await
+                    {
+                        error!("HTTPS listener failed: {e}");
+                    }
+                    return;
+                }
+                Err(e) => {
+                    error!(domain = %domain, error = %e, "Failed to provision cert");
+                }
+            }
+        }
+        error!("No TLS certs could be provisioned — HTTPS not started");
+    });
+
+    tokio::select! {
+        _ = http_handle => warn!("HTTP listener exited"),
+        _ = https_handle => warn!("HTTPS listener exited"),
+    }
+    Ok(())
+}
+
+/// Core accept loop shared by HTTP and HTTPS listeners.
+async fn serve_loop(
+    listener: TcpListener,
+    route_table: Arc<RwLock<HashMap<String, Vec<RouteTarget>>>>,
+    wasm_triggers: SharedWasmTriggers,
+    wasm_invoker: Option<WasmInvoker>,
+    tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+    acme_manager: Option<AcmeManager>,
+) -> anyhow::Result<()> {
     let counter = Arc::new(AtomicUsize::new(0));
     let client = Arc::new(reqwest::Client::new());
     let acme = acme_manager.map(Arc::new);
@@ -103,8 +183,8 @@ pub async fn run_proxy(
         let counter = counter.clone();
         let client = client.clone();
         let acme = acme.clone();
-
         let tls = tls_acceptor.clone();
+
         tokio::spawn(async move {
             let service = service_fn(move |req: Request<Incoming>| {
                 let routes = routes.clone();
@@ -114,7 +194,6 @@ pub async fn run_proxy(
                 let client = client.clone();
                 let acme = acme.clone();
                 async move {
-                    // Intercept ACME challenge requests before normal routing
                     if let Some(resp) = handle_acme_challenge(&req, acme.as_deref()).await {
                         return Ok(resp);
                     }
