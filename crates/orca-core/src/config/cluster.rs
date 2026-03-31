@@ -6,7 +6,7 @@ use super::ai::AiConfig;
 use crate::backup::BackupConfig;
 
 /// Top-level cluster configuration (`cluster.toml`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ClusterConfig {
     pub cluster: ClusterMeta,
     #[serde(default)]
@@ -43,6 +43,7 @@ fn default_network_provider() -> String {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClusterMeta {
+    #[serde(default = "default_cluster_name")]
     pub name: String,
     pub domain: Option<String>,
     pub acme_email: Option<String>,
@@ -52,6 +53,23 @@ pub struct ClusterMeta {
     pub api_port: u16,
     #[serde(default = "default_grpc_port")]
     pub grpc_port: u16,
+}
+
+impl Default for ClusterMeta {
+    fn default() -> Self {
+        Self {
+            name: default_cluster_name(),
+            domain: None,
+            acme_email: None,
+            log_level: default_log_level(),
+            api_port: default_api_port(),
+            grpc_port: default_grpc_port(),
+        }
+    }
+}
+
+fn default_cluster_name() -> String {
+    "orca".into()
 }
 
 pub(crate) fn default_log_level() -> String {

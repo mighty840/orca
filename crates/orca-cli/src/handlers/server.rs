@@ -5,7 +5,13 @@ use tracing::info;
 
 /// Handle the `orca server` command.
 pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> {
-    let cluster_config = orca_core::config::ClusterConfig::load(config.as_ref())?;
+    let cluster_config = match orca_core::config::ClusterConfig::load(config.as_ref()) {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("No cluster.toml found ({e}), using defaults");
+            orca_core::config::ClusterConfig::default()
+        }
+    };
     info!(
         "Starting orca server '{}' (API: {}, Proxy: {})",
         cluster_config.cluster.name, cluster_config.cluster.api_port, proxy_port,
