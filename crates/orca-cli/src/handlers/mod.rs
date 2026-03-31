@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod deploy;
 pub mod join;
 pub mod ops;

@@ -2,13 +2,23 @@
 
 use std::sync::Arc;
 
-use axum::Json;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use axum::routing::{get, post};
+use axum::{Json, Router};
 use serde::Deserialize;
 
 use crate::state::{AppState, RegisteredNode};
+
+/// Build cluster management routes.
+/// Build cluster management routes (call before with_state on parent router).
+pub fn cluster_router() -> Router<Arc<AppState>> {
+    Router::new()
+        .route("/api/v1/cluster/info", get(cluster_info))
+        .route("/api/v1/cluster/register", post(register_node))
+        .route("/api/v1/cluster/heartbeat", post(heartbeat))
+}
 
 pub async fn cluster_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let nodes = state.registered_nodes.read().await;

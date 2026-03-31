@@ -8,6 +8,7 @@ use crate::error::{OrcaError, Result};
 
 // -- Re-exports --
 
+pub use crate::backup::{BackupConfig, BackupTarget};
 pub use ai::{AiAlertConfig, AiConfig, AlertDeliveryChannels, AutoRemediateConfig};
 pub use cluster::{
     AlertChannelConfig, ClusterConfig, ClusterMeta, NodeConfig, NodeGpuConfig, ObservabilityConfig,

@@ -183,6 +183,37 @@ pub async fn stop_all(state: &AppState) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Redeploy a service: stop all instances and recreate them (forces fresh image pull).
+pub async fn redeploy(state: &AppState, service_name: &str) -> anyhow::Result<()> {
+    let config = {
+        let services = state.services.read().await;
+        let svc = services
+            .get(service_name)
+            .ok_or_else(|| anyhow::anyhow!("service '{}' not found", service_name))?;
+        svc.config.clone()
+    };
+
+    let runtime = get_runtime(state, config.runtime)?;
+
+    // Stop and remove all existing instances
+    {
+        let mut services = state.services.write().await;
+        if let Some(svc) = services.get_mut(service_name) {
+            for instance in svc.instances.drain(..) {
+                let _ = runtime
+                    .stop(&instance.handle, Duration::from_secs(10))
+                    .await;
+                let _ = runtime.remove(&instance.handle).await;
+            }
+        }
+    }
+
+    // Reconcile again to recreate instances with fresh image
+    reconcile_service(state, &config).await?;
+    info!("Redeployed service: {service_name}");
+    Ok(())
+}
+
 /// Scale a specific service to the given replica count.
 pub async fn scale(state: &AppState, service_name: &str, replicas: u32) -> anyhow::Result<()> {
     let config = {

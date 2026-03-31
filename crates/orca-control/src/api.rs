@@ -18,6 +18,7 @@ use orca_core::types::WorkloadStatus;
 use crate::cluster_handlers;
 use crate::reconciler;
 use crate::state::AppState;
+use crate::webhook;
 
 /// Build the axum router for the API.
 pub fn router(state: Arc<AppState>) -> Router {
@@ -29,15 +30,8 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/v1/services/{name}/scale", post(scale))
         .route("/api/v1/services/{name}", delete(stop_service))
         .route("/api/v1/stop", post(stop_all))
-        .route("/api/v1/cluster/info", get(cluster_handlers::cluster_info))
-        .route(
-            "/api/v1/cluster/register",
-            post(cluster_handlers::register_node),
-        )
-        .route(
-            "/api/v1/cluster/heartbeat",
-            post(cluster_handlers::heartbeat),
-        )
+        .merge(webhook::webhook_router())
+        .merge(cluster_handlers::cluster_router())
         .with_state(state)
 }
 

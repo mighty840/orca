@@ -10,6 +10,7 @@ pub(crate) mod routes;
 pub mod scheduler;
 pub mod state;
 pub mod store;
+pub mod webhook;
 
 use std::sync::Arc;
 

@@ -28,6 +28,9 @@ prost = { workspace = true }
 openraft = { workspace = true }
 redb = { workspace = true }
 reqwest = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
 
 [build-dependencies]
 tonic-build = "0.13"

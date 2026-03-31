@@ -118,6 +118,12 @@ pub enum Command {
         #[arg(short, long, default_value = "6890")]
         port: u16,
     },
+
+    /// Manage backups
+    Backup {
+        #[command(subcommand)]
+        action: BackupAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -167,6 +173,19 @@ pub enum ImportSource {
         path: String,
         #[arg(long)]
         analyze: bool,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum BackupAction {
+    /// Create a backup now
+    Create,
+    /// List existing backups
+    List,
+    /// Restore from a backup
+    Restore {
+        /// Backup identifier (filename)
+        id: String,
     },
 }
 

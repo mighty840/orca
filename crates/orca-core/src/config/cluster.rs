@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use super::ai::AiConfig;
+use crate::backup::BackupConfig;
 
 /// Top-level cluster configuration (`cluster.toml`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -14,6 +15,8 @@ pub struct ClusterConfig {
     pub observability: Option<ObservabilityConfig>,
     #[serde(default)]
     pub ai: Option<AiConfig>,
+    #[serde(default)]
+    pub backup: Option<BackupConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

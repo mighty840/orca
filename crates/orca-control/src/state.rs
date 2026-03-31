@@ -9,6 +9,8 @@ use orca_core::config::{ClusterConfig, ServiceConfig};
 use orca_core::runtime::{Runtime, WorkloadHandle};
 use orca_core::types::{HealthState, Replicas, WorkloadStatus};
 
+use crate::webhook::WebhookStore;
+
 pub use orca_proxy::{RouteTarget, SharedWasmTriggers, WasmTrigger};
 
 /// Shared route table type, compatible with [`orca_proxy::run_proxy`].
@@ -30,6 +32,8 @@ pub struct AppState {
     pub wasm_triggers: SharedWasmTriggers,
     /// Registered cluster nodes (M2 in-memory, will move to Raft store).
     pub registered_nodes: RwLock<HashMap<u64, RegisteredNode>>,
+    /// Webhook configurations for push-triggered deploys.
+    pub webhooks: WebhookStore,
 }
 
 /// A node registered in the cluster.
@@ -86,6 +90,7 @@ impl AppState {
             route_table,
             wasm_triggers,
             registered_nodes: RwLock::new(HashMap::new()),
+            webhooks: crate::webhook::new_store(),
         }
     }
 }
