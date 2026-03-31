@@ -94,13 +94,23 @@ async fn main() -> anyhow::Result<()> {
         Command::Rollback { service } => {
             handlers::ops::handle_rollback(service, cli.api).await?;
         }
-        Command::Join { address, daemon } => {
+        Command::Join {
+            address,
+            daemon,
+            setup_key,
+        } => {
             if daemon {
                 let args: Vec<String> = std::env::args().skip(1).collect();
                 handlers::daemon::daemonize(&args)?;
                 return Ok(());
             }
-            handlers::join::handle_join(&address, None, std::collections::HashMap::new()).await?;
+            handlers::join::handle_join(
+                &address,
+                None,
+                std::collections::HashMap::new(),
+                setup_key,
+            )
+            .await?;
         }
         Command::Backup { action } => handlers::backup::handle_backup(action),
         Command::Cleanup => {

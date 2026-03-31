@@ -20,6 +20,25 @@ pub struct ClusterConfig {
     /// API bearer tokens for authentication. Empty = allow all requests.
     #[serde(default)]
     pub api_tokens: Vec<String>,
+    /// Mesh networking configuration (NetBird).
+    #[serde(default)]
+    pub network: Option<NetworkConfig>,
+}
+
+/// Mesh networking configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkConfig {
+    /// Network provider: "netbird" (default).
+    #[serde(default = "default_network_provider")]
+    pub provider: String,
+    /// NetBird setup key for joining the mesh.
+    pub setup_key: Option<String>,
+    /// NetBird management URL (default: api.netbird.io).
+    pub management_url: Option<String>,
+}
+
+fn default_network_provider() -> String {
+    "netbird".into()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

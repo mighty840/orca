@@ -113,6 +113,9 @@ pub enum Command {
         /// Run in the background as a daemon
         #[arg(short, long)]
         daemon: bool,
+        /// NetBird setup key for mesh networking
+        #[arg(long)]
+        setup_key: Option<String>,
     },
 
     /// Launch the TUI dashboard
