@@ -1944,7 +1944,7 @@ dependencies = [
 
 [[package]]
 name = "mallorca"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "bollard",
@@ -2187,7 +2187,7 @@ dependencies = [
 
 [[package]]
 name = "orca-agent"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2209,7 +2209,7 @@ dependencies = [
 
 [[package]]
 name = "orca-ai"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2226,7 +2226,7 @@ dependencies = [
 
 [[package]]
 name = "orca-control"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2258,7 +2258,7 @@ dependencies = [
 
 [[package]]
 name = "orca-core"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2276,7 +2276,7 @@ dependencies = [
 
 [[package]]
 name = "orca-proxy"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "http-body-util",
@@ -2296,7 +2296,7 @@ dependencies = [
 
 [[package]]
 name = "orca-tui"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "crossterm",
@@ -2310,7 +2310,7 @@ dependencies = [
 
 [[package]]
 name = "orca-web"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "anyhow",
  "clap",
