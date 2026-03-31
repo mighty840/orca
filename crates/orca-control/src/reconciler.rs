@@ -145,6 +145,7 @@ async fn create_and_start_instance(
         handle,
         status: WorkloadStatus::Running,
         host_port,
+        health: orca_core::types::HealthState::Unknown,
     })
 }
 

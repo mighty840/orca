@@ -80,12 +80,58 @@ pub fn handle_alerts(action: AlertsAction) {
     }
 }
 
+fn open_secrets() -> orca_core::secrets::SecretStore {
+    orca_core::secrets::SecretStore::open("secrets.json").unwrap_or_else(|e| {
+        tracing::error!("Failed to open secrets store: {e}");
+        std::process::exit(1);
+    })
+}
+
 pub fn handle_secrets(action: SecretsAction) {
     match action {
-        SecretsAction::Set { key, .. } => println!("Secret '{key}' set."),
-        SecretsAction::Remove { key } => println!("Secret '{key}' removed."),
-        SecretsAction::List => println!("No secrets configured."),
-        SecretsAction::Import { file } => println!("Importing secrets from {file}..."),
+        SecretsAction::Set { key, value } => {
+            let mut store = open_secrets();
+            store.set(&key, &value).expect("failed to set secret");
+            println!("Secret '{key}' set.");
+        }
+        SecretsAction::Remove { key } => {
+            let mut store = open_secrets();
+            match store.remove(&key) {
+                Ok(true) => println!("Secret '{key}' removed."),
+                Ok(false) => println!("Secret '{key}' not found."),
+                Err(e) => tracing::error!("Failed to remove: {e}"),
+            }
+        }
+        SecretsAction::List => {
+            let store = open_secrets();
+            let keys = store.list();
+            if keys.is_empty() {
+                println!("No secrets configured.");
+            } else {
+                for key in keys {
+                    println!("  {key}");
+                }
+            }
+        }
+        SecretsAction::Import { file } => {
+            let mut store = open_secrets();
+            let content = std::fs::read_to_string(&file).unwrap_or_else(|e| {
+                tracing::error!("Failed to read '{file}': {e}");
+                std::process::exit(1);
+            });
+            let mut count = 0u32;
+            for line in content.lines() {
+                let line = line.trim();
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                if let Some((key, value)) = line.split_once('=') {
+                    store.set(key.trim(), value.trim()).expect("failed to set");
+                    count += 1;
+                }
+            }
+            println!("Imported {count} secrets from {file}.");
+        }
     }
 }
 

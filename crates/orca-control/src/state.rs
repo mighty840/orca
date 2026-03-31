@@ -7,7 +7,7 @@ use tokio::sync::RwLock;
 
 use orca_core::config::{ClusterConfig, ServiceConfig};
 use orca_core::runtime::{Runtime, WorkloadHandle};
-use orca_core::types::{Replicas, WorkloadStatus};
+use orca_core::types::{HealthState, Replicas, WorkloadStatus};
 
 pub use orca_proxy::{RouteTarget, SharedWasmTriggers, WasmTrigger};
 
@@ -65,6 +65,8 @@ pub struct InstanceState {
     pub status: WorkloadStatus,
     /// Host port mapped to the container's primary port (containers only).
     pub host_port: Option<u16>,
+    /// Health check state.
+    pub health: HealthState,
 }
 
 impl AppState {
@@ -149,6 +151,7 @@ mod tests {
             },
             status,
             host_port: None,
+            health: HealthState::Unknown,
         }
     }
 

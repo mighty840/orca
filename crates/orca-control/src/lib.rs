@@ -2,6 +2,7 @@ pub mod api;
 pub mod cluster_api;
 pub(crate) mod cluster_handlers;
 pub mod cluster_state;
+pub mod health;
 pub mod proto;
 pub mod raft;
 pub mod reconciler;
