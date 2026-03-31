@@ -11,6 +11,9 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
         cluster_config.cluster.name, cluster_config.cluster.api_port, proxy_port,
     );
 
+    // Setup NetBird mesh if configured
+    setup_netbird(&cluster_config).await;
+
     // Create runtimes
     let container_runtime = Arc::new(orca_agent::docker::ContainerRuntime::new()?);
     let wasm_runtime = match orca_agent::wasm::WasmRuntime::new() {
@@ -24,12 +27,11 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
         }
     };
 
-    // Shared state: route table + wasm triggers
+    // Shared state
     let route_table = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
     let wasm_triggers: orca_proxy::SharedWasmTriggers =
         Arc::new(tokio::sync::RwLock::new(Vec::new()));
 
-    // Build Wasm invoker callback for the proxy (needs concrete WasmRuntime)
     let wasm_invoker: Option<orca_proxy::WasmInvoker> = wasm_runtime.as_ref().map(|wr| {
         let wr = wr.clone();
         Arc::new(
@@ -44,21 +46,41 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
         ) as orca_proxy::WasmInvoker
     });
 
-    // Cast concrete WasmRuntime to dyn Runtime for the control plane
     let wasm_as_trait: Option<Arc<dyn orca_core::runtime::Runtime>> =
         wasm_runtime.map(|wr| wr as Arc<dyn orca_core::runtime::Runtime>);
 
-    // Spawn proxy
+    // Check if any domain needs TLS — load services.toml if it exists
+    let acme_email = cluster_config.cluster.acme_email.clone();
+    let has_domains = std::path::Path::new("services.toml")
+        .exists()
+        .then(|| orca_core::config::ServicesConfig::load("services.toml".as_ref()).ok())
+        .flatten()
+        .map(|s| s.service.iter().any(|svc| svc.domain.is_some()))
+        .unwrap_or(false);
+
+    // Spawn proxy: HTTPS on 443 + HTTP on 80 if domains exist, else HTTP only
     let proxy_routes = route_table.clone();
     let proxy_triggers = wasm_triggers.clone();
     tokio::spawn(async move {
+        let acme = if has_domains {
+            acme_email.map(|email| {
+                let cache = std::env::var("HOME")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|_| ".".into())
+                    .join(".orca/certs");
+                orca_proxy::acme::AcmeManager::new(email, cache)
+            })
+        } else {
+            None
+        };
+
         if let Err(e) = orca_proxy::run_proxy(
             proxy_routes,
             proxy_triggers,
             wasm_invoker,
             proxy_port,
             None,
-            None,
+            acme,
         )
         .await
         {
@@ -66,8 +88,8 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
         }
     });
 
-    // Run the API server (blocks until shutdown)
-    let container_runtime_cleanup = container_runtime.clone();
+    // Run API server (blocks until shutdown)
+    let cleanup_runtime = container_runtime.clone();
     orca_control::run_server(
         cluster_config,
         container_runtime,
@@ -77,10 +99,34 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
     )
     .await?;
 
-    // Graceful cleanup
     info!("Shutting down, cleaning up containers...");
-    container_runtime_cleanup.cleanup_all().await;
+    cleanup_runtime.cleanup_all().await;
     info!("Shutdown complete");
-
     Ok(())
+}
+
+/// Install and configure NetBird if configured in cluster.toml.
+async fn setup_netbird(config: &orca_core::config::ClusterConfig) {
+    let Some(net) = &config.network else { return };
+    if net.provider != "netbird" {
+        return;
+    }
+
+    let nb = orca_agent::netbird::NetbirdManager::new(net.management_url.clone());
+
+    if let Err(e) = nb.install() {
+        tracing::warn!("NetBird install failed: {e}");
+        return;
+    }
+
+    if let Some(key) = &net.setup_key
+        && let Err(e) = nb.connect(key)
+    {
+        tracing::warn!("NetBird connect failed: {e}");
+        return;
+    }
+
+    if let Ok(Some(ip)) = nb.get_ip() {
+        info!("NetBird mesh IP: {ip}");
+    }
 }

@@ -82,8 +82,15 @@ pub async fn run_proxy(
     };
     info!("Reverse proxy listening on {addr} ({proto})");
 
-    serve_loop(listener, route_table, wasm_triggers, wasm_invoker, tls_acceptor, acme_manager)
-        .await
+    serve_loop(
+        listener,
+        route_table,
+        wasm_triggers,
+        wasm_invoker,
+        tls_acceptor,
+        acme_manager,
+    )
+    .await
 }
 
 /// Run HTTP on port 80 (for ACME challenges + redirect) and HTTPS on port 443.

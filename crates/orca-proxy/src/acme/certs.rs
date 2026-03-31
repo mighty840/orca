@@ -11,8 +11,7 @@ pub(crate) fn load_pem_certs(
 ) -> anyhow::Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>)> {
     let cert_data = std::fs::read(cert_path)?;
     let key_data = std::fs::read(key_path)?;
-    let certs =
-        rustls_pemfile::certs(&mut cert_data.as_slice()).collect::<Result<Vec<_>, _>>()?;
+    let certs = rustls_pemfile::certs(&mut cert_data.as_slice()).collect::<Result<Vec<_>, _>>()?;
     let key = rustls_pemfile::private_key(&mut key_data.as_slice())?
         .ok_or_else(|| anyhow::anyhow!("no private key in {}", key_path.display()))?;
     Ok((certs, key))

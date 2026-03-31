@@ -74,10 +74,7 @@ impl AcmeProvider {
     }
 
     /// Process all authorizations for an order, handling HTTP-01 challenges.
-    async fn handle_authorizations(
-        &self,
-        order: &mut instant_acme::Order,
-    ) -> anyhow::Result<()> {
+    async fn handle_authorizations(&self, order: &mut instant_acme::Order) -> anyhow::Result<()> {
         let mut authorizations = order.authorizations();
         while let Some(result) = authorizations.next().await {
             let mut authz = result?;
@@ -146,12 +143,7 @@ impl AcmeProvider {
     }
 
     /// Save provisioned cert and key to the cache directory.
-    async fn save_cert(
-        &self,
-        domain: &str,
-        cert_pem: &[u8],
-        key_pem: &[u8],
-    ) -> anyhow::Result<()> {
+    async fn save_cert(&self, domain: &str, cert_pem: &[u8], key_pem: &[u8]) -> anyhow::Result<()> {
         tokio::fs::create_dir_all(&self.cache_dir).await?;
         let cert_path = self.cache_dir.join(format!("{domain}.cert.pem"));
         let key_path = self.cache_dir.join(format!("{domain}.key.pem"));
@@ -169,10 +161,7 @@ impl AcmeProvider {
     /// Ensure a valid cert exists for the domain — load from cache or provision.
     ///
     /// Returns a `TlsAcceptor` ready for use, or an error if provisioning fails.
-    pub async fn ensure_cert(
-        &self,
-        domain: &str,
-    ) -> anyhow::Result<tokio_rustls::TlsAcceptor> {
+    pub async fn ensure_cert(&self, domain: &str) -> anyhow::Result<tokio_rustls::TlsAcceptor> {
         // Check cache first
         let cert_path = self.cache_dir.join(format!("{domain}.cert.pem"));
         let key_path = self.cache_dir.join(format!("{domain}.key.pem"));
@@ -212,8 +201,7 @@ impl AcmeProvider {
         cert_pem: &[u8],
         key_pem: &[u8],
     ) -> anyhow::Result<tokio_rustls::TlsAcceptor> {
-        let certs = rustls_pemfile::certs(&mut &cert_pem[..])
-            .collect::<Result<Vec<_>, _>>()?;
+        let certs = rustls_pemfile::certs(&mut &cert_pem[..]).collect::<Result<Vec<_>, _>>()?;
         let key = rustls_pemfile::private_key(&mut &key_pem[..])?
             .ok_or_else(|| anyhow::anyhow!("no private key in PEM data"))?;
         let config = rustls::ServerConfig::builder()
