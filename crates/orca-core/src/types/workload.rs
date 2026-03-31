@@ -12,14 +12,25 @@ pub struct WorkloadSpec {
     /// Container image (runtime = container) or Wasm module path/OCI ref (runtime = wasm)
     pub image: String,
     pub replicas: Replicas,
+    /// Container port (internal).
     pub port: Option<u16>,
+    /// Host port to bind (specific port on host, e.g. 443).
+    pub host_port: Option<u16>,
     pub domain: Option<String>,
+    /// Path routes under the domain (e.g., ["/api/*"]).
+    pub routes: Vec<String>,
     pub health: Option<String>,
     pub env: std::collections::HashMap<String, String>,
     pub resources: Option<ResourceLimits>,
     pub volume: Option<VolumeSpec>,
     pub deploy: Option<DeployStrategy>,
     pub placement: Option<PlacementConstraint>,
+    /// Docker network name (auto-prefixed with "orca-").
+    pub network: Option<String>,
+    /// Network aliases (resolvable names within the Docker network).
+    pub aliases: Vec<String>,
+    /// Host bind mounts (e.g., ["/host/path:/container/path:ro"]).
+    pub mounts: Vec<String>,
     pub triggers: Vec<Trigger>,
 }
 

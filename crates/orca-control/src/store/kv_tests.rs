@@ -42,6 +42,11 @@ fn set_and_get_service() {
         volume: None,
         deploy: None,
         placement: None,
+        network: None,
+        aliases: vec![],
+        mounts: vec![],
+        routes: vec![],
+        host_port: None,
         triggers: Vec::new(),
         assets: None,
     };
@@ -112,6 +117,11 @@ fn snapshot_captures_all_state() {
             volume: None,
             deploy: None,
             placement: None,
+            network: None,
+            aliases: vec![],
+            mounts: vec![],
+            routes: vec![],
+            host_port: None,
             triggers: Vec::new(),
             assets: None,
         })))

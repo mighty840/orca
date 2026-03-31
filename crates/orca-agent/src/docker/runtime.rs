@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use bollard::Docker;
 use bollard::container::{ListContainersOptions, RemoveContainerOptions, StopContainerOptions};
 use bollard::image::CreateImageOptions;
+use bollard::network::{ConnectNetworkOptions, CreateNetworkOptions};
 use futures_util::StreamExt;
 use tracing::{debug, info, warn};
 
@@ -105,6 +106,56 @@ impl ContainerRuntime {
             .map_err(|e| OrcaError::Runtime(format!("list containers failed: {e}")))?;
 
         Ok(containers.into_iter().filter_map(|c| c.id).collect())
+    }
+
+    /// Ensure a Docker network exists, creating it if needed.
+    pub async fn ensure_network(&self, name: &str) -> Result<()> {
+        if self
+            .docker
+            .inspect_network::<&str>(name, None)
+            .await
+            .is_ok()
+        {
+            return Ok(());
+        }
+        info!("Creating Docker network: {name}");
+        self.docker
+            .create_network(CreateNetworkOptions {
+                name: name.to_string(),
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| OrcaError::Runtime(format!("create network failed: {e}")))?;
+        Ok(())
+    }
+
+    /// Connect a container to a network with optional aliases.
+    pub async fn connect_to_network(
+        &self,
+        container_id: &str,
+        network: &str,
+        aliases: &[String],
+    ) -> Result<()> {
+        let endpoint = bollard::models::EndpointSettings {
+            aliases: if aliases.is_empty() {
+                None
+            } else {
+                Some(aliases.to_vec())
+            },
+            ..Default::default()
+        };
+        self.docker
+            .connect_network(
+                network,
+                ConnectNetworkOptions {
+                    container: container_id.to_string(),
+                    endpoint_config: endpoint,
+                },
+            )
+            .await
+            .map_err(|e| OrcaError::Runtime(format!("connect network failed: {e}")))?;
+        debug!("Connected {container_id} to network {network}");
+        Ok(())
     }
 
     /// Stop and remove all orca-managed containers. Used for graceful shutdown.

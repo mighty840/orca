@@ -4,10 +4,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use bollard::container::{
     CreateContainerOptions, InspectContainerOptions, LogsOptions, RemoveContainerOptions,
-    StartContainerOptions, StatsOptions, StopContainerOptions,
+    StartContainerOptions, StopContainerOptions,
 };
 use bollard::exec::{CreateExecOptions, StartExecResults};
-use chrono::Utc;
 use futures_util::StreamExt;
 use tokio::io::AsyncRead;
 use tokio_util::io::StreamReader;
@@ -18,8 +17,6 @@ use orca_core::runtime::{ExecResult, LogOpts, LogStream, Runtime, WorkloadHandle
 use orca_core::types::{ResourceStats, WorkloadSpec, WorkloadStatus};
 
 use super::ContainerRuntime;
-
-use super::stats::{calculate_cpu_percent, extract_network_stats};
 
 #[async_trait]
 impl Runtime for ContainerRuntime {
@@ -32,13 +29,16 @@ impl Runtime for ContainerRuntime {
 
         let container_name = format!("orca-{}", spec.name);
         let config = super::config_builder::build_container_config(spec);
+        let network = super::config_builder::network_name(spec);
+
+        // Ensure the service network exists
+        let _ = self.ensure_network(&network).await;
 
         let opts = CreateContainerOptions {
             name: &container_name,
             platform: None,
         };
 
-        // Remove existing container with same name if it exists
         let _ = self
             .docker
             .remove_container(
@@ -56,8 +56,15 @@ impl Runtime for ContainerRuntime {
             .await
             .map_err(|e| OrcaError::Runtime(format!("create container failed: {e}")))?;
 
+        // Connect to service network with aliases
+        let mut aliases = spec.aliases.clone();
+        aliases.push(container_name.clone());
+        let _ = self
+            .connect_to_network(&response.id, &network, &aliases)
+            .await;
+
         info!(
-            "Created container {} ({})",
+            "Created container {} ({}) on {network}",
             container_name,
             &response.id[..12]
         );
@@ -215,29 +222,7 @@ impl Runtime for ContainerRuntime {
     }
 
     async fn stats(&self, handle: &WorkloadHandle) -> Result<ResourceStats> {
-        let opts = StatsOptions {
-            stream: false,
-            one_shot: true,
-        };
-
-        let mut stream = self.docker.stats(&handle.runtime_id, Some(opts));
-
-        if let Some(Ok(stats)) = stream.next().await {
-            let cpu_percent = calculate_cpu_percent(&stats);
-            let memory_bytes = stats.memory_stats.usage.unwrap_or(0);
-            let (rx, tx) = extract_network_stats(&stats);
-
-            Ok(ResourceStats {
-                cpu_percent,
-                memory_bytes,
-                network_rx_bytes: rx,
-                network_tx_bytes: tx,
-                gpu_stats: Vec::new(),
-                timestamp: Utc::now(),
-            })
-        } else {
-            Err(OrcaError::Runtime("no stats available".to_string()))
-        }
+        super::stats::collect_stats(&self.docker, &handle.runtime_id).await
     }
 
     async fn resolve_host_port(

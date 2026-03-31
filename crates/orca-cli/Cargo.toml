@@ -29,3 +29,4 @@ reqwest = { workspace = true }
 hostname = "0.4"
 bollard = { workspace = true }
 dirs-next = "2"
+libc = "0.2"

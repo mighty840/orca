@@ -51,7 +51,16 @@ async fn main() -> anyhow::Result<()> {
     };
 
     match cli.command {
-        Command::Server { config, proxy_port } => {
+        Command::Server {
+            config,
+            proxy_port,
+            daemon,
+        } => {
+            if daemon {
+                let args: Vec<String> = std::env::args().skip(1).collect();
+                handlers::daemon::daemonize(&args)?;
+                return Ok(());
+            }
             handlers::server::handle_server(&config, proxy_port).await?;
         }
         Command::Deploy { file } => {
@@ -85,12 +94,20 @@ async fn main() -> anyhow::Result<()> {
         Command::Rollback { service } => {
             handlers::ops::handle_rollback(service, cli.api).await?;
         }
-        Command::Join { address } => {
+        Command::Join { address, daemon } => {
+            if daemon {
+                let args: Vec<String> = std::env::args().skip(1).collect();
+                handlers::daemon::daemonize(&args)?;
+                return Ok(());
+            }
             handlers::join::handle_join(&address, None, std::collections::HashMap::new()).await?;
         }
         Command::Backup { action } => handlers::backup::handle_backup(action),
         Command::Cleanup => {
             handlers::cleanup::handle_cleanup().await?;
+        }
+        Command::Shutdown => {
+            handlers::daemon::handle_shutdown()?;
         }
         Command::Db { action } => {
             handlers::db::handle_db(action, cli.api).await?;

@@ -1,6 +1,12 @@
 //! Helper functions for extracting resource statistics from Docker stats.
 
-use bollard::container::Stats;
+use bollard::Docker;
+use bollard::container::{Stats, StatsOptions};
+use chrono::Utc;
+use futures_util::StreamExt;
+
+use orca_core::error::{OrcaError, Result};
+use orca_core::types::ResourceStats;
 
 /// Calculate CPU usage percentage from Docker stats.
 pub(crate) fn calculate_cpu_percent(stats: &Stats) -> f64 {
@@ -28,4 +34,27 @@ pub(crate) fn extract_network_stats(stats: &Stats) -> (u64, u64) {
             })
         })
         .unwrap_or((0, 0))
+}
+
+/// Collect resource stats for a running container.
+pub(crate) async fn collect_stats(docker: &Docker, container_id: &str) -> Result<ResourceStats> {
+    let opts = StatsOptions {
+        stream: false,
+        one_shot: true,
+    };
+    let mut stream = docker.stats(container_id, Some(opts));
+    let stats = stream
+        .next()
+        .await
+        .and_then(|r| r.ok())
+        .ok_or_else(|| OrcaError::Runtime("no stats available".into()))?;
+    let (rx, tx) = extract_network_stats(&stats);
+    Ok(ResourceStats {
+        cpu_percent: calculate_cpu_percent(&stats),
+        memory_bytes: stats.memory_stats.usage.unwrap_or(0),
+        network_rx_bytes: rx,
+        network_tx_bytes: tx,
+        gpu_stats: Vec::new(),
+        timestamp: Utc::now(),
+    })
 }

@@ -31,6 +31,10 @@ pub struct RouteTarget {
     pub address: String,
     /// Owning service name.
     pub service_name: String,
+    /// Optional path pattern (e.g., `"/api/*"`). When `None`, this target is a
+    /// catch-all for the domain. When `Some`, only requests whose path matches
+    /// the pattern are routed here. Longest-prefix match wins.
+    pub path_pattern: Option<String>,
 }
 
 /// A Wasm HTTP trigger: maps a path pattern to a Wasm runtime instance.

@@ -149,6 +149,11 @@ mod tests {
             volume: None,
             deploy: None,
             placement: None,
+            network: None,
+            aliases: vec![],
+            mounts: vec![],
+            routes: vec![],
+            host_port: None,
             triggers: Vec::new(),
             assets: None,
         }

@@ -12,8 +12,8 @@ use orca_core::types::WorkloadSpec;
 pub(crate) fn build_container_config(spec: &WorkloadSpec) -> Config<String> {
     let env: Vec<String> = spec.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
 
-    let (port_bindings, exposed_ports) = build_port_config(spec.port);
-    let binds = build_volume_binds(spec);
+    let (port_bindings, exposed_ports) = build_port_config(spec.port, spec.host_port);
+    let binds = build_all_binds(spec);
     let device_requests = build_gpu_requests(spec);
     let labels = build_labels(spec);
 
@@ -42,31 +42,50 @@ pub(crate) fn build_container_config(spec: &WorkloadSpec) -> Config<String> {
     }
 }
 
+/// Derive the Docker network name for a service.
+pub(crate) fn network_name(spec: &WorkloadSpec) -> String {
+    if let Some(net) = &spec.network {
+        format!("orca-{net}")
+    } else {
+        // Derive from service name prefix (e.g., "kitchenasty-db" → "orca-kitchenasty")
+        let prefix = spec.name.split('-').next().unwrap_or(&spec.name);
+        format!("orca-{prefix}")
+    }
+}
+
 type PortBindings = HashMap<String, Option<Vec<PortBinding>>>;
 type ExposedPorts = HashMap<String, HashMap<(), ()>>;
 
-fn build_port_config(port: Option<u16>) -> (PortBindings, ExposedPorts) {
+fn build_port_config(port: Option<u16>, host_port: Option<u16>) -> (PortBindings, ExposedPorts) {
     let mut port_bindings = HashMap::new();
     let mut exposed_ports = HashMap::new();
     if let Some(port) = port {
         let key = format!("{port}/tcp");
         exposed_ports.insert(key.clone(), HashMap::new());
+        let hp = host_port
+            .map(|p| p.to_string())
+            .unwrap_or_else(|| "0".to_string());
         port_bindings.insert(
             key,
             Some(vec![PortBinding {
                 host_ip: Some("0.0.0.0".to_string()),
-                host_port: Some("0".to_string()),
+                host_port: Some(hp),
             }]),
         );
     }
     (port_bindings, exposed_ports)
 }
 
-fn build_volume_binds(spec: &WorkloadSpec) -> Vec<String> {
+fn build_all_binds(spec: &WorkloadSpec) -> Vec<String> {
     let mut binds = Vec::new();
+    // Named volume
     if let Some(vol) = &spec.volume {
         let vol_name = format!("orca-{}-data", spec.name);
         binds.push(format!("{vol_name}:{}", vol.path));
+    }
+    // Host bind mounts
+    for mount in &spec.mounts {
+        binds.push(mount.clone());
     }
     binds
 }
@@ -90,5 +109,8 @@ fn build_labels(spec: &WorkloadSpec) -> HashMap<String, String> {
     let mut labels = HashMap::new();
     labels.insert(ORCA_LABEL.to_string(), "true".to_string());
     labels.insert("orca.service".to_string(), spec.name.clone());
+    if let Some(net) = &spec.network {
+        labels.insert("orca.network".to_string(), net.clone());
+    }
     labels
 }

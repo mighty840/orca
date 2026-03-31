@@ -10,6 +10,9 @@ pub enum Command {
         /// Proxy port for HTTP traffic
         #[arg(long, default_value = "80")]
         proxy_port: u16,
+        /// Run in the background as a daemon
+        #[arg(short, long)]
+        daemon: bool,
     },
 
     /// Deploy services from config
@@ -107,6 +110,9 @@ pub enum Command {
     Join {
         /// Address of an existing cluster node
         address: String,
+        /// Run in the background as a daemon
+        #[arg(short, long)]
+        daemon: bool,
     },
 
     /// Launch the TUI dashboard
@@ -127,6 +133,9 @@ pub enum Command {
 
     /// Clean up unused Docker resources
     Cleanup,
+
+    /// Stop the orca daemon
+    Shutdown,
 
     /// Create a database service
     Db {

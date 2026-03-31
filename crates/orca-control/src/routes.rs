@@ -27,6 +27,7 @@ pub(crate) async fn update_container_routes(state: &AppState, config: &ServiceCo
             i.host_port.map(|port| RouteTarget {
                 address: format!("127.0.0.1:{port}"),
                 service_name: config.name.clone(),
+                path_pattern: None,
             })
         })
         .collect();
@@ -92,13 +93,18 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
         image,
         replicas: config.replicas.clone(),
         port: config.port,
+        host_port: config.host_port,
         domain: config.domain.clone(),
+        routes: config.routes.clone(),
         health: config.health.clone(),
         env: config.env.clone(),
         resources: config.resources.clone(),
         volume: config.volume.clone(),
         deploy: config.deploy.clone(),
         placement: config.placement.clone(),
+        network: config.network.clone(),
+        aliases: config.aliases.clone(),
+        mounts: config.mounts.clone(),
         triggers: config
             .triggers
             .iter()
@@ -130,6 +136,11 @@ mod tests {
             volume: None,
             deploy: None,
             placement: None,
+            network: None,
+            aliases: vec![],
+            mounts: vec![],
+            routes: vec![],
+            host_port: None,
             triggers: Vec::new(),
             assets: None,
         }

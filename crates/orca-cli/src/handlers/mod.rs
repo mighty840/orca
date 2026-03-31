@@ -1,5 +1,6 @@
 pub mod backup;
 pub mod cleanup;
+pub mod daemon;
 pub mod db;
 pub mod deploy;
 pub mod join;

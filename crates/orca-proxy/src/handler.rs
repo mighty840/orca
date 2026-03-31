@@ -11,7 +11,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, error};
 
 use crate::acme::AcmeManager;
-use crate::routing::find_matching_trigger;
+use crate::routing::{find_matching_trigger, select_path_targets};
 use crate::{RouteTarget, SharedWasmTriggers, WasmInvoker};
 
 /// ACME challenge path prefix.
@@ -139,9 +139,16 @@ pub(crate) async fn handle_request(
         ));
     }
 
-    // Round-robin selection
-    let idx = counter.fetch_add(1, Ordering::Relaxed) % targets.len();
-    let target = targets[idx].clone();
+    // Filter by path pattern (longest prefix wins), then round-robin
+    let matched = select_path_targets(targets, &path);
+    if matched.is_empty() {
+        return Ok(error_response(
+            StatusCode::NOT_FOUND,
+            &format!("no backend for path: {path} on host: {host}"),
+        ));
+    }
+    let idx = counter.fetch_add(1, Ordering::Relaxed) % matched.len();
+    let target = matched[idx].clone();
     drop(routes);
 
     // Forward the request
