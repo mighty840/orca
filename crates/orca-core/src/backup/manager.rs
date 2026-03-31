@@ -2,9 +2,10 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use tracing::{info, warn};
+use tracing::info;
 
 use super::config::{BackupConfig, BackupTarget};
+use super::s3 as s3_backend;
 
 /// Result of a single backup operation.
 #[derive(Debug, Clone)]
@@ -25,8 +26,7 @@ impl BackupManager {
         Self { config }
     }
 
-    /// Backup a service volume directory. Runs an optional pre-hook command first,
-    /// then creates a tar.gz archive and stores it to each configured target.
+    /// Backup a service volume directory.
     pub fn backup_volume(
         &self,
         service_name: &str,
@@ -35,7 +35,6 @@ impl BackupManager {
     ) -> Result<BackupResult> {
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
 
-        // Run pre-hook if configured (e.g. pg_dump).
         if let Some(hook) = pre_hook {
             info!(service = service_name, hook, "Running pre-backup hook");
             let status = std::process::Command::new("sh")
@@ -44,62 +43,39 @@ impl BackupManager {
                 .status()
                 .context("Failed to execute pre-backup hook")?;
             if !status.success() {
-                anyhow::bail!("Pre-backup hook failed with exit code: {:?}", status.code());
+                anyhow::bail!("Pre-backup hook failed: {:?}", status.code());
             }
         }
 
-        // Create tar.gz archive in a temp location.
         let archive_name = format!("{service_name}_{timestamp}.tar.gz");
-        let tmp_dir = std::env::temp_dir();
-        let archive_path = tmp_dir.join(&archive_name);
+        let archive_path = std::env::temp_dir().join(&archive_name);
 
         info!(
             service = service_name,
             src = volume_path,
-            archive = %archive_path.display(),
-            "Creating volume archive"
+            "Creating archive"
         );
-
         let status = std::process::Command::new("tar")
             .args([
                 "-czf",
-                archive_path.to_str().unwrap_or_default(),
+                archive_path.to_str().unwrap_or(""),
                 "-C",
                 volume_path,
                 ".",
             ])
             .status()
             .context("Failed to create tar archive")?;
-
         if !status.success() {
-            anyhow::bail!("tar failed with exit code: {:?}", status.code());
+            anyhow::bail!("tar failed: {:?}", status.code());
         }
 
         let size_bytes = std::fs::metadata(&archive_path)
             .map(|m| m.len())
             .unwrap_or(0);
-
-        // Store to each configured target.
         let mut target_desc = String::new();
-        for target in &self.config.targets {
-            match target {
-                BackupTarget::Local { path } => {
-                    self.store_local(&archive_path, path, &archive_name)?;
-                    target_desc = format!("local:{path}");
-                }
-                BackupTarget::S3 {
-                    bucket,
-                    region,
-                    prefix,
-                } => {
-                    let pfx = prefix.as_deref().unwrap_or("");
-                    self.store_s3(&archive_path, bucket, region, pfx, &archive_name)?;
-                    target_desc = format!("s3://{bucket}");
-                }
-            }
+        for t in &self.config.targets {
+            target_desc = self.store(&archive_path, t, &archive_name)?;
         }
-
-        // Clean up temp archive.
         let _ = std::fs::remove_file(&archive_path);
 
         Ok(BackupResult {
@@ -110,66 +86,37 @@ impl BackupManager {
         })
     }
 
-    /// Backup a single file (config, secrets.json, redb) to all targets.
+    /// Backup a single file to all targets.
     pub fn backup_file(&self, name: &str, path: &Path) -> Result<()> {
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("bak");
         let backup_name = format!("{name}_{timestamp}.{ext}");
-
-        for target in &self.config.targets {
-            match target {
-                BackupTarget::Local { path: dest } => {
-                    self.store_local(path, dest, &backup_name)?;
-                }
-                BackupTarget::S3 {
-                    bucket,
-                    region,
-                    prefix,
-                } => {
-                    let pfx = prefix.as_deref().unwrap_or("");
-                    self.store_s3(path, bucket, region, pfx, &backup_name)?;
-                }
-            }
+        for t in &self.config.targets {
+            self.store(path, t, &backup_name)?;
         }
         Ok(())
     }
 
-    /// Copy a file to a local backup directory with a timestamped name.
-    fn store_local(&self, data_path: &Path, target_path: &str, backup_name: &str) -> Result<()> {
-        let dest_dir = Path::new(target_path);
-        std::fs::create_dir_all(dest_dir)
-            .with_context(|| format!("Failed to create backup dir: {target_path}"))?;
-
-        let dest = dest_dir.join(backup_name);
-        std::fs::copy(data_path, &dest)
-            .with_context(|| format!("Failed to copy to {}", dest.display()))?;
-
-        info!(dest = %dest.display(), "Stored backup locally");
-        Ok(())
+    fn store(&self, data_path: &Path, target: &BackupTarget, name: &str) -> Result<String> {
+        match target {
+            BackupTarget::Local { path } => {
+                let dest_dir = Path::new(path);
+                std::fs::create_dir_all(dest_dir)
+                    .with_context(|| format!("create backup dir: {path}"))?;
+                let dest = dest_dir.join(name);
+                std::fs::copy(data_path, &dest)
+                    .with_context(|| format!("copy to {}", dest.display()))?;
+                info!(dest = %dest.display(), "Stored backup locally");
+                Ok(format!("local:{path}"))
+            }
+            t @ BackupTarget::S3 { bucket, .. } => {
+                s3_backend::upload(data_path, t, name)?;
+                Ok(format!("s3://{bucket}"))
+            }
+        }
     }
 
-    /// Placeholder for S3 upload — logs intent, actual SDK integration deferred to M5.
-    fn store_s3(
-        &self,
-        _data_path: &Path,
-        bucket: &str,
-        region: &str,
-        prefix: &str,
-        name: &str,
-    ) -> Result<()> {
-        let key = if prefix.is_empty() {
-            name.to_string()
-        } else {
-            format!("{prefix}{name}")
-        };
-        warn!(
-            bucket,
-            region, key, "S3 upload not yet implemented — would upload here (M5)"
-        );
-        Ok(())
-    }
-
-    /// List backup files in a local target directory.
+    /// List backups in a target.
     pub fn list_backups(&self, target: &BackupTarget) -> Result<Vec<String>> {
         match target {
             BackupTarget::Local { path } => {
@@ -178,21 +125,15 @@ impl BackupManager {
                     return Ok(vec![]);
                 }
                 let mut entries = Vec::new();
-                for entry in std::fs::read_dir(dir)
-                    .with_context(|| format!("Failed to read backup dir: {path}"))?
-                {
-                    let entry = entry?;
-                    if let Some(name) = entry.file_name().to_str() {
+                for entry in std::fs::read_dir(dir)? {
+                    if let Some(name) = entry?.file_name().to_str() {
                         entries.push(name.to_string());
                     }
                 }
                 entries.sort();
                 Ok(entries)
             }
-            BackupTarget::S3 { bucket, .. } => {
-                warn!(bucket, "S3 listing not yet implemented (M5)");
-                Ok(vec![])
-            }
+            t @ BackupTarget::S3 { .. } => s3_backend::list_objects(t),
         }
     }
 }
@@ -200,13 +141,11 @@ impl BackupManager {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backup::config::BackupConfig;
 
     #[test]
     fn backup_file_to_local() {
         let tmp = tempfile::tempdir().unwrap();
         let target_dir = tmp.path().join("backups");
-
         let config = BackupConfig {
             schedule: None,
             retention_days: 7,
@@ -214,15 +153,10 @@ mod tests {
                 path: target_dir.to_str().unwrap().to_string(),
             }],
         };
-
         let mgr = BackupManager::new(config);
-
-        // Create a test file to back up.
         let src = tmp.path().join("test.json");
         std::fs::write(&src, r#"{"key":"value"}"#).unwrap();
-
         mgr.backup_file("secrets", &src).unwrap();
-
         let backups = std::fs::read_dir(&target_dir).unwrap().count();
         assert_eq!(backups, 1);
     }

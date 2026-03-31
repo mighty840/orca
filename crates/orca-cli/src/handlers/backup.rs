@@ -2,13 +2,12 @@ use crate::commands::BackupAction;
 use orca_core::backup::{BackupConfig, BackupManager, BackupTarget};
 
 pub fn handle_backup(action: BackupAction) {
-    // Load backup config from cluster.toml if available, else use defaults.
     let config = std::path::Path::new("cluster.toml");
     let backup_cfg = if config.exists() {
         match orca_core::config::ClusterConfig::load(config) {
             Ok(cc) => cc.backup.unwrap_or_else(default_backup_config),
             Err(e) => {
-                tracing::warn!("Failed to load cluster.toml: {e}, using default backup config");
+                tracing::warn!("Failed to load cluster.toml: {e}");
                 default_backup_config()
             }
         }
@@ -20,7 +19,6 @@ pub fn handle_backup(action: BackupAction) {
 
     match action {
         BackupAction::Create => {
-            // Backup well-known files: secrets.json, cluster.toml, services.toml
             let files = ["secrets.json", "cluster.toml", "services.toml"];
             let mut count = 0u32;
             for file in &files {
@@ -59,7 +57,7 @@ pub fn handle_backup(action: BackupAction) {
             }
         }
         BackupAction::Restore { id } => {
-            println!("Restore from backup '{id}' not yet implemented (M5).");
+            println!("Restore from backup '{id}' not yet implemented.");
         }
     }
 }

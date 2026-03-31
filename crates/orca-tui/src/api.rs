@@ -80,4 +80,27 @@ impl ApiClient {
             .error_for_status()?;
         Ok(resp.text().await?)
     }
+
+    /// Trigger a redeploy for a service.
+    pub async fn deploy(&self, service: &str) -> anyhow::Result<()> {
+        self.client
+            .post(format!(
+                "{}/api/v1/services/{service}/deploy",
+                self.base_url
+            ))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
+    /// Stop a service (scale to 0).
+    pub async fn stop(&self, service: &str) -> anyhow::Result<()> {
+        self.client
+            .post(format!("{}/api/v1/services/{service}/stop", self.base_url))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
 }

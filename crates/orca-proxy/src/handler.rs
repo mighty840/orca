@@ -10,8 +10,53 @@ use hyper::{Request, Response, StatusCode};
 use tokio::sync::RwLock;
 use tracing::{debug, error};
 
+use crate::acme::AcmeManager;
 use crate::routing::find_matching_trigger;
 use crate::{RouteTarget, SharedWasmTriggers, WasmInvoker};
+
+/// ACME challenge path prefix.
+const ACME_CHALLENGE_PREFIX: &str = "/.well-known/acme-challenge/";
+
+/// Handle ACME HTTP-01 challenge requests.
+///
+/// Returns `Some(response)` if the request is an ACME challenge, `None` otherwise.
+pub(crate) async fn handle_acme_challenge(
+    req: &Request<Incoming>,
+    acme: Option<&AcmeManager>,
+) -> Option<Response<http_body_util::Full<hyper::body::Bytes>>> {
+    let path = req.uri().path();
+    if !path.starts_with(ACME_CHALLENGE_PREFIX) {
+        return None;
+    }
+
+    let token = &path[ACME_CHALLENGE_PREFIX.len()..];
+    debug!("ACME challenge request for token: {token}");
+
+    let Some(manager) = acme else {
+        return Some(error_response(StatusCode::NOT_FOUND, "ACME not configured"));
+    };
+
+    match manager.get_challenge_response(token).await {
+        Some(authorization) => {
+            let body = http_body_util::Full::new(hyper::body::Bytes::from(authorization));
+            Some(Response::new(body))
+        }
+        None => {
+            // Also check the webroot directory for certbot-placed challenge files
+            let webroot_path = format!("/tmp/orca-acme/.well-known/acme-challenge/{token}");
+            match tokio::fs::read_to_string(&webroot_path).await {
+                Ok(content) => {
+                    let body = http_body_util::Full::new(hyper::body::Bytes::from(content));
+                    Some(Response::new(body))
+                }
+                Err(_) => Some(error_response(
+                    StatusCode::NOT_FOUND,
+                    "ACME challenge token not found",
+                )),
+            }
+        }
+    }
+}
 
 /// Handle a single proxied request.
 pub(crate) async fn handle_request(

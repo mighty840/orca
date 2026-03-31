@@ -1,13 +1,16 @@
 //! TLS configuration for the reverse proxy.
 //!
 //! Supports: self-signed certs (auto-generated), user-provided certs,
-//! and ACME/Let's Encrypt (future).
+//! and ACME/Let's Encrypt via certbot.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use rustls::ServerConfig;
 use tokio_rustls::TlsAcceptor;
-use tracing::info;
+use tracing::{info, warn};
+
+use crate::acme::AcmeManager;
 
 /// TLS mode for the proxy.
 #[derive(Debug, Clone)]
@@ -18,10 +21,34 @@ pub enum TlsMode {
     SelfSigned,
     /// User-provided certificate and key files.
     Custom { cert_path: String, key_path: String },
+    /// ACME/Let's Encrypt via certbot.
+    ///
+    /// The proxy serves HTTP-01 challenges on port 80. Certificates are
+    /// provisioned via `orca certs provision <domain>` (which calls certbot)
+    /// and cached in `cache_dir`.
+    Acme {
+        /// Email for the Let's Encrypt account registration.
+        email: String,
+        /// Directory to cache provisioned certificates.
+        /// Defaults to `~/.orca/certs/` if not specified.
+        cache_dir: Option<PathBuf>,
+    },
 }
 
 /// Create a TLS acceptor based on the configured mode.
+///
+/// For `TlsMode::Acme`, pass the primary `domain` to load certs for.
+/// Returns `None` if no certs are cached yet (proxy will serve HTTP only
+/// until `orca certs provision` is run).
 pub fn create_tls_acceptor(mode: &TlsMode) -> anyhow::Result<Option<TlsAcceptor>> {
+    create_tls_acceptor_for_domain(mode, None)
+}
+
+/// Create a TLS acceptor, optionally for a specific ACME domain.
+pub fn create_tls_acceptor_for_domain(
+    mode: &TlsMode,
+    domain: Option<&str>,
+) -> anyhow::Result<Option<TlsAcceptor>> {
     match mode {
         TlsMode::None => Ok(None),
         TlsMode::SelfSigned => {
@@ -57,6 +84,35 @@ pub fn create_tls_acceptor(mode: &TlsMode) -> anyhow::Result<Option<TlsAcceptor>
                 .with_single_cert(certs, key)?;
 
             Ok(Some(TlsAcceptor::from(Arc::new(config))))
+        }
+        TlsMode::Acme { email, cache_dir } => {
+            let cache = cache_dir.clone().unwrap_or_else(|| {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(".orca/certs")
+            });
+            let manager = AcmeManager::new(email.clone(), cache);
+
+            let Some(domain) = domain else {
+                warn!(
+                    "ACME mode requires a domain — serving HTTP only until certs are provisioned"
+                );
+                return Ok(None);
+            };
+
+            match manager.tls_acceptor_for(domain)? {
+                Some(acceptor) => {
+                    info!(domain, "Loaded ACME certificate");
+                    Ok(Some(acceptor))
+                }
+                None => {
+                    warn!(
+                        domain,
+                        "No ACME certs found — run `orca certs provision {domain}`"
+                    );
+                    Ok(None)
+                }
+            }
         }
     }
 }

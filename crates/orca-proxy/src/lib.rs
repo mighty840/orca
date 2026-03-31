@@ -3,6 +3,7 @@
 //! Routes HTTP traffic by `Host` header to container backends (round-robin),
 //! and by path pattern to Wasm component invocations via a callback.
 
+pub mod acme;
 mod handler;
 mod routing;
 pub mod tls;
@@ -20,7 +21,8 @@ use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use handler::handle_request;
+use acme::AcmeManager;
+use handler::{handle_acme_challenge, handle_request};
 
 /// A backend target for container routing.
 #[derive(Debug, Clone)]
@@ -67,6 +69,7 @@ pub async fn run_proxy(
     wasm_invoker: Option<WasmInvoker>,
     port: u16,
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+    acme_manager: Option<AcmeManager>,
 ) -> anyhow::Result<()> {
     let addr = format!("0.0.0.0:{port}");
     let listener = TcpListener::bind(&addr).await?;
@@ -79,6 +82,7 @@ pub async fn run_proxy(
 
     let counter = Arc::new(AtomicUsize::new(0));
     let client = Arc::new(reqwest::Client::new());
+    let acme = acme_manager.map(Arc::new);
 
     loop {
         let (stream, peer) = match listener.accept().await {
@@ -94,6 +98,7 @@ pub async fn run_proxy(
         let invoker = wasm_invoker.clone();
         let counter = counter.clone();
         let client = client.clone();
+        let acme = acme.clone();
 
         let tls = tls_acceptor.clone();
         tokio::spawn(async move {
@@ -103,7 +108,12 @@ pub async fn run_proxy(
                 let invoker = invoker.clone();
                 let counter = counter.clone();
                 let client = client.clone();
+                let acme = acme.clone();
                 async move {
+                    // Intercept ACME challenge requests before normal routing
+                    if let Some(resp) = handle_acme_challenge(&req, acme.as_deref()).await {
+                        return Ok(resp);
+                    }
                     handle_request(req, &routes, &triggers, invoker.as_ref(), &counter, &client)
                         .await
                 }

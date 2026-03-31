@@ -26,6 +26,8 @@ fn test_cluster_config() -> ClusterConfig {
         node: Vec::new(),
         observability: None,
         ai: None,
+        api_tokens: Vec::new(),
+        backup: None,
     }
 }
 

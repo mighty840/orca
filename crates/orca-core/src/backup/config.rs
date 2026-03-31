@@ -32,6 +32,15 @@ pub enum BackupTarget {
         region: String,
         #[serde(default)]
         prefix: Option<String>,
+        /// Optional S3-compatible endpoint (for Minio, R2, B2, etc.).
+        #[serde(default)]
+        endpoint: Option<String>,
+        /// AWS access key. Falls back to `AWS_ACCESS_KEY_ID` env var.
+        #[serde(default)]
+        access_key: Option<String>,
+        /// AWS secret key. Falls back to `AWS_SECRET_ACCESS_KEY` env var.
+        #[serde(default)]
+        secret_key: Option<String>,
     },
 }
 
