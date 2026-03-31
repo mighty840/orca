@@ -17,17 +17,11 @@ fn test_cluster_config() -> ClusterConfig {
     ClusterConfig {
         cluster: ClusterMeta {
             name: "test-cluster".to_string(),
-            domain: None,
-            acme_email: None,
-            log_level: "info".to_string(),
             api_port: 0,
             grpc_port: 0,
+            ..Default::default()
         },
-        node: Vec::new(),
-        observability: None,
-        ai: None,
-        api_tokens: Vec::new(),
-        backup: None,
+        ..Default::default()
     }
 }
 
