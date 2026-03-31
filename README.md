@@ -1,16 +1,39 @@
-# Orca
+<p align="center">
+  <img src="assets/logo.svg" alt="Orca" width="180" height="180">
+</p>
 
-**Container + Wasm orchestrator with AI ops — fills the gap between Coolify and Kubernetes.**
+<h1 align="center">Orca</h1>
 
-[![CI](https://github.com/mighty840/orca/actions/workflows/ci.yml/badge.svg)](https://github.com/mighty840/orca/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/mallorca.svg)](https://crates.io/crates/mallorca)
-[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+<p align="center">
+  <strong>Container + Wasm orchestrator with AI ops</strong><br>
+  <em>Fills the gap between Coolify and Kubernetes.</em>
+</p>
 
-Orca is a single-binary orchestrator for teams that have outgrown one server but don't need Kubernetes. It runs **containers and WebAssembly modules** as first-class workloads, with built-in reverse proxy, secrets management, health checks, and an AI operations assistant.
+<p align="center">
+  <a href="https://github.com/mighty840/orca/actions/workflows/ci.yml"><img src="https://github.com/mighty840/orca/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://crates.io/crates/mallorca"><img src="https://img.shields.io/crates/v/mallorca.svg" alt="crates.io"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License"></a>
+  <img src="https://img.shields.io/badge/rust-2024_edition-orange.svg" alt="Rust">
+  <img src="https://img.shields.io/badge/tests-63_passing-brightgreen.svg" alt="Tests">
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> &bull;
+  <a href="#quick-start">Quick Start</a> &bull;
+  <a href="#features">Features</a> &bull;
+  <a href="#cli-reference">CLI</a> &bull;
+  <a href="#configuration">Config</a> &bull;
+  <a href="#architecture">Architecture</a> &bull;
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+---
+
+Orca is a **single-binary orchestrator** for teams that have outgrown one server but don't need Kubernetes. It runs containers and WebAssembly modules as first-class workloads, with built-in reverse proxy, auto-TLS, secrets management, health checks, and an AI operations assistant.
 
 ```
-Docker Compose --> Coolify --> Orca --> Kubernetes
-  (1 node)       (1 node)   (2-20)    (20-10k)
+Docker Compose ──> Coolify ──> Orca ──> Kubernetes
+   (1 node)        (1 node)   (2-20)     (20-10k)
 ```
 
 ## Install
@@ -19,19 +42,25 @@ Docker Compose --> Coolify --> Orca --> Kubernetes
 cargo install mallorca
 ```
 
-This installs the `orca` binary.
+This installs the `orca` binary. Requires `protoc` (for gRPC codegen):
+```bash
+# Ubuntu/Debian
+sudo apt install protobuf-compiler build-essential pkg-config libssl-dev
+
+# Fedora
+sudo dnf install protobuf-compiler gcc pkg-config openssl-devel
+```
 
 ## Quick Start
 
 ```bash
-# Create a cluster config
+# 1. Create configs
 cat > cluster.toml << 'EOF'
 [cluster]
 name = "my-cluster"
 domain = "example.com"
 EOF
 
-# Create a service config
 cat > services.toml << 'EOF'
 [[service]]
 name = "web"
@@ -42,80 +71,108 @@ domain = "example.com"
 health = "/"
 EOF
 
-# Start the server
+# 2. Start the server
 orca server --proxy-port 8080 &
 
-# Deploy
+# 3. Deploy and manage
 orca deploy
 orca status
 orca logs web
-orca tui
+orca tui            # terminal dashboard
+```
+
+### One-Click Database
+
+```bash
+orca db create postgres mydb
+# --> Deploys postgres:16 with auto-generated password, volume, health check
+# --> Stores password as secret, prints connection string
 ```
 
 ## Features
 
 ### Dual Runtime
-- **Containers** via Docker with GPU passthrough support
-- **WebAssembly** via wasmtime with WASI Preview 2 (sub-5ms cold start)
+| | Containers | WebAssembly |
+|---|---|---|
+| **Backend** | Docker (bollard) | wasmtime (WASI P2) |
+| **Cold start** | ~3s | ~5ms |
+| **Memory** | 30MB+ | 1-5MB |
+| **GPU** | nvidia passthrough | N/A |
+| **Use case** | Existing images, databases | Edge functions, API handlers |
 
 ### Multi-Node Clustering
-- Raft consensus for HA (no etcd dependency)
-- Bin-packing scheduler with GPU awareness and Wasm preference
-- Node join/leave with heartbeat protocol
+- **Raft consensus** for HA control plane (no etcd dependency)
+- **Bin-packing scheduler** with GPU awareness and Wasm preference
+- **Node join/leave** with heartbeat protocol
+- **Cross-provider networking** via NetBird WireGuard mesh
 
-### Operations
-- **Health checks** with automatic restart after 3 failures
-- **Secrets management** with encrypted storage and `${secrets.KEY}` resolution
-- **Webhook deploy** from GitHub/Gitea with HMAC-SHA256 validation
-- **Backups** with pre-hooks (pg_dump), local disk and S3 targets
-- **Rollback** to any previous deploy
-- **TUI dashboard** for terminal-based cluster management
+### Production Operations
+- **Health checks** — HTTP probing, auto-restart after 3 failures
+- **Auto-TLS** — ACME/Let's Encrypt via certbot, self-signed, or custom certs
+- **Secrets** — encrypted storage, `${secrets.KEY}` resolution, `.env` import
+- **Webhooks** — GitHub/Gitea push triggers auto-redeploy with HMAC-SHA256
+- **Backups** — volume tar.gz with pre-hooks, local disk + S3 targets
+- **Rollback** — deploy history, one-command rollback to previous config
+- **API auth** — bearer token middleware on all endpoints
+- **Docker cleanup** — prune unused images, containers, volumes
 
 ### AI Ops
-- `orca ask "why is the API slow?"` — AI diagnoses issues using cluster context
-- Conversational alerts that investigate, suggest fixes, and track resolution
-- GPU thermal and VRAM monitoring
+- `orca ask "why is the API slow?"` — diagnoses issues using cluster context
+- **Conversational alerts** — AI investigates, suggests fixes, tracks resolution
+- **GPU monitoring** — thermal and VRAM utilization tracking
 
 ### Developer Experience
-- Single static binary — `scp` it to a server and run
-- TOML config (not YAML) — fits on one screen
-- One-click databases — `orca db create postgres mydb`
-- Config as code — version control your infrastructure
+- **Single binary** — `scp` to a server and run
+- **TOML config** — not YAML, fits on one screen
+- **Config as code** — version control your infrastructure
+- **TUI dashboard** — k9s-style terminal UI with search, detail view, keybindings
+- **63 tests** — unit, integration, E2E framework
 
 ## CLI Reference
 
 ```
-orca server               Start control plane + agent + proxy
-orca deploy               Deploy services from services.toml
-orca status               Show cluster and service status
-orca logs <service>       Stream service logs
-orca scale <service> N    Scale to N replicas
-orca stop <service>       Stop a service
-orca rollback <service>   Rollback to previous deploy
-orca tui                  Launch terminal dashboard
-orca join <leader>        Join this node to a cluster
-orca nodes                List cluster nodes
-orca secrets set K V      Store a secret
-orca secrets list         List secret keys
-orca db create TYPE NAME  Create a database service
-orca backup create        Create a backup
-orca cleanup              Prune unused Docker resources
-orca ask "question"       Ask the AI assistant
+CLUSTER
+  orca server               Start control plane + agent + proxy
+  orca join <leader>         Join this node to a cluster
+  orca nodes                 List cluster nodes
+  orca tui                   Launch terminal dashboard
+
+SERVICES
+  orca deploy                Deploy services from services.toml
+  orca status                Show service status
+  orca logs <service>        Stream service logs
+  orca scale <service> N     Scale to N replicas
+  orca stop <service>        Stop a service
+  orca rollback <service>    Rollback to previous deploy
+
+DATABASES
+  orca db create TYPE NAME   Create postgres/mysql/redis/mongodb
+  orca db list               List database services
+
+SECRETS
+  orca secrets set K V       Store a secret
+  orca secrets list          List secret keys
+  orca secrets import -f .env  Import from .env file
+
+OPS
+  orca backup create         Backup configs and volumes
+  orca backup list           List existing backups
+  orca cleanup               Prune unused Docker resources
+  orca ask "question"        Ask the AI assistant
 ```
 
 ## Configuration
 
-### cluster.toml
+<details>
+<summary><strong>cluster.toml</strong> (click to expand)</summary>
+
 ```toml
 [cluster]
 name = "production"
 domain = "myapp.com"
 acme_email = "ops@myapp.com"
-
-# API authentication
 api_tokens = ["${secrets.api_token}"]
 
-# Multi-node
 [[node]]
 address = "10.0.0.1"
 labels = { role = "general" }
@@ -124,22 +181,27 @@ labels = { role = "general" }
 address = "10.0.0.2"
 labels = { role = "gpu" }
 
-# AI operations assistant
 [ai]
 provider = "ollama"
 model = "qwen3:30b"
 
-# Backups
 [backup]
 retention_days = 30
 [[backup.targets]]
 type = "local"
 path = "/var/backups/orca"
+[[backup.targets]]
+type = "s3"
+bucket = "my-backups"
+region = "eu-central-1"
 ```
+</details>
 
-### services.toml
+<details>
+<summary><strong>services.toml</strong> (click to expand)</summary>
+
 ```toml
-# Container workload
+# Container service
 [[service]]
 name = "api"
 image = "myapp:latest"
@@ -147,11 +209,10 @@ replicas = 3
 port = 8080
 domain = "api.myapp.com"
 health = "/healthz"
-
 [service.env]
 DATABASE_URL = "${secrets.db_url}"
 
-# Wasm workload (sub-5ms cold start)
+# Wasm edge function (5ms cold start)
 [[service]]
 name = "edge-fn"
 runtime = "wasm"
@@ -163,16 +224,15 @@ triggers = ["http:/api/edge/*"]
 name = "llm"
 image = "vllm/vllm-openai:latest"
 port = 8000
-
 [service.resources]
 memory = "32Gi"
 cpu = 8.0
-
 [service.resources.gpu]
 count = 1
 vendor = "nvidia"
 vram_min = 24000
 ```
+</details>
 
 ## Architecture
 
@@ -199,7 +259,7 @@ vram_min = 24000
 └────────┘ └────────┘ └────────┘
 ```
 
-8 Rust crates, ~10k lines of code, 100 source files, 59 tests.
+**8 Rust crates** | **~12k lines** | **100+ source files** | **63 tests** | **All files under 250 lines**
 
 ## Building from Source
 
@@ -209,11 +269,15 @@ cd orca
 cargo build --release
 ```
 
-Requires: Rust 2024 edition, `protoc` (for gRPC codegen).
-
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+Key areas:
+- Nixpacks integration for auto-detect builds
+- Service templates (WordPress, Supabase, etc.)
+- Preview environments (PR-based deploys)
+- ACME cert renewal automation
 
 ## License
 

@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 40" width="200" height="40">
+  <defs>
+    <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#06B6D4"/>
+      <stop offset="100%" stop-color="#0891B2"/>
+    </linearGradient>
+  </defs>
+  <!-- Mini orca icon -->
+  <circle cx="20" cy="20" r="18" fill="#0F172A"/>
+  <path d="M12 24 Q12 18 16 16 L22 14 Q26 13 29 15 Q32 17 32 21 Q32 24 30 26 Q27 28 24 28 L18 27 Q14 26 12 24Z" fill="#06B6D4"/>
+  <path d="M22 14 L20 8 Q20 7 21 7.5 L25 13Z" fill="#22D3EE"/>
+  <path d="M17 22 Q19 20 23 20 Q26 19 27 21 Q27 23 25 25 Q22 26 19 25 Q17 24 17 22Z" fill="#E2E8F0" opacity="0.9"/>
+  <circle cx="17" cy="19" r="1.8" fill="#0F172A"/>
+  <circle cx="17.5" cy="18.5" r="0.6" fill="#22D3EE"/>
+  <!-- Text -->
+  <text x="46" y="28" font-family="system-ui, -apple-system, sans-serif" font-weight="700" font-size="24" fill="#E2E8F0" letter-spacing="-0.5">orca</text>
+</svg>
