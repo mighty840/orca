@@ -14,7 +14,7 @@ members = [
 exclude = ["examples/wasm-hello"]
 
 [workspace.package]
-version = "0.0.4"
+version = "0.0.5"
 edition = "2024"
 license = "AGPL-3.0"
 repository = "https://github.com/mighty840/orca"
@@ -24,9 +24,9 @@ categories = ["command-line-utilities"]
 
 [workspace.dependencies]
 # Shared across crates
-orca-core = { path = "crates/orca-core", version = "0.0.4" }
-orca-ai = { path = "crates/orca-ai", version = "0.0.4" }
-orca-proxy = { path = "crates/orca-proxy", version = "0.0.4" }
+orca-core = { path = "crates/orca-core", version = "0.0.5" }
+orca-ai = { path = "crates/orca-ai", version = "0.0.5" }
+orca-proxy = { path = "crates/orca-proxy", version = "0.0.5" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

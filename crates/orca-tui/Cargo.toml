@@ -6,7 +6,7 @@ description = "Terminal UI dashboard for orca cluster management"
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
-publish = false
+
 
 [lib]
 path = "src/lib.rs"

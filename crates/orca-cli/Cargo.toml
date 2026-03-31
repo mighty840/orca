@@ -14,10 +14,10 @@ path = "src/main.rs"
 [dependencies]
 orca-core = { workspace = true }
 orca-ai = { workspace = true }
-orca-agent = { path = "../orca-agent", version = "0.0.4" }
-orca-control = { path = "../orca-control", version = "0.0.4" }
+orca-agent = { path = "../orca-agent", version = "0.0.5" }
+orca-control = { path = "../orca-control", version = "0.0.5" }
 orca-proxy = { workspace = true }
-orca-tui = { path = "../orca-tui" }
+orca-tui = { path = "../orca-tui", version = "0.0.5" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
