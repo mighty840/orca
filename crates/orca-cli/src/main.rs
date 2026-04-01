@@ -1,6 +1,7 @@
 mod client;
 mod commands;
 mod handlers;
+mod subcommands;
 
 use clap::Parser;
 

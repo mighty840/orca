@@ -1,5 +1,9 @@
 use clap::Subcommand;
 
+pub use crate::subcommands::{
+    AlertsAction, BackupAction, DbAction, ImportSource, SecretsAction, WebhookAction,
+};
+
 #[derive(Subcommand)]
 pub enum Command {
     /// Start the orca server (control plane + agent + proxy)
@@ -163,100 +167,4 @@ pub enum Command {
         #[command(subcommand)]
         action: DbAction,
     },
-}
-
-#[derive(Subcommand)]
-pub enum AlertsAction {
-    /// List active alert conversations
-    List {
-        #[arg(short, long)]
-        all: bool,
-    },
-    /// View an alert conversation
-    View { id: String },
-    /// Reply to an alert conversation
-    Reply { id: String, message: Vec<String> },
-    /// Dismiss an alert
-    Dismiss { id: String },
-    /// Apply the AI's suggested fix for an alert
-    Fix { id: String },
-}
-
-#[derive(Subcommand)]
-pub enum SecretsAction {
-    /// Set a secret
-    Set { key: String, value: String },
-    /// Remove a secret
-    Remove { key: String },
-    /// List all secret keys
-    List,
-    /// Import secrets from env file
-    Import {
-        #[arg(short, long)]
-        file: String,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum ImportSource {
-    /// Import from a docker-compose.yml
-    DockerCompose {
-        #[arg(default_value = "docker-compose.yml")]
-        file: String,
-        #[arg(long)]
-        analyze: bool,
-    },
-    /// Import from a Coolify installation
-    Coolify {
-        #[arg(default_value = "/data/coolify")]
-        path: String,
-        #[arg(long)]
-        analyze: bool,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum BackupAction {
-    /// Create a backup now
-    Create,
-    /// List existing backups
-    List,
-    /// Restore from a backup
-    Restore {
-        /// Backup identifier (filename)
-        id: String,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum DbAction {
-    /// Create a new database service
-    Create {
-        /// Database type: postgres, mysql, redis, mongodb
-        db_type: String,
-        /// Service name
-        name: String,
-        /// Database password (auto-generated if omitted)
-        #[arg(long)]
-        password: Option<String>,
-    },
-    /// List running database services
-    List,
-}
-
-#[derive(Subcommand)]
-pub enum WebhookAction {
-    /// Add a webhook
-    Add {
-        #[arg(long)]
-        repo: String,
-        #[arg(long)]
-        service: String,
-        #[arg(long, default_value = "main")]
-        branch: String,
-    },
-    /// List webhooks
-    List,
-    /// Remove a webhook
-    Remove { id: String },
 }
