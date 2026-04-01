@@ -1,4 +1,4 @@
-//! Nodes panel rendering with status coloring and relative heartbeat times.
+//! Full-screen node table (k9s style).
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
@@ -7,16 +7,15 @@ use ratatui::widgets::{Block, Borders, Paragraph, Row, Table};
 
 use crate::state::AppState;
 
-/// Draw the nodes table with colored status and relative heartbeat.
+/// Draw the full-screen nodes table with status coloring.
 pub fn draw_nodes(f: &mut Frame, area: Rect, state: &AppState) {
-    let border_style = Style::default().fg(Color::Cyan);
     let block = Block::default()
         .title(format!(" Nodes ({}) ", state.nodes.len()))
         .borders(Borders::ALL)
-        .border_style(border_style);
+        .border_style(Style::default().fg(Color::Cyan));
 
     if state.nodes.is_empty() {
-        let para = Paragraph::new("No nodes registered (single-node mode)").block(block);
+        let para = Paragraph::new("  No nodes registered (single-node mode)").block(block);
         f.render_widget(para, area);
         return;
     }
@@ -39,26 +38,23 @@ pub fn draw_nodes(f: &mut Frame, area: Rect, state: &AppState) {
         })
         .collect();
 
-    let header = Row::new(vec!["ID", "ADDRESS", "STATUS", "HEARTBEAT"]).style(
+    let header = Row::new(vec!["ID", "ADDRESS", "STATUS", "LAST HEARTBEAT"]).style(
         Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::BOLD),
     );
     let widths = [
         Constraint::Length(8),
-        Constraint::Length(25),
+        Constraint::Min(25),
         Constraint::Length(12),
-        Constraint::Min(14),
+        Constraint::Min(16),
     ];
     let table = Table::new(rows, widths).header(header).block(block);
     f.render_widget(table, area);
 }
 
 /// Parse an ISO 8601 heartbeat timestamp and return relative time + staleness.
-/// Returns ("Xs ago" / "Xm ago" / raw string, is_stale).
 fn format_relative_heartbeat(ts: &str) -> (String, bool) {
-    // Try to parse ISO 8601: "2024-01-15T10:30:00Z" or "2024-01-15T10:30:00"
-    // We'll do a simple parse without pulling in chrono.
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -76,12 +72,11 @@ fn format_relative_heartbeat(ts: &str) -> (String, bool) {
         };
         (relative, stale)
     } else {
-        // Fallback: show raw, mark as stale since we can't tell
         (ts.chars().take(19).collect(), false)
     }
 }
 
-/// Minimal ISO 8601 parser → unix seconds. Handles "YYYY-MM-DDTHH:MM:SS".
+/// Minimal ISO 8601 parser -> unix seconds. Handles "YYYY-MM-DDTHH:MM:SS".
 fn parse_iso_timestamp(ts: &str) -> Option<u64> {
     let ts = ts.trim_end_matches('Z').trim();
     if ts.len() < 19 {
@@ -94,7 +89,6 @@ fn parse_iso_timestamp(ts: &str) -> Option<u64> {
     let min: u64 = ts[14..16].parse().ok()?;
     let sec: u64 = ts[17..19].parse().ok()?;
 
-    // Approximate: days from epoch (good enough for relative time)
     let mut days: u64 = 0;
     for y in 1970..year {
         days += if is_leap(y) { 366 } else { 365 };

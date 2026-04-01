@@ -1,22 +1,24 @@
-//! TUI application state.
+//! TUI application state — k9s-style view stack navigation.
 
 use std::time::Instant;
 
 use crate::api::{ClusterInfo, NodeInfo, ServiceStatus, StatusResponse};
 
-/// Which panel is currently focused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Panel {
+/// Full-screen views (k9s style — each replaces the entire screen).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum View {
     Services,
-    Logs,
     Nodes,
-    Detail,
+    Logs { service: String },
+    Detail { service: String },
+    Help,
 }
 
 /// Input mode for the TUI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
+    Command,
     Filter,
 }
 
@@ -29,10 +31,10 @@ pub enum ConnectionStatus {
 
 /// Full application state for the TUI.
 pub struct AppState {
-    /// Current panel focus.
-    pub panel: Panel,
-    /// Previous panel (for returning from Detail).
-    pub prev_panel: Panel,
+    /// Current view (top of the view stack).
+    pub view: View,
+    /// View stack for Esc navigation (does NOT include current view).
+    pub view_stack: Vec<View>,
     /// Cluster name.
     pub cluster_name: String,
     /// Services and their status.
@@ -53,15 +55,15 @@ pub struct AppState {
     pub filter: String,
     /// Current input mode.
     pub input_mode: InputMode,
-    /// Whether to show help overlay.
-    pub show_help: bool,
+    /// Command input buffer for `:` mode.
+    pub command_input: String,
     /// Status message (e.g. "Deployed nginx").
     pub status_msg: Option<String>,
     /// When the status message was set (for auto-clear).
     pub status_msg_time: Option<Instant>,
     /// App start time for uptime display.
     pub start_time: Instant,
-    /// Word wrap toggle for logs panel.
+    /// Word wrap toggle for logs view.
     pub word_wrap: bool,
     /// Connection status based on API responses.
     pub connection: ConnectionStatus,
@@ -71,6 +73,8 @@ pub struct AppState {
     pub api_url: String,
     /// Tick counter for blinking indicator.
     pub tick: u64,
+    /// Whether logs should auto-refresh.
+    pub auto_refresh_logs: bool,
 }
 
 impl Default for AppState {
@@ -82,8 +86,8 @@ impl Default for AppState {
 impl AppState {
     pub fn new() -> Self {
         Self {
-            panel: Panel::Services,
-            prev_panel: Panel::Services,
+            view: View::Services,
+            view_stack: Vec::new(),
             cluster_name: "connecting...".into(),
             services: Vec::new(),
             nodes: Vec::new(),
@@ -94,7 +98,7 @@ impl AppState {
             should_quit: false,
             filter: String::new(),
             input_mode: InputMode::Normal,
-            show_help: false,
+            command_input: String::new(),
             status_msg: None,
             status_msg_time: None,
             start_time: Instant::now(),
@@ -103,6 +107,23 @@ impl AppState {
             service_scroll: 0,
             api_url: String::new(),
             tick: 0,
+            auto_refresh_logs: true,
+        }
+    }
+
+    /// Push current view onto the stack and switch to a new view.
+    pub fn push_view(&mut self, new_view: View) {
+        let old = std::mem::replace(&mut self.view, new_view);
+        self.view_stack.push(old);
+    }
+
+    /// Pop back to the previous view. Returns false if stack is empty.
+    pub fn pop_view(&mut self) -> bool {
+        if let Some(prev) = self.view_stack.pop() {
+            self.view = prev;
+            true
+        } else {
+            false
         }
     }
 
@@ -182,16 +203,6 @@ impl AppState {
         if len > 0 && self.selected_service < len - 1 {
             self.selected_service += 1;
         }
-    }
-
-    /// Cycle to the next panel.
-    pub fn next_panel(&mut self) {
-        self.panel = match self.panel {
-            Panel::Services => Panel::Logs,
-            Panel::Logs => Panel::Nodes,
-            Panel::Nodes => Panel::Services,
-            Panel::Detail => Panel::Services,
-        };
     }
 
     /// Format uptime as HH:MM:SS.
