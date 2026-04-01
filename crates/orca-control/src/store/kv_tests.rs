@@ -51,6 +51,7 @@ fn set_and_get_service() {
         host_port: None,
         triggers: Vec::new(),
         assets: None,
+        build: None,
     };
     store
         .apply(&RaftEntry::SetService(Box::new(config)))
@@ -128,6 +129,7 @@ fn snapshot_captures_all_state() {
             host_port: None,
             triggers: Vec::new(),
             assets: None,
+            build: None,
         })))
         .unwrap();
 

@@ -40,6 +40,36 @@ fn default_initial_delay() -> u64 {
     5
 }
 
+/// Build-from-source configuration for a service.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BuildConfig {
+    /// Git repository URL (SSH or HTTPS).
+    pub repo: String,
+    /// Branch to build from (default: "main").
+    pub branch: Option<String>,
+    /// Dockerfile path relative to repo root (default: "Dockerfile").
+    pub dockerfile: Option<String>,
+    /// Build context relative to repo root (default: ".").
+    pub context: Option<String>,
+}
+
+impl BuildConfig {
+    /// Branch to use, defaulting to "main".
+    pub fn branch_or_default(&self) -> &str {
+        self.branch.as_deref().unwrap_or("main")
+    }
+
+    /// Dockerfile path, defaulting to "Dockerfile".
+    pub fn dockerfile_or_default(&self) -> &str {
+        self.dockerfile.as_deref().unwrap_or("Dockerfile")
+    }
+
+    /// Build context, defaulting to ".".
+    pub fn context_or_default(&self) -> &str {
+        self.context.as_deref().unwrap_or(".")
+    }
+}
+
 /// Services configuration (`services.toml`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServicesConfig {
@@ -93,4 +123,7 @@ pub struct ServiceConfig {
     pub triggers: Vec<String>,
     /// Static assets directory (for builtin:static-server Wasm module).
     pub assets: Option<String>,
+    /// Build configuration: clone a repo and build a Docker image from a Dockerfile.
+    /// When set, `image` is not required — the built image is used instead.
+    pub build: Option<BuildConfig>,
 }

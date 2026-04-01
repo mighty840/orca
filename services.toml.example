@@ -84,6 +84,19 @@ size = "10Gi"
 [service.placement]
 labels = { zone = "eu-1" }
 
+# -- Build from source (Dockerfile) --
+[[service]]
+name = "custom-api"
+port = 3000
+domain = "custom.example.com"
+health = "/health"
+
+[service.build]
+repo = "git@github.com:myorg/custom-api.git"
+branch = "main"
+dockerfile = "Dockerfile"
+context = "."
+
 # -- Wasm cron job --
 [[service]]
 name = "daily-report"

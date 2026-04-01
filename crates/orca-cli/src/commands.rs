@@ -167,4 +167,13 @@ pub enum Command {
         #[command(subcommand)]
         action: DbAction,
     },
+
+    /// Build a Docker image from source for a service
+    Build {
+        /// Service name to build (builds all if omitted)
+        service: Option<String>,
+        /// Path to services.toml
+        #[arg(short, long, default_value = "services.toml")]
+        file: String,
+    },
 }

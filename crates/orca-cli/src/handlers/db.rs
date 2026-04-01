@@ -90,6 +90,7 @@ async fn handle_create(
         mounts: vec![],
         triggers: vec![],
         assets: None,
+        build: None,
     };
 
     // Store password as a secret

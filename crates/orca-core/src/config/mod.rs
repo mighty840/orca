@@ -14,7 +14,7 @@ pub use cluster::NetworkConfig;
 pub use cluster::{
     AlertChannelConfig, ClusterConfig, ClusterMeta, NodeConfig, NodeGpuConfig, ObservabilityConfig,
 };
-pub use service::{ProbeConfig, ServiceConfig, ServicesConfig};
+pub use service::{BuildConfig, ProbeConfig, ServiceConfig, ServicesConfig};
 
 // -- Load methods --
 
@@ -86,6 +86,51 @@ triggers = ["http:/api/edge/*"]
         assert_eq!(config.service.len(), 2);
         assert_eq!(config.service[0].name, "api");
         assert_eq!(config.service[1].runtime, RuntimeKind::Wasm);
+    }
+
+    #[test]
+    fn parse_build_config() {
+        let toml = r#"
+[[service]]
+name = "custom-api"
+port = 3000
+domain = "custom.example.com"
+
+[service.build]
+repo = "git@github.com:myorg/api.git"
+branch = "main"
+dockerfile = "Dockerfile"
+context = "."
+"#;
+        let config: ServicesConfig = toml::from_str(toml).unwrap();
+        assert_eq!(config.service.len(), 1);
+        let svc = &config.service[0];
+        assert!(svc.image.is_none());
+        let build = svc.build.as_ref().unwrap();
+        assert_eq!(build.repo, "git@github.com:myorg/api.git");
+        assert_eq!(build.branch_or_default(), "main");
+        assert_eq!(build.dockerfile_or_default(), "Dockerfile");
+        assert_eq!(build.context_or_default(), ".");
+    }
+
+    #[test]
+    fn parse_build_config_defaults() {
+        let toml = r#"
+[[service]]
+name = "minimal-build"
+port = 8080
+
+[service.build]
+repo = "https://github.com/org/repo.git"
+"#;
+        let config: ServicesConfig = toml::from_str(toml).unwrap();
+        let build = config.service[0].build.as_ref().unwrap();
+        assert!(build.branch.is_none());
+        assert_eq!(build.branch_or_default(), "main");
+        assert!(build.dockerfile.is_none());
+        assert_eq!(build.dockerfile_or_default(), "Dockerfile");
+        assert!(build.context.is_none());
+        assert_eq!(build.context_or_default(), ".");
     }
 
     #[test]
