@@ -20,6 +20,13 @@ pub enum InputMode {
     Filter,
 }
 
+/// Connection status based on API responses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionStatus {
+    Connected,
+    Disconnected,
+}
+
 /// Full application state for the TUI.
 pub struct AppState {
     /// Current panel focus.
@@ -50,8 +57,20 @@ pub struct AppState {
     pub show_help: bool,
     /// Status message (e.g. "Deployed nginx").
     pub status_msg: Option<String>,
+    /// When the status message was set (for auto-clear).
+    pub status_msg_time: Option<Instant>,
     /// App start time for uptime display.
     pub start_time: Instant,
+    /// Word wrap toggle for logs panel.
+    pub word_wrap: bool,
+    /// Connection status based on API responses.
+    pub connection: ConnectionStatus,
+    /// Scroll offset for services list.
+    pub service_scroll: usize,
+    /// API base URL for display.
+    pub api_url: String,
+    /// Tick counter for blinking indicator.
+    pub tick: u64,
 }
 
 impl Default for AppState {
@@ -77,7 +96,13 @@ impl AppState {
             input_mode: InputMode::Normal,
             show_help: false,
             status_msg: None,
+            status_msg_time: None,
             start_time: Instant::now(),
+            word_wrap: false,
+            connection: ConnectionStatus::Disconnected,
+            service_scroll: 0,
+            api_url: String::new(),
+            tick: 0,
         }
     }
 
@@ -85,16 +110,38 @@ impl AppState {
     pub fn update_status(&mut self, resp: StatusResponse) {
         self.cluster_name = resp.cluster_name;
         self.services = resp.services;
+        self.connection = ConnectionStatus::Connected;
         let filtered_len = self.filtered_services().len();
         if self.selected_service >= filtered_len && filtered_len > 0 {
             self.selected_service = filtered_len - 1;
         }
     }
 
+    /// Mark connection as failed.
+    pub fn mark_disconnected(&mut self) {
+        self.connection = ConnectionStatus::Disconnected;
+    }
+
     /// Update from cluster info response.
     pub fn update_cluster(&mut self, info: ClusterInfo) {
         self.nodes = info.nodes;
         self.node_count = info.node_count;
+    }
+
+    /// Set a flash status message with auto-clear timer.
+    pub fn flash(&mut self, msg: String) {
+        self.status_msg = Some(msg);
+        self.status_msg_time = Some(Instant::now());
+    }
+
+    /// Clear status message if it has been visible long enough (3s).
+    pub fn maybe_clear_flash(&mut self) {
+        if let Some(t) = self.status_msg_time
+            && t.elapsed().as_secs() >= 3
+        {
+            self.status_msg = None;
+            self.status_msg_time = None;
+        }
     }
 
     /// Get services filtered by the current filter string.
@@ -154,5 +201,21 @@ impl AppState {
         let m = (secs % 3600) / 60;
         let s = secs % 60;
         format!("{h:02}:{m:02}:{s:02}")
+    }
+
+    /// Count services by aggregate status.
+    pub fn status_counts(&self) -> (usize, usize, usize) {
+        let running = self
+            .services
+            .iter()
+            .filter(|s| s.status == "running")
+            .count();
+        let stopped = self
+            .services
+            .iter()
+            .filter(|s| s.status == "stopped" || s.status == "failed")
+            .count();
+        let other = self.services.len() - running - stopped;
+        (running, stopped, other)
     }
 }

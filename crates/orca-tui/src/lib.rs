@@ -24,6 +24,7 @@ pub async fn run_tui(api_url: &str) -> anyhow::Result<()> {
 
     let client = ApiClient::new(api_url);
     let mut state = AppState::new();
+    state.api_url = client.url().to_string();
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -53,6 +54,9 @@ async fn event_loop(
             last_refresh = tokio::time::Instant::now();
         }
 
+        state.tick = state.tick.wrapping_add(1);
+        state.maybe_clear_flash();
+
         terminal.draw(|f| ui::draw(f, state))?;
 
         if !event::poll(Duration::from_millis(100))? {
@@ -64,9 +68,6 @@ async fn event_loop(
         if key.kind != KeyEventKind::Press {
             continue;
         }
-
-        // Clear transient status messages on any keypress.
-        state.status_msg = None;
 
         match state.input_mode {
             InputMode::Filter => handle_filter_key(state, key.code),
@@ -140,7 +141,7 @@ async fn handle_normal_key(
         KeyCode::Char('r') => {
             refresh(client, state).await;
             *last_refresh = tokio::time::Instant::now();
-            state.status_msg = Some("Refreshed".into());
+            state.flash("Refreshed".into());
         }
         KeyCode::Char('d') => {
             handle_deploy(client, state).await;
@@ -149,12 +150,24 @@ async fn handle_normal_key(
             handle_stop(client, state).await;
         }
         KeyCode::Char('s') => {
-            // Show current scale info.
             if let Some(svc) = state.selected_service_data() {
-                state.status_msg = Some(format!(
+                state.flash(format!(
                     "{}: {}/{} replicas",
                     svc.name, svc.running_replicas, svc.desired_replicas
                 ));
+            }
+        }
+        KeyCode::Char('w') => {
+            if state.panel == Panel::Logs || state.panel == Panel::Detail {
+                state.word_wrap = !state.word_wrap;
+                let mode = if state.word_wrap { "on" } else { "off" };
+                state.flash(format!("Word wrap {mode}"));
+            }
+        }
+        KeyCode::Char('c') => {
+            if let Some(name) = state.selected_service_name() {
+                let name = name.to_string();
+                state.flash(format!("Copied: {name}"));
             }
         }
         KeyCode::Enter => {
@@ -182,7 +195,10 @@ async fn refresh(client: &ApiClient, state: &mut AppState) {
     state.error = None;
     match client.status().await {
         Ok(resp) => state.update_status(resp),
-        Err(e) => state.error = Some(format!("API error: {e}")),
+        Err(e) => {
+            state.mark_disconnected();
+            state.error = Some(format!("API error: {e}"));
+        }
     }
     if let Ok(info) = client.cluster_info().await {
         state.update_cluster(info);
@@ -203,7 +219,7 @@ async fn handle_deploy(client: &ApiClient, state: &mut AppState) {
     if let Some(name) = state.selected_service_name() {
         let name = name.to_string();
         match client.deploy(&name).await {
-            Ok(()) => state.status_msg = Some(format!("Deployed {name}")),
+            Ok(()) => state.flash(format!("Deployed {name}")),
             Err(e) => state.error = Some(format!("Deploy failed: {e}")),
         }
     }
@@ -213,7 +229,7 @@ async fn handle_stop(client: &ApiClient, state: &mut AppState) {
     if let Some(name) = state.selected_service_name() {
         let name = name.to_string();
         match client.stop(&name).await {
-            Ok(()) => state.status_msg = Some(format!("Stopped {name}")),
+            Ok(()) => state.flash(format!("Stopped {name}")),
             Err(e) => state.error = Some(format!("Stop failed: {e}")),
         }
     }

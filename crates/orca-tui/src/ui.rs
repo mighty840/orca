@@ -12,7 +12,9 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use crate::state::{AppState, InputMode, Panel};
+use crate::state::{AppState, ConnectionStatus, InputMode, Panel};
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Render the full dashboard.
 pub fn draw(f: &mut Frame, state: &AppState) {
@@ -36,22 +38,54 @@ pub fn draw(f: &mut Frame, state: &AppState) {
     draw_footer(f, chunks[2], state);
 
     if state.show_help {
-        help::draw_help(f, f.area());
+        help::draw_help(f, f.area(), state);
     }
 }
 
 fn draw_header(f: &mut Frame, area: Rect, state: &AppState) {
-    let running = state
-        .services
-        .iter()
-        .filter(|s| s.status == "running")
-        .count();
+    let (running, stopped, degraded) = state.status_counts();
     let total = state.services.len();
-    let svc_color = if running == total {
-        Color::Green
-    } else {
-        Color::Yellow
+
+    // Blinking connection dot — blink every ~5 ticks (~500ms)
+    let blink_on = (state.tick / 5).is_multiple_of(2);
+    let (dot, dot_color) = match state.connection {
+        ConnectionStatus::Connected => {
+            if blink_on {
+                ("●", Color::Green)
+            } else {
+                ("●", Color::DarkGray)
+            }
+        }
+        ConnectionStatus::Disconnected => {
+            if blink_on {
+                ("●", Color::Red)
+            } else {
+                ("●", Color::DarkGray)
+            }
+        }
     };
+
+    let svc_summary = if stopped == 0 && degraded == 0 {
+        Span::styled(
+            format!("{running}/{total} running"),
+            Style::default().fg(Color::Green),
+        )
+    } else {
+        let mut parts = format!("{running} up");
+        if degraded > 0 {
+            parts.push_str(&format!(", {degraded} degraded"));
+        }
+        if stopped > 0 {
+            parts.push_str(&format!(", {stopped} down"));
+        }
+        let color = if stopped > 0 {
+            Color::Red
+        } else {
+            Color::Yellow
+        };
+        Span::styled(parts, Style::default().fg(color))
+    };
+
     let text = Line::from(vec![
         Span::styled(
             " orca ",
@@ -59,14 +93,16 @@ fn draw_header(f: &mut Frame, area: Rect, state: &AppState) {
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("| ", Style::default().fg(Color::DarkGray)),
+        Span::styled(format!("v{VERSION} "), Style::default().fg(Color::DarkGray)),
+        Span::styled(dot, Style::default().fg(dot_color)),
+        Span::styled(" | ", Style::default().fg(Color::DarkGray)),
         Span::styled(
             state.cluster_name.clone(),
             Style::default().fg(Color::White),
         ),
         Span::styled(" | ", Style::default().fg(Color::DarkGray)),
         Span::raw("Svc: "),
-        Span::styled(format!("{running}/{total}"), Style::default().fg(svc_color)),
+        svc_summary,
         Span::styled(" | ", Style::default().fg(Color::DarkGray)),
         Span::raw("Nodes: "),
         Span::styled(
@@ -127,7 +163,7 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
 
 fn footer_keys() -> Span<'static> {
     Span::styled(
-        " j/k:nav  Tab:panel  1/2/3:jump  /:filter  Enter:detail  d:deploy  x:stop  r:refresh  ?:help  q:quit",
+        " j/k:nav  Tab:panel  1/2/3:jump  /:filter  Enter:detail  d:deploy  x:stop  w:wrap  r:refresh  ?:help  q:quit",
         Style::default().fg(Color::DarkGray),
     )
 }
@@ -140,5 +176,16 @@ pub fn status_color(status: &str) -> Color {
         "stopped" | "failed" => Color::Red,
         "creating" | "starting" => Color::Blue,
         _ => Color::Gray,
+    }
+}
+
+/// Status indicator character for service status.
+pub fn status_icon(status: &str) -> (&'static str, Color) {
+    match status {
+        "running" => ("\u{25cf}", Color::Green),          // ●
+        "degraded" => ("\u{25d0}", Color::Yellow),        // ◐
+        "stopped" | "failed" => ("\u{25cb}", Color::Red), // ○
+        "creating" | "starting" => ("\u{25d0}", Color::Blue),
+        _ => ("\u{25cb}", Color::Gray),
     }
 }
