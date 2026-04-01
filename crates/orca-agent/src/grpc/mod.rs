@@ -2,4 +2,4 @@
 
 mod client;
 
-pub use client::AgentClient;
+pub use client::{AgentClient, WorkloadCommand};

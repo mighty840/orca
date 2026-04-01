@@ -36,6 +36,9 @@ pub struct AppState {
     pub webhooks: WebhookStore,
     /// API bearer tokens for authentication (empty = allow all).
     pub api_tokens: Vec<String>,
+    /// Pending commands for agent nodes, keyed by node_id.
+    /// Uses serde_json::Value to avoid circular dependency on orca-agent types.
+    pub pending_commands: RwLock<HashMap<u64, Vec<serde_json::Value>>>,
     /// Deploy history for rollback support.
     pub deploy_history: RwLock<crate::deploy_history::DeployHistory>,
     /// ACME manager for hot cert provisioning (None if no TLS).
@@ -101,6 +104,7 @@ impl AppState {
             route_table,
             wasm_triggers,
             registered_nodes: RwLock::new(HashMap::new()),
+            pending_commands: RwLock::new(HashMap::new()),
             webhooks: crate::webhook::new_store(),
             api_tokens,
             deploy_history: RwLock::new(crate::deploy_history::DeployHistory::new()),

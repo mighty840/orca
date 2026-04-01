@@ -12,7 +12,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
-use orca_core::types::WorkloadStatus;
+use orca_core::runtime::Runtime;
+use orca_core::types::{WorkloadSpec, WorkloadStatus};
 
 /// Agent client that communicates with the cluster leader.
 pub struct AgentClient {
@@ -55,14 +56,12 @@ pub struct HeartbeatResponse {
 }
 
 /// A command from the leader to the agent.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkloadCommand {
-    /// Action to perform.
+    /// Action to perform: "deploy" or "stop".
     pub action: String,
-    /// Service name.
-    pub service: String,
-    /// Container image or wasm module.
-    pub image: String,
+    /// Full workload specification for deployment.
+    pub spec: WorkloadSpec,
 }
 
 impl AgentClient {
@@ -147,8 +146,8 @@ impl AgentClient {
         }
     }
 
-    /// Run the heartbeat loop (call from a spawned task).
-    pub async fn run_heartbeat_loop(&self, interval: Duration) {
+    /// Run the heartbeat loop with a container runtime for executing commands.
+    pub async fn run_heartbeat_loop(&self, interval: Duration, runtime: Arc<dyn Runtime>) {
         info!(
             "Starting heartbeat loop (interval: {}s)",
             interval.as_secs()
@@ -157,13 +156,47 @@ impl AgentClient {
             tokio::time::sleep(interval).await;
             match self.heartbeat().await {
                 Ok(resp) => {
-                    if !resp.commands.is_empty() {
-                        info!("Received {} commands from leader", resp.commands.len());
+                    for cmd in resp.commands {
+                        info!("Executing command: {} for {}", cmd.action, cmd.spec.name);
+                        self.execute_command(&cmd, runtime.as_ref()).await;
                     }
                 }
                 Err(e) => {
                     warn!("Heartbeat failed: {e}");
                 }
+            }
+        }
+    }
+
+    /// Execute a workload command received from the leader.
+    async fn execute_command(&self, cmd: &WorkloadCommand, runtime: &dyn Runtime) {
+        match cmd.action.as_str() {
+            "deploy" => {
+                info!("Deploying workload: {}", cmd.spec.name);
+                match runtime.create(&cmd.spec).await {
+                    Ok(handle) => {
+                        if let Err(e) = runtime.start(&handle).await {
+                            warn!("Failed to start {}: {e}", cmd.spec.name);
+                            return;
+                        }
+                        self.update_workload_status(
+                            &handle.runtime_id,
+                            &cmd.spec.name,
+                            WorkloadStatus::Running,
+                        )
+                        .await;
+                        info!("Workload {} deployed successfully", cmd.spec.name);
+                    }
+                    Err(e) => {
+                        warn!("Failed to create {}: {e}", cmd.spec.name);
+                    }
+                }
+            }
+            "stop" => {
+                info!("Stop command for {} (not yet implemented)", cmd.spec.name);
+            }
+            other => {
+                warn!("Unknown command action: {other}");
             }
         }
     }

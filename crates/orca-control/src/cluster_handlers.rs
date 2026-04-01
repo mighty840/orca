@@ -67,5 +67,19 @@ pub async fn heartbeat(
     if let Some(node) = nodes.get_mut(&req.node_id) {
         node.last_heartbeat = chrono::Utc::now();
     }
-    Json(serde_json::json!({"commands": []}))
+    drop(nodes);
+
+    // Drain any pending commands for this node
+    let commands = {
+        let mut pending = state.pending_commands.write().await;
+        pending.remove(&req.node_id).unwrap_or_default()
+    };
+    if !commands.is_empty() {
+        tracing::info!(
+            "Dispatching {} commands to node {}",
+            commands.len(),
+            req.node_id
+        );
+    }
+    Json(serde_json::json!({"commands": commands}))
 }

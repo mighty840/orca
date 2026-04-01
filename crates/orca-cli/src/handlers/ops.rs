@@ -219,7 +219,25 @@ pub async fn handle_rollback(service: String, api: String) -> anyhow::Result<()>
 }
 
 pub async fn handle_tui(api: &str) -> anyhow::Result<()> {
-    orca_tui::run_tui(api).await
+    // On agent nodes, fall back to saved leader URL if default API isn't reachable
+    let api = if api == "http://127.0.0.1:6880" {
+        let leader_file = dirs_next::home_dir()
+            .unwrap_or_else(|| ".".into())
+            .join(".orca/leader.url");
+        if let Ok(url) = std::fs::read_to_string(&leader_file) {
+            let url = url.trim().to_string();
+            if !url.is_empty() {
+                url
+            } else {
+                api.to_string()
+            }
+        } else {
+            api.to_string()
+        }
+    } else {
+        api.to_string()
+    };
+    orca_tui::run_tui(&api).await
 }
 pub async fn handle_web(_port: u16) -> anyhow::Result<()> {
     println!("Use `orca tui` instead.");

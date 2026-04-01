@@ -38,7 +38,24 @@ pub async fn handle_join(
 
     info!("Joining cluster at {leader_url} as node {node_id}");
 
-    let _container_runtime = Arc::new(orca_agent::docker::ContainerRuntime::new()?);
+    // Save leader URL and token so TUI and other commands work on agent nodes
+    let orca_dir = dirs_next::home_dir()
+        .unwrap_or_else(|| ".".into())
+        .join(".orca");
+    let _ = std::fs::create_dir_all(&orca_dir);
+    let _ = std::fs::write(orca_dir.join("leader.url"), &leader_url);
+    if let Ok(token) = std::env::var("ORCA_TOKEN") {
+        let token_path = orca_dir.join("cluster.token");
+        let _ = std::fs::write(&token_path, &token);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&token_path, std::fs::Permissions::from_mode(0o600));
+        }
+    }
+
+    let container_runtime: Arc<dyn orca_core::runtime::Runtime> =
+        Arc::new(orca_agent::docker::ContainerRuntime::new()?);
     let _wasm_runtime = match orca_agent::wasm::WasmRuntime::new() {
         Ok(r) => {
             info!("Wasm runtime initialized");
@@ -61,12 +78,27 @@ pub async fn handle_join(
     let local_address = format!("{local_ip}:6881");
 
     let agent = orca_agent::grpc::AgentClient::new(leader_url, node_id);
-    agent.register(&local_address, &labels).await?;
+
+    // Retry registration with exponential backoff
+    let mut delay = Duration::from_secs(2);
+    for attempt in 1..=30 {
+        match agent.register(&local_address, &labels).await {
+            Ok(()) => break,
+            Err(e) => {
+                if attempt == 30 {
+                    anyhow::bail!("Registration failed after 30 attempts: {e}");
+                }
+                tracing::warn!("Registration attempt {attempt} failed: {e}, retrying in {delay:?}");
+                tokio::time::sleep(delay).await;
+                delay = (delay * 2).min(Duration::from_secs(30));
+            }
+        }
+    }
 
     info!("Registered with cluster. Running heartbeat loop...");
 
     tokio::select! {
-        _ = agent.run_heartbeat_loop(Duration::from_secs(5)) => {},
+        _ = agent.run_heartbeat_loop(Duration::from_secs(5), container_runtime.clone()) => {},
         _ = tokio::signal::ctrl_c() => {
             info!("Shutdown signal received");
         }

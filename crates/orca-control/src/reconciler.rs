@@ -86,6 +86,16 @@ pub(crate) async fn reconcile_service(
         spec.image = image_tag;
     }
 
+    // Check if placement targets a specific remote node
+    if let Some(target_node_id) = find_target_node(state, config).await {
+        queue_remote_deploy(state, target_node_id, &spec).await;
+        info!(
+            "Queued deploy of {} to remote node {}",
+            config.name, target_node_id
+        );
+        return Ok(());
+    }
+
     let runtime = get_runtime(state, config.runtime)?;
 
     let mut services = state.services.write().await;
@@ -265,6 +275,36 @@ async fn wait_for_ready(addr: &str, path: &str) {
         }
     }
     tracing::warn!("Container at {addr} not ready after 15s, registering route anyway");
+}
+
+/// Find a registered node matching the service's placement constraint.
+/// Returns `None` if no placement node is set or no matching node is found.
+async fn find_target_node(state: &AppState, config: &ServiceConfig) -> Option<u64> {
+    let placement = config.placement.as_ref()?;
+    let target = placement.node.as_ref()?;
+    let nodes = state.registered_nodes.read().await;
+    for node in nodes.values() {
+        if node.address.contains(target.as_str()) || target == &node.node_id.to_string() {
+            return Some(node.node_id);
+        }
+        // Check hostname label
+        if let Some(hostname) = node.labels.get("hostname")
+            && hostname == target
+        {
+            return Some(node.node_id);
+        }
+    }
+    None
+}
+
+/// Queue a deploy command for a remote agent node.
+async fn queue_remote_deploy(state: &AppState, node_id: u64, spec: &WorkloadSpec) {
+    let cmd = serde_json::json!({
+        "action": "deploy",
+        "spec": spec,
+    });
+    let mut pending = state.pending_commands.write().await;
+    pending.entry(node_id).or_default().push(cmd);
 }
 
 // stop, stop_all, redeploy, rollback, scale moved to operations.rs
