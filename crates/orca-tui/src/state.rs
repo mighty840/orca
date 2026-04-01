@@ -1,31 +1,40 @@
-//! TUI application state.
+//! TUI application state — k9s-style view stack navigation.
 
 use std::time::Instant;
 
 use crate::api::{ClusterInfo, NodeInfo, ServiceStatus, StatusResponse};
 
-/// Which panel is currently focused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Panel {
+/// Full-screen views (k9s style — each replaces the entire screen).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum View {
     Services,
-    Logs,
     Nodes,
-    Detail,
+    Logs { service: String },
+    Detail { service: String },
+    Help,
 }
 
 /// Input mode for the TUI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InputMode {
     Normal,
+    Command,
     Filter,
+}
+
+/// Connection status based on API responses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionStatus {
+    Connected,
+    Disconnected,
 }
 
 /// Full application state for the TUI.
 pub struct AppState {
-    /// Current panel focus.
-    pub panel: Panel,
-    /// Previous panel (for returning from Detail).
-    pub prev_panel: Panel,
+    /// Current view (top of the view stack).
+    pub view: View,
+    /// View stack for Esc navigation (does NOT include current view).
+    pub view_stack: Vec<View>,
     /// Cluster name.
     pub cluster_name: String,
     /// Services and their status.
@@ -46,12 +55,26 @@ pub struct AppState {
     pub filter: String,
     /// Current input mode.
     pub input_mode: InputMode,
-    /// Whether to show help overlay.
-    pub show_help: bool,
+    /// Command input buffer for `:` mode.
+    pub command_input: String,
     /// Status message (e.g. "Deployed nginx").
     pub status_msg: Option<String>,
+    /// When the status message was set (for auto-clear).
+    pub status_msg_time: Option<Instant>,
     /// App start time for uptime display.
     pub start_time: Instant,
+    /// Word wrap toggle for logs view.
+    pub word_wrap: bool,
+    /// Connection status based on API responses.
+    pub connection: ConnectionStatus,
+    /// Scroll offset for services list.
+    pub service_scroll: usize,
+    /// API base URL for display.
+    pub api_url: String,
+    /// Tick counter for blinking indicator.
+    pub tick: u64,
+    /// Whether logs should auto-refresh.
+    pub auto_refresh_logs: bool,
 }
 
 impl Default for AppState {
@@ -63,8 +86,8 @@ impl Default for AppState {
 impl AppState {
     pub fn new() -> Self {
         Self {
-            panel: Panel::Services,
-            prev_panel: Panel::Services,
+            view: View::Services,
+            view_stack: Vec::new(),
             cluster_name: "connecting...".into(),
             services: Vec::new(),
             nodes: Vec::new(),
@@ -75,9 +98,32 @@ impl AppState {
             should_quit: false,
             filter: String::new(),
             input_mode: InputMode::Normal,
-            show_help: false,
+            command_input: String::new(),
             status_msg: None,
+            status_msg_time: None,
             start_time: Instant::now(),
+            word_wrap: false,
+            connection: ConnectionStatus::Disconnected,
+            service_scroll: 0,
+            api_url: String::new(),
+            tick: 0,
+            auto_refresh_logs: true,
+        }
+    }
+
+    /// Push current view onto the stack and switch to a new view.
+    pub fn push_view(&mut self, new_view: View) {
+        let old = std::mem::replace(&mut self.view, new_view);
+        self.view_stack.push(old);
+    }
+
+    /// Pop back to the previous view. Returns false if stack is empty.
+    pub fn pop_view(&mut self) -> bool {
+        if let Some(prev) = self.view_stack.pop() {
+            self.view = prev;
+            true
+        } else {
+            false
         }
     }
 
@@ -85,16 +131,38 @@ impl AppState {
     pub fn update_status(&mut self, resp: StatusResponse) {
         self.cluster_name = resp.cluster_name;
         self.services = resp.services;
+        self.connection = ConnectionStatus::Connected;
         let filtered_len = self.filtered_services().len();
         if self.selected_service >= filtered_len && filtered_len > 0 {
             self.selected_service = filtered_len - 1;
         }
     }
 
+    /// Mark connection as failed.
+    pub fn mark_disconnected(&mut self) {
+        self.connection = ConnectionStatus::Disconnected;
+    }
+
     /// Update from cluster info response.
     pub fn update_cluster(&mut self, info: ClusterInfo) {
         self.nodes = info.nodes;
         self.node_count = info.node_count;
+    }
+
+    /// Set a flash status message with auto-clear timer.
+    pub fn flash(&mut self, msg: String) {
+        self.status_msg = Some(msg);
+        self.status_msg_time = Some(Instant::now());
+    }
+
+    /// Clear status message if it has been visible long enough (3s).
+    pub fn maybe_clear_flash(&mut self) {
+        if let Some(t) = self.status_msg_time
+            && t.elapsed().as_secs() >= 3
+        {
+            self.status_msg = None;
+            self.status_msg_time = None;
+        }
     }
 
     /// Get services filtered by the current filter string.
@@ -137,16 +205,6 @@ impl AppState {
         }
     }
 
-    /// Cycle to the next panel.
-    pub fn next_panel(&mut self) {
-        self.panel = match self.panel {
-            Panel::Services => Panel::Logs,
-            Panel::Logs => Panel::Nodes,
-            Panel::Nodes => Panel::Services,
-            Panel::Detail => Panel::Services,
-        };
-    }
-
     /// Format uptime as HH:MM:SS.
     pub fn uptime_str(&self) -> String {
         let secs = self.start_time.elapsed().as_secs();
@@ -154,5 +212,21 @@ impl AppState {
         let m = (secs % 3600) / 60;
         let s = secs % 60;
         format!("{h:02}:{m:02}:{s:02}")
+    }
+
+    /// Count services by aggregate status.
+    pub fn status_counts(&self) -> (usize, usize, usize) {
+        let running = self
+            .services
+            .iter()
+            .filter(|s| s.status == "running")
+            .count();
+        let stopped = self
+            .services
+            .iter()
+            .filter(|s| s.status == "stopped" || s.status == "failed")
+            .count();
+        let other = self.services.len() - running - stopped;
+        (running, stopped, other)
     }
 }

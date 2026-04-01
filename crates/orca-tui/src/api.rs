@@ -19,6 +19,8 @@ pub struct StatusResponse {
 #[allow(dead_code)]
 pub struct ServiceStatus {
     pub name: String,
+    #[serde(default)]
+    pub image: String,
     pub runtime: String,
     pub desired_replicas: u32,
     pub running_replicas: u32,
@@ -42,6 +44,11 @@ pub struct NodeInfo {
 }
 
 impl ApiClient {
+    /// Get the base URL for display purposes.
+    pub fn url(&self) -> &str {
+        &self.base_url
+    }
+
     pub fn new(base_url: &str) -> Self {
         // Read token from ~/.orca/cluster.token or ORCA_TOKEN env
         let token = std::env::var("ORCA_TOKEN").ok().or_else(|| {
