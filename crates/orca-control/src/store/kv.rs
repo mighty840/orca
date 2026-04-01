@@ -11,13 +11,13 @@ use orca_core::types::NodeStatus;
 
 use super::types::{Assignment, NodeEntry, RaftEntry, RaftSnapshot};
 
-const NODES: TableDefinition<u64, &[u8]> = TableDefinition::new("nodes");
-const SERVICES: TableDefinition<&str, &[u8]> = TableDefinition::new("services");
-const ASSIGNMENTS: TableDefinition<&str, &[u8]> = TableDefinition::new("assignments");
+pub(super) const NODES: TableDefinition<u64, &[u8]> = TableDefinition::new("nodes");
+pub(super) const SERVICES: TableDefinition<&str, &[u8]> = TableDefinition::new("services");
+pub(super) const ASSIGNMENTS: TableDefinition<&str, &[u8]> = TableDefinition::new("assignments");
 
 /// Persistent cluster state store.
 pub struct ClusterStore {
-    db: Database,
+    pub(super) db: Database,
 }
 
 impl ClusterStore {

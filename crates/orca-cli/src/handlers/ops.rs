@@ -1,5 +1,5 @@
 use crate::client::OrcaClient;
-use crate::commands::{AlertsAction, ImportSource, SecretsAction, WebhookAction};
+use crate::commands::{AlertsAction, SecretsAction, WebhookAction};
 
 pub async fn handle_stop(service: Option<String>, api: String) -> anyhow::Result<()> {
     let client = OrcaClient::new(api);
@@ -134,23 +134,6 @@ pub fn handle_secrets(action: SecretsAction) {
     }
 }
 
-pub fn handle_import(source: ImportSource) {
-    match source {
-        ImportSource::DockerCompose { file, analyze } => {
-            println!("Importing from docker-compose: {file}");
-            if analyze {
-                println!("AI analysis not yet connected.");
-            }
-        }
-        ImportSource::Coolify { path, analyze } => {
-            println!("Importing from Coolify: {path}");
-            if analyze {
-                println!("AI analysis not yet connected.");
-            }
-        }
-    }
-}
-
 pub async fn handle_webhooks(action: WebhookAction, api: String) -> anyhow::Result<()> {
     let client = OrcaClient::new(api);
     match action {
@@ -183,9 +166,8 @@ pub async fn handle_webhooks(action: WebhookAction, api: String) -> anyhow::Resu
             }
         }
         WebhookAction::Remove { id } => {
-            println!(
-                "Webhook removal not yet supported by the API (id: {id}). Restart server to clear."
-            );
+            client.remove_webhook(&id).await?;
+            println!("Webhook removed for service: {id}");
         }
     }
     Ok(())

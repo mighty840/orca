@@ -3,7 +3,7 @@
 use tracing::info;
 
 use orca_core::config::ServiceConfig;
-use orca_core::types::{WorkloadSpec, WorkloadStatus};
+use orca_core::types::{HealthState, WorkloadSpec, WorkloadStatus};
 
 /// Derive the Docker network name for a workload spec.
 pub(crate) fn service_network_name(spec: &WorkloadSpec) -> String {
@@ -36,6 +36,7 @@ pub(crate) async fn update_container_routes(state: &AppState, config: &ServiceCo
         .instances
         .iter()
         .filter(|i| i.status == WorkloadStatus::Running)
+        .filter(|i| matches!(i.health, HealthState::Healthy | HealthState::NoCheck))
         .filter_map(|i| {
             let address = i
                 .host_port
@@ -187,5 +188,56 @@ mod tests {
             err_msg.contains("no image or module"),
             "unexpected error: {err_msg}"
         );
+    }
+
+    use crate::state::InstanceState;
+    use orca_core::runtime::WorkloadHandle;
+
+    fn make_instance(health: HealthState, port: Option<u16>) -> InstanceState {
+        InstanceState {
+            handle: WorkloadHandle {
+                runtime_id: "r".into(),
+                name: "n".into(),
+                metadata: HashMap::new(),
+            },
+            status: WorkloadStatus::Running,
+            host_port: port,
+            container_address: None,
+            health,
+        }
+    }
+
+    /// Only Healthy and NoCheck instances should be routable.
+    #[test]
+    fn health_filter_includes_healthy_and_nocheck() {
+        let instances = vec![
+            make_instance(HealthState::Healthy, Some(8080)),
+            make_instance(HealthState::NoCheck, Some(8081)),
+            make_instance(HealthState::Unhealthy, Some(8082)),
+            make_instance(HealthState::Unknown, Some(8083)),
+        ];
+        let routable: Vec<_> = instances
+            .iter()
+            .filter(|i| i.status == WorkloadStatus::Running)
+            .filter(|i| matches!(i.health, HealthState::Healthy | HealthState::NoCheck))
+            .collect();
+        assert_eq!(routable.len(), 2);
+        assert_eq!(routable[0].host_port, Some(8080));
+        assert_eq!(routable[1].host_port, Some(8081));
+    }
+
+    /// All-unhealthy instances should produce an empty route set.
+    #[test]
+    fn health_filter_excludes_all_unhealthy() {
+        let instances = vec![
+            make_instance(HealthState::Unhealthy, Some(8080)),
+            make_instance(HealthState::Unknown, Some(8081)),
+        ];
+        let routable: Vec<_> = instances
+            .iter()
+            .filter(|i| i.status == WorkloadStatus::Running)
+            .filter(|i| matches!(i.health, HealthState::Healthy | HealthState::NoCheck))
+            .collect();
+        assert!(routable.is_empty());
     }
 }

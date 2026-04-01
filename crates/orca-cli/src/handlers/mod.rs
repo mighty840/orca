@@ -4,6 +4,7 @@ pub mod daemon;
 pub mod db;
 pub mod deploy;
 pub mod exec;
+pub mod import;
 pub mod join;
 pub mod ops;
 mod port;

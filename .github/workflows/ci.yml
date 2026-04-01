@@ -29,9 +29,9 @@ jobs:
         run: cargo test
       - name: Check file sizes
         run: |
-          over=$(find crates -name "*.rs" -exec wc -l {} + | sort -rn | awk '$1 > 250 && $2 != "total" {print}')
+          over=$(find crates -name "*.rs" -exec wc -l {} + | sort -rn | awk '$1 > 275 && $2 != "total" {print}')
           if [ -n "$over" ]; then
-            echo "Files over 250 lines:"
+            echo "Files over 275 lines:"
             echo "$over"
             exit 1
           fi

@@ -85,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Generate { description } => handlers::ops::handle_generate(description),
         Command::Alerts { action } => handlers::ops::handle_alerts(action),
         Command::Secrets { action } => handlers::ops::handle_secrets(action),
-        Command::Import { source } => handlers::ops::handle_import(source),
+        Command::Import { source } => handlers::import::handle_import(source),
         Command::Webhooks { action } => handlers::ops::handle_webhooks(action, cli.api).await?,
         Command::Nodes { gpus } => handlers::ops::handle_nodes(gpus, cli.api).await?,
         Command::Gpus => handlers::ops::handle_gpus(),
