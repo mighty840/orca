@@ -28,6 +28,8 @@ pub struct AcmeManager {
     pub cache_dir: PathBuf,
     challenges: Arc<RwLock<HashMap<String, String>>>,
     domains: Arc<RwLock<HashSet<String>>>,
+    /// Semaphore ensuring only one ACME order is in-flight at a time.
+    provision_lock: Arc<tokio::sync::Semaphore>,
 }
 
 impl AcmeManager {
@@ -37,6 +39,7 @@ impl AcmeManager {
             cache_dir: cache_dir.into(),
             challenges: Arc::new(RwLock::new(HashMap::new())),
             domains: Arc::new(RwLock::new(HashSet::new())),
+            provision_lock: Arc::new(tokio::sync::Semaphore::new(1)),
         }
     }
 
@@ -132,6 +135,19 @@ impl AcmeManager {
         domain: &str,
         resolver: &DynCertResolver,
     ) -> anyhow::Result<()> {
+        if resolver.has_cert(domain) && !self.needs_renewal(domain) {
+            return Ok(());
+        }
+
+        // Acquire the provision lock to serialize ACME orders.
+        // Concurrent orders to the same ACME provider can fail.
+        let _permit = self
+            .provision_lock
+            .acquire()
+            .await
+            .map_err(|e| anyhow::anyhow!("ACME provision lock closed: {e}"))?;
+
+        // Re-check after acquiring lock (another task may have provisioned it)
         if resolver.has_cert(domain) && !self.needs_renewal(domain) {
             return Ok(());
         }

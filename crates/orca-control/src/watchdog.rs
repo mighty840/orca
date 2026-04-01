@@ -48,6 +48,9 @@ async fn check_services(state: &AppState) {
             .collect()
     };
 
+    let total = service_info.len();
+    let mut reconciled = 0u32;
+
     for (name, runtime_kind) in &service_info {
         let needs_reconcile = check_and_prune(state, name, *runtime_kind).await;
 
@@ -61,6 +64,7 @@ async fn check_services(state: &AppState) {
                 if let Err(e) = crate::reconciler::reconcile_service(state, &config).await {
                     warn!(service = %name, "Watchdog reconciliation failed: {e}");
                 }
+                reconciled += 1;
             }
         }
 
@@ -75,6 +79,12 @@ async fn check_services(state: &AppState) {
             }
         }
     }
+
+    debug!(
+        services_checked = total,
+        services_reconciled = reconciled,
+        "Watchdog cycle complete"
+    );
 }
 
 /// Check instance statuses and remove stopped/failed ones.

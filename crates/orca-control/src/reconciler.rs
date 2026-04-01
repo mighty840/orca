@@ -106,8 +106,9 @@ pub(crate) async fn reconcile_service(
 
     // Skip scaling if we already have the right number of instances
     // with the same image — prevents duplicate containers on re-deploy.
-    let same_image =
-        svc_state.config.image == config.image && svc_state.config.module == config.module;
+    let same_image = svc_state.config.image == config.image
+        && svc_state.config.module == config.module
+        && svc_state.config.env == config.env;
 
     svc_state.config = config.clone();
     svc_state.desired_replicas = desired;
@@ -130,6 +131,18 @@ pub(crate) async fn reconcile_service(
             RuntimeKind::Container => update_container_routes(state, config).await,
             RuntimeKind::Wasm => update_wasm_triggers(state, config).await,
         }
+        return Ok(());
+    }
+
+    // Rolling update: config changed but replica count is the same.
+    // Start new instances first, then stop old ones to minimize downtime.
+    if current == desired && !same_image {
+        info!(
+            "Rolling update for {} ({} replicas, config changed)",
+            config.name, desired
+        );
+        drop(services);
+        crate::operations::rolling_update(state, runtime, config, &spec, desired).await?;
         return Ok(());
     }
 

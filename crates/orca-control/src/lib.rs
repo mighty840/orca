@@ -17,6 +17,7 @@ pub mod store;
 pub mod watchdog;
 pub mod webhook;
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use orca_core::config::ClusterConfig;
@@ -71,6 +72,10 @@ pub async fn run_server_with_acme(
     }
     let state = Arc::new(app_state);
 
+    // Register the master node so it appears in TUI/status.
+    register_master_node(&state, cluster_config.cluster.api_port).await;
+    spawn_master_heartbeat(state.clone());
+
     // Spawn background resilience tasks.
     watchdog::spawn_watchdog(state.clone());
     health::spawn_health_checker(state.clone());
@@ -86,6 +91,47 @@ pub async fn run_server_with_acme(
         .await?;
 
     Ok(())
+}
+
+/// Compute a deterministic node ID from the system hostname.
+fn master_node_id() -> u64 {
+    use std::hash::{Hash, Hasher};
+    let hostname = std::env::var("HOSTNAME")
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .unwrap_or_else(|_| "orca-master".to_string());
+    let mut hasher = std::hash::DefaultHasher::new();
+    hostname.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Register the master node in the cluster node map.
+async fn register_master_node(state: &state::AppState, api_port: u16) {
+    let node_id = master_node_id();
+    let mut labels = HashMap::new();
+    labels.insert("role".to_string(), "master".to_string());
+    let node = state::RegisteredNode {
+        node_id,
+        address: format!("localhost:{api_port}"),
+        labels,
+        last_heartbeat: chrono::Utc::now(),
+    };
+    let mut nodes = state.registered_nodes.write().await;
+    nodes.insert(node_id, node);
+    info!(node_id, "Master node self-registered");
+}
+
+/// Spawn a periodic task that updates the master node's heartbeat timestamp.
+fn spawn_master_heartbeat(state: Arc<state::AppState>) {
+    let node_id = master_node_id();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            let mut nodes = state.registered_nodes.write().await;
+            if let Some(node) = nodes.get_mut(&node_id) {
+                node.last_heartbeat = chrono::Utc::now();
+            }
+        }
+    });
 }
 
 async fn shutdown_signal() {
