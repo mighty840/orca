@@ -5,8 +5,10 @@
 
 pub(crate) mod certs;
 mod provider;
+mod resolver;
 
 pub use provider::AcmeProvider;
+pub use resolver::DynCertResolver;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -119,6 +121,52 @@ impl AcmeManager {
             .with_no_client_auth()
             .with_single_cert(certs, key)?;
         Ok(Some(TlsAcceptor::from(Arc::new(config))))
+    }
+
+    /// Provision a cert for a domain and add it to the dynamic resolver.
+    ///
+    /// If a valid cached cert exists, it's loaded instead of re-provisioning.
+    /// This is the hot-provisioning entry point called during `orca deploy`.
+    pub async fn ensure_cert_for_resolver(
+        &self,
+        domain: &str,
+        resolver: &DynCertResolver,
+    ) -> anyhow::Result<()> {
+        if resolver.has_cert(domain) && !self.needs_renewal(domain) {
+            return Ok(());
+        }
+
+        let provider = self.provider();
+        let cert_path = self.cert_path(domain);
+        let key_path = self.key_path(domain);
+
+        // Try cache first
+        let (cert_pem, key_pem) =
+            if cert_path.exists() && key_path.exists() && !self.needs_renewal(domain) {
+                info!(domain, "Loading cached cert for hot provisioning");
+                (std::fs::read(&cert_path)?, std::fs::read(&key_path)?)
+            } else {
+                info!(domain, "Hot-provisioning TLS certificate");
+                provider.provision_cert(domain).await?
+            };
+
+        let certified_key = Self::build_certified_key(&cert_pem, &key_pem)?;
+        resolver.add_cert(domain, Arc::new(certified_key));
+        info!(domain, "Certificate ready (hot-provisioned)");
+        Ok(())
+    }
+
+    /// Build a `CertifiedKey` from PEM bytes.
+    fn build_certified_key(
+        cert_pem: &[u8],
+        key_pem: &[u8],
+    ) -> anyhow::Result<rustls::sign::CertifiedKey> {
+        let certs: Vec<_> =
+            rustls_pemfile::certs(&mut &cert_pem[..]).collect::<Result<Vec<_>, _>>()?;
+        let key = rustls_pemfile::private_key(&mut &key_pem[..])?
+            .ok_or_else(|| anyhow::anyhow!("no private key in PEM data"))?;
+        let signing_key = rustls::crypto::aws_lc_rs::sign::any_supported_type(&key)?;
+        Ok(rustls::sign::CertifiedKey::new(certs, signing_key))
     }
 
     pub fn cert_path(&self, domain: &str) -> PathBuf {

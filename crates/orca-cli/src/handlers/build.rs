@@ -5,7 +5,12 @@ use orca_core::config::ServicesConfig;
 
 /// Build Docker images from source for one or all services.
 pub async fn handle_build(file: &str, service: Option<String>) -> anyhow::Result<()> {
-    let config = ServicesConfig::load(file.as_ref())?;
+    let path = std::path::Path::new(file);
+    let config = if path.is_dir() {
+        ServicesConfig::load_dir(path)?
+    } else {
+        ServicesConfig::load(path)?
+    };
     let builder = DockerBuilder::default_dir()?;
 
     let services: Vec<_> = config

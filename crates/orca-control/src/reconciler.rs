@@ -145,6 +145,15 @@ pub(crate) async fn reconcile_service(
         RuntimeKind::Wasm => update_wasm_triggers(state, config).await,
     }
 
+    // Hot-provision TLS cert for new domains
+    if let Some(domain) = &config.domain
+        && let (Some(acme), Some(resolver)) = (&state.acme_manager, &state.cert_resolver)
+        && !resolver.has_cert(domain)
+        && let Err(e) = acme.ensure_cert_for_resolver(domain, resolver).await
+    {
+        tracing::error!(domain, "Hot cert provisioning failed: {e}");
+    }
+
     Ok(())
 }
 
@@ -192,12 +201,21 @@ async fn create_and_start_instance(
         wait_for_ready(&addr, path).await;
     }
 
+    // If no health/liveness probe is configured, mark as NoCheck so the
+    // instance is immediately routable. If probes exist, the health checker
+    // will update the state after its first check.
+    let initial_health = if spec.health.is_none() && spec.liveness.is_none() {
+        orca_core::types::HealthState::NoCheck
+    } else {
+        orca_core::types::HealthState::Healthy
+    };
+
     Ok(InstanceState {
         handle,
         status: WorkloadStatus::Running,
         host_port,
         container_address,
-        health: orca_core::types::HealthState::Unknown,
+        health: initial_health,
     })
 }
 

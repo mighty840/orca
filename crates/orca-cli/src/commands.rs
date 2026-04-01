@@ -19,10 +19,10 @@ pub enum Command {
         daemon: bool,
     },
 
-    /// Deploy services from config
+    /// Deploy services from config (file or directory)
     Deploy {
-        /// Path to services.toml
-        #[arg(short, long, default_value = "services.toml")]
+        /// Path to services dir or single .toml file
+        #[arg(short, long, default_value = "services")]
         file: String,
     },
 
@@ -172,8 +172,8 @@ pub enum Command {
     Build {
         /// Service name to build (builds all if omitted)
         service: Option<String>,
-        /// Path to services.toml
-        #[arg(short, long, default_value = "services.toml")]
+        /// Path to services dir or single .toml file
+        #[arg(short, long, default_value = "services")]
         file: String,
     },
 }

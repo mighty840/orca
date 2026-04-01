@@ -38,6 +38,10 @@ pub struct AppState {
     pub api_tokens: Vec<String>,
     /// Deploy history for rollback support.
     pub deploy_history: RwLock<crate::deploy_history::DeployHistory>,
+    /// ACME manager for hot cert provisioning (None if no TLS).
+    pub acme_manager: Option<orca_proxy::acme::AcmeManager>,
+    /// Dynamic cert resolver shared with the HTTPS listener.
+    pub cert_resolver: Option<orca_proxy::SharedCertResolver>,
 }
 
 /// A node registered in the cluster.
@@ -100,7 +104,20 @@ impl AppState {
             webhooks: crate::webhook::new_store(),
             api_tokens,
             deploy_history: RwLock::new(crate::deploy_history::DeployHistory::new()),
+            acme_manager: None,
+            cert_resolver: None,
         }
+    }
+
+    /// Set ACME manager and cert resolver for hot cert provisioning.
+    pub fn with_acme(
+        mut self,
+        manager: orca_proxy::acme::AcmeManager,
+        resolver: orca_proxy::SharedCertResolver,
+    ) -> Self {
+        self.acme_manager = Some(manager);
+        self.cert_resolver = Some(resolver);
+        self
     }
 }
 

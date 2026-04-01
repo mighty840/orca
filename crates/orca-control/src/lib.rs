@@ -35,13 +35,39 @@ pub async fn run_server(
     route_table: SharedRouteTable,
     wasm_triggers: SharedWasmTriggers,
 ) -> anyhow::Result<()> {
-    let state = Arc::new(AppState::new(
+    run_server_with_acme(
+        cluster_config,
+        container_runtime,
+        wasm_runtime,
+        route_table,
+        wasm_triggers,
+        None,
+        None,
+    )
+    .await
+}
+
+/// Start the orca control plane with optional ACME hot-provisioning.
+pub async fn run_server_with_acme(
+    cluster_config: ClusterConfig,
+    container_runtime: Arc<dyn Runtime>,
+    wasm_runtime: Option<Arc<dyn Runtime>>,
+    route_table: SharedRouteTable,
+    wasm_triggers: SharedWasmTriggers,
+    acme_manager: Option<orca_proxy::acme::AcmeManager>,
+    cert_resolver: Option<orca_proxy::SharedCertResolver>,
+) -> anyhow::Result<()> {
+    let mut app_state = AppState::new(
         cluster_config.clone(),
         container_runtime,
         wasm_runtime,
         route_table,
         wasm_triggers,
-    ));
+    );
+    if let (Some(acme), Some(resolver)) = (acme_manager, cert_resolver) {
+        app_state = app_state.with_acme(acme, resolver);
+    }
+    let state = Arc::new(app_state);
     let app = api::router(state.clone());
 
     let addr = format!("0.0.0.0:{}", cluster_config.cluster.api_port);

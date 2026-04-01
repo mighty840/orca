@@ -51,17 +51,30 @@ sudo apt install protobuf-compiler build-essential pkg-config libssl-dev
 sudo dnf install protobuf-compiler gcc pkg-config openssl-devel
 ```
 
+### Port 80/443 binding (one-time)
+
+Orca's built-in proxy needs ports 80 and 443 for HTTP and auto-TLS. On Linux,
+non-root processes can't bind to ports below 1024. Grant the capability once
+after each binary install/update:
+
+```bash
+sudo setcap 'cap_net_bind_service=+ep' $(which orca)
+```
+
 ## Quick Start
 
 ```bash
 # 1. Create configs
+mkdir -p services/web
+
 cat > cluster.toml << 'EOF'
 [cluster]
 name = "my-cluster"
 domain = "example.com"
+acme_email = "ops@example.com"
 EOF
 
-cat > services.toml << 'EOF'
+cat > services/web/service.toml << 'EOF'
 [[service]]
 name = "web"
 image = "nginx:alpine"
@@ -72,13 +85,13 @@ health = "/"
 EOF
 
 # 2. Start the server
-orca server --proxy-port 8080 &
+orca server &
 
 # 3. Deploy and manage
-orca deploy
+orca deploy           # auto-discovers services/*/service.toml
 orca status
 orca logs web
-orca tui            # terminal dashboard
+orca tui              # terminal dashboard
 ```
 
 ### One-Click Database

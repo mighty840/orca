@@ -65,83 +65,123 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
     let wasm_as_trait: Option<Arc<dyn orca_core::runtime::Runtime>> =
         wasm_runtime.map(|wr| wr as Arc<dyn orca_core::runtime::Runtime>);
 
-    // Check if any domain needs TLS — load services.toml if it exists
+    // Collect domains for ACME cert provisioning
     let acme_email = cluster_config.cluster.acme_email.clone();
-    let has_domains = std::path::Path::new("services.toml")
-        .exists()
-        .then(|| orca_core::config::ServicesConfig::load("services.toml".as_ref()).ok())
-        .flatten()
-        .map(|s| s.service.iter().any(|svc| svc.domain.is_some()))
-        .unwrap_or(false);
+    let services_dir = std::path::Path::new("services");
+    let domains: Vec<String> = if services_dir.is_dir() {
+        orca_core::config::ServicesConfig::load_dir(services_dir)
+            .ok()
+            .map(|s| {
+                s.service
+                    .iter()
+                    .filter_map(|svc| svc.domain.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        std::path::Path::new("services.toml")
+            .exists()
+            .then(|| orca_core::config::ServicesConfig::load("services.toml".as_ref()).ok())
+            .flatten()
+            .map(|s| {
+                s.service
+                    .iter()
+                    .filter_map(|svc| svc.domain.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    info!("Domain detection: {} domains found", domains.len());
 
-    // Spawn proxy: HTTPS on 443 + HTTP on 80 if domains exist, else HTTP only
+    // Start proxy and get ACME components for hot cert provisioning
     let proxy_routes = route_table.clone();
     let proxy_triggers = wasm_triggers.clone();
-    tokio::spawn(async move {
-        let acme = if has_domains {
-            acme_email.map(|email| {
-                let cache = std::env::var("HOME")
-                    .map(std::path::PathBuf::from)
-                    .unwrap_or_else(|_| ".".into())
-                    .join(".orca/certs");
-                orca_proxy::acme::AcmeManager::new(email, cache)
-            })
-        } else {
-            None
-        };
-
-        let actual_port = match orca_proxy::run_proxy(
-            proxy_routes.clone(),
-            proxy_triggers.clone(),
-            wasm_invoker.clone(),
-            proxy_port,
-            None,
-            acme.clone(),
-        )
-        .await
-        {
-            Ok(()) => return,
-            Err(e) if is_permission_denied(&e) && (proxy_port == 80 || proxy_port == 443) => {
-                let high_port = setup_port_redirect(proxy_port);
-                if high_port == proxy_port {
-                    tracing::error!("Proxy error: {e}");
-                    tracing::error!(
-                        "Port {proxy_port} requires root. Run with sudo or use --proxy-port {}",
-                        if proxy_port == 80 { 8080 } else { 8443 }
-                    );
-                    return;
-                }
-                high_port
-            }
-            Err(e) => {
-                tracing::error!("Proxy error: {e}");
-                return;
-            }
-        };
-
-        info!("Retrying proxy on port {actual_port} (iptables redirect from {proxy_port})");
-        if let Err(e) = orca_proxy::run_proxy(
+    let (acme_for_control, resolver_for_control) = if !domains.is_empty()
+        && let Some(email) = acme_email
+    {
+        let cache = std::env::var("HOME")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| ".".into())
+            .join(".orca/certs");
+        let acme = orca_proxy::acme::AcmeManager::new(email, cache);
+        let acme_clone = acme.clone();
+        match orca_proxy::run_proxy_with_acme(
             proxy_routes,
             proxy_triggers,
             wasm_invoker,
-            actual_port,
-            None,
-            acme,
+            acme.clone(),
+            domains,
         )
         .await
         {
-            tracing::error!("Proxy error on fallback port {actual_port}: {e}");
+            Ok(resolver) => (Some(acme_clone), Some(resolver)),
+            Err(e) => {
+                tracing::error!("Proxy with ACME failed: {e}");
+                (None, None)
+            }
         }
-    });
+    } else {
+        // Fallback: HTTP only proxy
+        let proxy_routes_c = proxy_routes.clone();
+        let proxy_triggers_c = proxy_triggers.clone();
+        let wasm_invoker_c = wasm_invoker.clone();
+        tokio::spawn(async move {
+            let actual_port = match orca_proxy::run_proxy(
+                proxy_routes_c.clone(),
+                proxy_triggers_c.clone(),
+                wasm_invoker_c.clone(),
+                proxy_port,
+                None,
+                None,
+            )
+            .await
+            {
+                Ok(()) => return,
+                Err(e) if is_permission_denied(&e) && (proxy_port == 80 || proxy_port == 443) => {
+                    let high_port = setup_port_redirect(proxy_port);
+                    if high_port == proxy_port {
+                        tracing::error!("Proxy error: {e}");
+                        tracing::error!(
+                            "Port {proxy_port} requires root. Run with sudo or use --proxy-port {}",
+                            if proxy_port == 80 { 8080 } else { 8443 }
+                        );
+                        return;
+                    }
+                    high_port
+                }
+                Err(e) => {
+                    tracing::error!("Proxy error: {e}");
+                    return;
+                }
+            };
+
+            info!("Retrying proxy on port {actual_port} (iptables redirect from {proxy_port})");
+            if let Err(e) = orca_proxy::run_proxy(
+                proxy_routes_c,
+                proxy_triggers_c,
+                wasm_invoker_c,
+                actual_port,
+                None,
+                None,
+            )
+            .await
+            {
+                tracing::error!("Proxy error on fallback port {actual_port}: {e}");
+            }
+        });
+        (None, None)
+    };
 
     // Run API server (blocks until shutdown)
     let cleanup_runtime = container_runtime.clone();
-    orca_control::run_server(
+    orca_control::run_server_with_acme(
         cluster_config,
         container_runtime,
         wasm_as_trait,
         route_table,
         wasm_triggers,
+        acme_for_control,
+        resolver_for_control,
     )
     .await?;
 

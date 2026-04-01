@@ -93,20 +93,23 @@ pub async fn run_proxy(
     .await
 }
 
+/// Shared dynamic cert resolver for hot-provisioning.
+pub type SharedCertResolver = Arc<acme::DynCertResolver>;
+
 /// Run HTTP on port 80 (for ACME challenges + redirect) and HTTPS on port 443.
 ///
 /// Automatically provisions certs for all given domains via Let's Encrypt.
+/// Returns a `SharedCertResolver` that can be used to hot-provision certs
+/// for new domains added later via `orca deploy`.
 pub async fn run_proxy_with_acme(
     route_table: Arc<RwLock<HashMap<String, Vec<RouteTarget>>>>,
     wasm_triggers: SharedWasmTriggers,
     wasm_invoker: Option<WasmInvoker>,
     acme_manager: AcmeManager,
     domains: Vec<String>,
-) -> anyhow::Result<()> {
-    let provider = acme_manager.provider();
+) -> anyhow::Result<SharedCertResolver> {
+    let resolver = Arc::new(acme::DynCertResolver::new());
 
-    // Provision certs for all domains (spawned so HTTP-01 challenges can be
-    // served concurrently on port 80).
     let acme_mgr = acme_manager.clone();
     let routes_clone = route_table.clone();
     let triggers_clone = wasm_triggers.clone();
@@ -125,41 +128,59 @@ pub async fn run_proxy_with_acme(
         }
     });
 
-    // Provision certs then start HTTPS
+    // Provision certs for initial domains, then start HTTPS with SNI resolver
+    let resolver_clone = resolver.clone();
     let https_handle = tokio::spawn(async move {
-        // Small delay to let HTTP listener start
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
+        // Provision all initial domain certs
         for domain in &domains {
-            info!(domain = %domain, "Auto-provisioning TLS certificate");
-            match provider.ensure_cert(domain).await {
-                Ok(acceptor) => {
-                    info!(domain = %domain, "TLS cert ready, starting HTTPS");
-                    let routes = routes_clone.clone();
-                    let triggers = triggers_clone.clone();
-                    let invoker = invoker_clone.clone();
-                    let acme = acme_mgr.clone();
-                    // Start HTTPS with the first successful cert
-                    if let Err(e) =
-                        run_proxy(routes, triggers, invoker, 443, Some(acceptor), Some(acme)).await
-                    {
-                        error!("HTTPS listener failed: {e}");
-                    }
-                    return;
-                }
-                Err(e) => {
-                    error!(domain = %domain, error = %e, "Failed to provision cert");
-                }
+            if let Err(e) = acme_mgr
+                .ensure_cert_for_resolver(domain, &resolver_clone)
+                .await
+            {
+                error!(domain = %domain, error = %e, "Failed to provision cert");
             }
         }
-        error!("No TLS certs could be provisioned — HTTPS not started");
+
+        // Build TlsAcceptor with SNI resolver for multi-domain support
+        let config = rustls::ServerConfig::builder()
+            .with_no_client_auth()
+            .with_cert_resolver(resolver_clone);
+
+        let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
+        info!(
+            "Starting HTTPS with SNI resolver ({} domains)",
+            domains.len()
+        );
+
+        let routes = routes_clone;
+        let triggers = triggers_clone;
+        let invoker = invoker_clone;
+        if let Err(e) = run_proxy(
+            routes,
+            triggers,
+            invoker,
+            443,
+            Some(acceptor),
+            Some(acme_mgr),
+        )
+        .await
+        {
+            error!("HTTPS listener failed: {e}");
+        }
     });
 
-    tokio::select! {
-        _ = http_handle => warn!("HTTP listener exited"),
-        _ = https_handle => warn!("HTTPS listener exited"),
-    }
-    Ok(())
+    // Don't block — return the resolver so the control plane can hot-add certs.
+    // The HTTP and HTTPS listeners run in the background.
+    tokio::spawn(async move {
+        tokio::select! {
+            _ = http_handle => warn!("HTTP listener exited"),
+            _ = https_handle => warn!("HTTPS listener exited"),
+        }
+    });
+
+    Ok(resolver)
 }
 
 /// Core accept loop shared by HTTP and HTTPS listeners.

@@ -54,8 +54,13 @@ impl AcmeProvider {
         // Process authorizations
         self.handle_authorizations(&mut order).await?;
 
-        // Poll until order is ready for finalization
+        // Poll until order is ready for finalization.
+        // Challenge tokens remain available until LE validates them.
         let status = order.poll_ready(&RetryPolicy::default()).await?;
+
+        // Clean up challenge tokens now that validation is complete
+        self.challenges.write().await.clear();
+
         if status != OrderStatus::Ready {
             anyhow::bail!("Order not ready after challenges: {status:?}");
         }
@@ -99,9 +104,12 @@ impl AcmeProvider {
 
             challenge.set_ready().await?;
 
-            // Clean up challenge token after validation
-            self.challenges.write().await.remove(&token);
+            // Don't remove the token yet — Let's Encrypt needs to hit our
+            // /.well-known/acme-challenge/{token} endpoint. The token stays
+            // in memory until poll_ready succeeds on the order, then we
+            // clean up all challenge tokens.
         }
+
         Ok(())
     }
 

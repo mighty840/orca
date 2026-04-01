@@ -32,10 +32,15 @@ pub async fn handle_reload() -> Result<()> {
     // Wait for API to be ready
     tokio::time::sleep(std::time::Duration::from_secs(3)).await;
 
-    // Redeploy all services
-    info!("Redeploying services...");
+    // Redeploy all services (try services/ dir first, fall back to services.toml)
+    let deploy_arg = if cwd.join("services").is_dir() {
+        "services"
+    } else {
+        "services.toml"
+    };
+    info!("Redeploying services from {deploy_arg}...");
     let output = std::process::Command::new(&exe)
-        .args(["deploy"])
+        .args(["deploy", "--file", deploy_arg])
         .current_dir(&cwd)
         .output()?;
 
