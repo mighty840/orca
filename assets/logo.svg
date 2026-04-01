@@ -4,28 +4,41 @@
       <stop offset="0%" stop-color="#06B6D4"/>
       <stop offset="100%" stop-color="#0891B2"/>
     </linearGradient>
-    <linearGradient id="fin" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#22D3EE"/>
-      <stop offset="100%" stop-color="#06B6D4"/>
-    </linearGradient>
   </defs>
-  <!-- Background circle -->
-  <circle cx="256" cy="256" r="248" fill="#0F172A"/>
-  <circle cx="256" cy="256" r="240" fill="none" stroke="#1E293B" stroke-width="2"/>
-  <!-- Orca body - geometric whale shape -->
-  <path d="M140 300 Q140 220 200 190 L260 170 Q320 155 360 180 Q400 205 410 260 Q415 290 400 320 Q380 355 340 365 Q300 375 260 370 L200 360 Q160 350 140 300Z" fill="url(#body)"/>
+  <rect width="512" height="512" rx="80" fill="#0F172A"/>
+  <!-- Orca body — clean geometric silhouette -->
+  <path d="
+    M 130 310
+    C 135 230, 185 170, 260 155
+    C 310 145, 355 155, 385 180
+    C 415 210, 425 260, 415 305
+    C 405 340, 375 360, 340 368
+    L 280 372
+    C 230 374, 180 365, 155 345
+    C 138 332, 130 320, 130 310Z
+  " fill="url(#body)"/>
   <!-- Dorsal fin -->
-  <path d="M270 170 L255 100 Q250 85 260 90 L300 155Z" fill="url(#fin)"/>
-  <!-- Belly patch (white/light marking) -->
-  <path d="M200 280 Q220 250 270 245 Q310 242 340 260 Q355 270 350 290 Q340 320 300 330 Q270 345 240 340 Q210 330 200 300Z" fill="#E2E8F0" opacity="0.9"/>
-  <!-- Eye -->
-  <circle cx="220" cy="230" r="12" fill="#0F172A"/>
-  <circle cx="223" cy="227" r="4" fill="#22D3EE"/>
-  <!-- Tail fluke -->
-  <path d="M140 300 Q120 310 100 290 Q90 275 105 270 Q120 268 140 280Z" fill="url(#body)"/>
-  <path d="M140 300 Q120 320 100 335 Q88 345 95 350 Q110 348 135 330 Q145 320 140 310Z" fill="url(#body)"/>
-  <!-- Container/hex accent marks -->
-  <rect x="310" cy="200" y="195" width="18" height="18" rx="3" fill="#22D3EE" opacity="0.6" transform="rotate(15 319 204)"/>
-  <rect x="345" y="220" width="12" height="12" rx="2" fill="#22D3EE" opacity="0.4" transform="rotate(-10 351 226)"/>
-  <rect x="370" y="195" width="8" height="8" rx="1.5" fill="#22D3EE" opacity="0.3"/>
+  <path d="
+    M 275 155
+    C 268 110, 290 65, 310 52
+    C 305 90, 308 125, 318 155Z
+  " fill="url(#body)"/>
+  <!-- Tail flukes -->
+  <path d="
+    M 130 310
+    C 115 298, 88 270, 78 252
+    C 92 268, 108 280, 120 286
+    C 106 298, 94 312, 80 328
+    C 100 326, 118 318, 130 310Z
+  " fill="url(#body)"/>
+  <!-- Eye patch (dark) -->
+  <ellipse cx="365" cy="215" rx="18" ry="13" fill="#0F172A"/>
+  <!-- Eye (bright) -->
+  <ellipse cx="367" cy="213" rx="7" ry="5" fill="#E2E8F0"/>
+  <!-- Belly marking -->
+  <path d="
+    M 240 368
+    C 265 348, 310 345, 335 365
+    C 305 362, 265 362, 240 368Z
+  " fill="#E2E8F0" opacity="0.35"/>
 </svg>

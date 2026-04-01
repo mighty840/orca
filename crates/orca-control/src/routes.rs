@@ -1,9 +1,19 @@
 //! Routing table management for container and Wasm workloads.
 
+use std::collections::HashMap;
+
 use tracing::info;
 
 use orca_core::config::ServiceConfig;
 use orca_core::types::{HealthState, WorkloadSpec, WorkloadStatus};
+
+/// Resolve `${secrets.KEY}` patterns in env vars using the local secrets store.
+fn resolve_secrets(env: &HashMap<String, String>) -> HashMap<String, String> {
+    match orca_core::secrets::SecretStore::open("secrets.json") {
+        Ok(store) => store.resolve_env(env),
+        Err(_) => env.clone(),
+    }
+}
 
 /// Derive the Docker network name for a workload spec.
 pub(crate) fn service_network_name(spec: &WorkloadSpec) -> String {
@@ -132,7 +142,7 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
         health: config.health.clone(),
         readiness: config.readiness.clone(),
         liveness: config.liveness.clone(),
-        env: config.env.clone(),
+        env: resolve_secrets(&config.env),
         resources: config.resources.clone(),
         volume: config.volume.clone(),
         deploy: config.deploy.clone(),
@@ -270,5 +280,53 @@ mod tests {
             .filter(|i| matches!(i.health, HealthState::Healthy | HealthState::NoCheck))
             .collect();
         assert!(routable.is_empty());
+    }
+
+    /// Secret patterns in env vars must be resolved by service_config_to_spec.
+    #[test]
+    fn config_to_spec_resolves_secrets() {
+        let dir = tempfile::tempdir().unwrap();
+        let secrets_path = dir.path().join("secrets.json");
+
+        // Use the default master key so resolve_secrets() (which calls open())
+        // can decrypt with the same key.
+        let mut store = orca_core::secrets::SecretStore::open(&secrets_path).unwrap();
+        store.set("DB_PASS", "hunter2").unwrap();
+        drop(store);
+
+        // Copy secrets.json to "secrets.json" relative (where resolve_secrets looks)
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let mut config = minimal_config(Some("postgres:16".into()), None);
+        config
+            .env
+            .insert("POSTGRES_PASSWORD".into(), "${secrets.DB_PASS}".into());
+        config.env.insert("PLAIN".into(), "unchanged".into());
+
+        let spec = service_config_to_spec(&config).unwrap();
+        assert_eq!(spec.env["POSTGRES_PASSWORD"], "hunter2");
+        assert_eq!(spec.env["PLAIN"], "unchanged");
+
+        std::env::set_current_dir(original_dir).unwrap();
+    }
+
+    /// When no secrets file exists, env vars pass through unchanged.
+    #[test]
+    fn config_to_spec_no_secrets_file_passes_env_through() {
+        let dir = tempfile::tempdir().unwrap();
+        let original_dir = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+
+        let mut config = minimal_config(Some("nginx:latest".into()), None);
+        config
+            .env
+            .insert("SECRET_VAR".into(), "${secrets.MISSING}".into());
+
+        let spec = service_config_to_spec(&config).unwrap();
+        // No secrets file -> env returned as-is (clone fallback)
+        assert_eq!(spec.env["SECRET_VAR"], "${secrets.MISSING}");
+
+        std::env::set_current_dir(original_dir).unwrap();
     }
 }
