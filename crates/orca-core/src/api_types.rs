@@ -119,6 +119,7 @@ mod tests {
                 host_port: None,
                 triggers: vec![],
                 assets: None,
+                build: None,
             }],
         };
         let json = serde_json::to_string(&req).unwrap();

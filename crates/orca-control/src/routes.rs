@@ -98,12 +98,27 @@ pub(crate) async fn update_wasm_triggers(state: &AppState, config: &ServiceConfi
 }
 
 /// Convert a [`ServiceConfig`] into a [`WorkloadSpec`] for the runtime.
+///
+/// When `build` is configured, the image field uses a placeholder that the
+/// reconciler replaces after building. If neither `image`, `module`, nor `build`
+/// is set, an error is returned.
 pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<WorkloadSpec> {
     let image = config
         .image
         .clone()
         .or_else(|| config.module.clone())
-        .ok_or_else(|| anyhow::anyhow!("service '{}' has no image or module", config.name))?;
+        .or_else(|| {
+            config
+                .build
+                .as_ref()
+                .map(|_| format!("orca-build-{}:pending", config.name))
+        })
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "service '{}' has no image, module, or build config",
+                config.name
+            )
+        })?;
 
     Ok(WorkloadSpec {
         name: config.name.clone(),
@@ -130,6 +145,7 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
             .iter()
             .filter_map(|t| t.clone().try_into().ok())
             .collect(),
+        build: config.build.clone(),
     })
 }
 
@@ -165,6 +181,7 @@ mod tests {
             host_port: None,
             triggers: Vec::new(),
             assets: None,
+            build: None,
         }
     }
 
@@ -185,9 +202,23 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(
-            err_msg.contains("no image or module"),
+            err_msg.contains("no image, module, or build config"),
             "unexpected error: {err_msg}"
         );
+    }
+
+    #[test]
+    fn config_to_spec_with_build_config() {
+        let mut config = minimal_config(None, None);
+        config.build = Some(orca_core::config::BuildConfig {
+            repo: "git@github.com:org/repo.git".to_string(),
+            branch: None,
+            dockerfile: None,
+            context: None,
+        });
+        let spec = service_config_to_spec(&config).unwrap();
+        assert!(spec.image.starts_with("orca-build-test-svc:"));
+        assert!(spec.build.is_some());
     }
 
     use crate::state::InstanceState;

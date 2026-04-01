@@ -36,6 +36,8 @@ pub struct WorkloadSpec {
     /// Host bind mounts (e.g., ["/host/path:/container/path:ro"]).
     pub mounts: Vec<String>,
     pub triggers: Vec<Trigger>,
+    /// Build configuration for building the image from source.
+    pub build: Option<crate::config::BuildConfig>,
 }
 
 /// Replica count: either a fixed number or "auto" for auto-scaling.

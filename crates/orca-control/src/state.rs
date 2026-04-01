@@ -160,6 +160,7 @@ mod tests {
             host_port: None,
             triggers: Vec::new(),
             assets: None,
+            build: None,
         }
     }
 

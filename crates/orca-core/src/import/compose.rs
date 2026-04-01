@@ -105,6 +105,7 @@ fn convert_service(name: &str, svc: &ComposeService, network: &str) -> ServiceCo
         mounts: svc.volumes.clone(),
         triggers: vec![],
         assets: None,
+        build: None,
     }
 }
 
@@ -243,6 +244,7 @@ services:
                 mounts: vec![],
                 triggers: vec![],
                 assets: None,
+                build: None,
             }],
         };
         let toml_str = services_to_toml(&config).unwrap();

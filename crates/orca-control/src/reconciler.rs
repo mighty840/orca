@@ -60,7 +60,20 @@ pub(crate) async fn reconcile_service(
         Replicas::Auto => 1,
     };
 
-    let spec = service_config_to_spec(config)?;
+    let mut spec = service_config_to_spec(config)?;
+
+    // If the service has a build config, build the image from source first.
+    if let Some(build_config) = &config.build {
+        info!("Building image for {} from source", config.name);
+        let builder = orca_agent::builder::DockerBuilder::default_dir()
+            .map_err(|e| anyhow::anyhow!("failed to create builder: {e}"))?;
+        let image_tag = builder
+            .build_service(build_config, &config.name)
+            .await
+            .map_err(|e| anyhow::anyhow!("build failed for {}: {e}", config.name))?;
+        spec.image = image_tag;
+    }
+
     let runtime = get_runtime(state, config.runtime)?;
 
     let mut services = state.services.write().await;

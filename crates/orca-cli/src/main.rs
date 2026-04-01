@@ -131,6 +131,9 @@ async fn main() -> anyhow::Result<()> {
         Command::Db { action } => {
             handlers::db::handle_db(action, cli.api).await?;
         }
+        Command::Build { service, file } => {
+            handlers::build::handle_build(&file, service).await?;
+        }
         Command::Tui => handlers::ops::handle_tui(&cli.api).await?,
         Command::Web { port } => handlers::ops::handle_web(port).await?,
     }

@@ -24,3 +24,4 @@ wasmtime = { workspace = true }
 wasmtime-wasi = { workspace = true }
 futures-util = "0.3"
 tokio-util = { version = "0.7", features = ["io"] }
+dirs-next = "2"
