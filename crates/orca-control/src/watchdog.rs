@@ -37,6 +37,11 @@ async fn run_watchdog(state: &AppState) {
     }
 }
 
+/// Run a single watchdog cycle. Exposed for testing.
+pub async fn run_watchdog_cycle(state: &AppState) {
+    check_services(state).await;
+}
+
 /// Check all services for degraded instances and re-reconcile as needed.
 async fn check_services(state: &AppState) {
     // Collect service names and their runtime kinds under a read lock.
