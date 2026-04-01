@@ -7,11 +7,13 @@ use clap::Parser;
 
 use commands::Command;
 
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-", env!("ORCA_COMMIT"));
+
 #[derive(Parser)]
 #[command(
     name = "orca",
     about = "Container + Wasm orchestrator with AI ops",
-    version
+    version = VERSION,
 )]
 struct Cli {
     #[command(subcommand)]
