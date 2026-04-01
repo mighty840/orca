@@ -14,13 +14,12 @@ pub fn handle_exec(service: &str, cmd: &[String]) -> Result<()> {
         anyhow::bail!("Container '{container}' is not running");
     }
 
-    // Execute command interactively
-    let status = std::process::Command::new("docker")
-        .arg("exec")
-        .arg("-it")
-        .arg(&container)
-        .args(cmd)
-        .status()?;
+    let mut docker_cmd = std::process::Command::new("docker");
+    docker_cmd.arg("exec");
+    if std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        docker_cmd.arg("-it");
+    }
+    let status = docker_cmd.arg(&container).args(cmd).status()?;
 
     if !status.success() {
         anyhow::bail!("Command exited with status: {status}");
