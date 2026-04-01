@@ -126,4 +126,11 @@ pub struct ServiceConfig {
     /// Build configuration: clone a repo and build a Docker image from a Dockerfile.
     /// When set, `image` is not required — the built image is used instead.
     pub build: Option<BuildConfig>,
+    /// Path to PEM certificate file for BYO TLS (skips ACME provisioning).
+    pub tls_cert: Option<String>,
+    /// Path to PEM private key file for BYO TLS.
+    pub tls_key: Option<String>,
+    /// Join the shared `orca-internal` network for cross-service communication.
+    #[serde(default)]
+    pub internal: bool,
 }

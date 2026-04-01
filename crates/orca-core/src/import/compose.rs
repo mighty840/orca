@@ -106,6 +106,9 @@ fn convert_service(name: &str, svc: &ComposeService, network: &str) -> ServiceCo
         triggers: vec![],
         assets: None,
         build: None,
+        tls_cert: None,
+        tls_key: None,
+        internal: false,
     }
 }
 
@@ -245,6 +248,9 @@ services:
                 triggers: vec![],
                 assets: None,
                 build: None,
+                tls_cert: None,
+                tls_key: None,
+                internal: false,
             }],
         };
         let toml_str = services_to_toml(&config).unwrap();

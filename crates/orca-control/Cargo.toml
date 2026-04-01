@@ -10,7 +10,7 @@ include = ["src/**/*", "build.rs", "proto/**/*", "Cargo.toml"]
 
 [dependencies]
 orca-core = { workspace = true }
-orca-agent = { path = "../orca-agent", version = "0.1.0-rc.1" }
+orca-agent = { path = "../orca-agent", version = "0.1.0-rc.2" }
 orca-proxy = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -33,6 +33,8 @@ reqwest = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
+rustls = "0.23"
+rustls-pemfile = "2"
 
 [build-dependencies]
 tonic-build = "0.13"

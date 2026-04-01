@@ -156,6 +156,9 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
             .filter_map(|t| t.clone().try_into().ok())
             .collect(),
         build: config.build.clone(),
+        tls_cert: config.tls_cert.clone(),
+        tls_key: config.tls_key.clone(),
+        internal: config.internal,
     })
 }
 
@@ -192,6 +195,9 @@ mod tests {
             triggers: Vec::new(),
             assets: None,
             build: None,
+            tls_cert: None,
+            tls_key: None,
+            internal: false,
         }
     }
 

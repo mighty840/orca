@@ -38,6 +38,12 @@ pub struct WorkloadSpec {
     pub triggers: Vec<Trigger>,
     /// Build configuration for building the image from source.
     pub build: Option<crate::config::BuildConfig>,
+    /// BYO TLS certificate path (PEM).
+    pub tls_cert: Option<String>,
+    /// BYO TLS private key path (PEM).
+    pub tls_key: Option<String>,
+    /// Join shared orca-internal network.
+    pub internal: bool,
 }
 
 /// Replica count: either a fixed number or "auto" for auto-scaling.

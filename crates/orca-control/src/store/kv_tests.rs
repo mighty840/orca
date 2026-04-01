@@ -52,6 +52,9 @@ fn set_and_get_service() {
         triggers: Vec::new(),
         assets: None,
         build: None,
+        tls_cert: None,
+        tls_key: None,
+        internal: false,
     };
     store
         .apply(&RaftEntry::SetService(Box::new(config)))
@@ -130,6 +133,9 @@ fn snapshot_captures_all_state() {
             triggers: Vec::new(),
             assets: None,
             build: None,
+            tls_cert: None,
+            tls_key: None,
+            internal: false,
         })))
         .unwrap();
 

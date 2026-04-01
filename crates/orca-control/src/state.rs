@@ -178,6 +178,9 @@ mod tests {
             triggers: Vec::new(),
             assets: None,
             build: None,
+            tls_cert: None,
+            tls_key: None,
+            internal: false,
         }
     }
 

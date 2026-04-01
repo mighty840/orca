@@ -91,6 +91,9 @@ async fn handle_create(
         triggers: vec![],
         assets: None,
         build: None,
+        tls_cert: None,
+        tls_key: None,
+        internal: false,
     };
 
     // Store password as a secret

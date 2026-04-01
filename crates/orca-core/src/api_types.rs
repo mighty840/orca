@@ -120,6 +120,9 @@ mod tests {
                 triggers: vec![],
                 assets: None,
                 build: None,
+                tls_cert: None,
+                tls_key: None,
+                internal: false,
             }],
         };
         let json = serde_json::to_string(&req).unwrap();

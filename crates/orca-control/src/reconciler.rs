@@ -11,6 +11,18 @@ use orca_core::types::{Replicas, RuntimeKind, WorkloadSpec, WorkloadStatus};
 use crate::routes::{service_config_to_spec, update_container_routes, update_wasm_triggers};
 use crate::state::{AppState, InstanceState, ServiceState};
 
+/// Load a BYO TLS certificate and key from PEM files.
+fn load_byo_cert(cert_path: &str, key_path: &str) -> anyhow::Result<rustls::sign::CertifiedKey> {
+    let cert_pem = std::fs::read(cert_path)?;
+    let key_pem = std::fs::read(key_path)?;
+    let certs: Vec<_> =
+        rustls_pemfile::certs(&mut cert_pem.as_slice()).collect::<Result<Vec<_>, _>>()?;
+    let key = rustls_pemfile::private_key(&mut key_pem.as_slice())?
+        .ok_or_else(|| anyhow::anyhow!("no private key in {key_path}"))?;
+    let signing_key = rustls::crypto::aws_lc_rs::sign::any_supported_type(&key)?;
+    Ok(rustls::sign::CertifiedKey::new(certs, signing_key))
+}
+
 /// Reconcile all services: make reality match the desired config.
 ///
 /// For each service, creates or removes workloads to match the desired replica count,
@@ -145,13 +157,26 @@ pub(crate) async fn reconcile_service(
         RuntimeKind::Wasm => update_wasm_triggers(state, config).await,
     }
 
-    // Hot-provision TLS cert for new domains
+    // TLS cert provisioning for domains
     if let Some(domain) = &config.domain
-        && let (Some(acme), Some(resolver)) = (&state.acme_manager, &state.cert_resolver)
+        && let Some(resolver) = &state.cert_resolver
         && !resolver.has_cert(domain)
-        && let Err(e) = acme.ensure_cert_for_resolver(domain, resolver).await
     {
-        tracing::error!(domain, "Hot cert provisioning failed: {e}");
+        if let (Some(cert_path), Some(key_path)) = (&config.tls_cert, &config.tls_key) {
+            // BYO cert: load from file
+            match load_byo_cert(cert_path, key_path) {
+                Ok(key) => {
+                    resolver.add_cert(domain, std::sync::Arc::new(key));
+                    tracing::info!(domain, "BYO TLS certificate loaded");
+                }
+                Err(e) => tracing::error!(domain, "Failed to load BYO cert: {e}"),
+            }
+        } else if let Some(acme) = &state.acme_manager {
+            // ACME auto-provisioning
+            if let Err(e) = acme.ensure_cert_for_resolver(domain, resolver).await {
+                tracing::error!(domain, "Hot cert provisioning failed: {e}");
+            }
+        }
     }
 
     Ok(())

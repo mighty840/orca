@@ -63,10 +63,27 @@ impl Runtime for ContainerRuntime {
             .connect_to_network(&response.id, &network, &aliases)
             .await;
 
+        // Also connect to orca-internal network for cross-service communication
+        if spec.internal {
+            let _ = self.ensure_network("orca-internal").await;
+            let _ = self
+                .connect_to_network(
+                    &response.id,
+                    "orca-internal",
+                    std::slice::from_ref(&container_name),
+                )
+                .await;
+        }
+
         info!(
-            "Created container {} ({}) on {network}",
+            "Created container {} ({}) on {network}{}",
             container_name,
-            &response.id[..12]
+            &response.id[..12],
+            if spec.internal {
+                " + orca-internal"
+            } else {
+                ""
+            }
         );
 
         Ok(WorkloadHandle {

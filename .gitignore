@@ -7,3 +7,4 @@
 *.key
 orca-linux-x86_64
 migration/
+crates/orca-control/secrets.json
