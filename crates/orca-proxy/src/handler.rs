@@ -1,16 +1,20 @@
 //! HTTP request handler for the reverse proxy.
 
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Instant;
 
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use hyper::{Request, Response, StatusCode};
 use tokio::sync::RwLock;
-use tracing::{debug, error};
+use tracing::{debug, error, info};
 
 use crate::acme::AcmeManager;
+use crate::forward::{forward_with_retry, redirect_to_https};
+use crate::rate_limit::RateLimiter;
 use crate::routing::{find_matching_trigger, select_path_targets};
 use crate::{RouteTarget, SharedWasmTriggers, WasmInvoker};
 
@@ -59,6 +63,7 @@ pub(crate) async fn handle_acme_challenge(
 }
 
 /// Handle a single proxied request.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn handle_request(
     req: Request<Incoming>,
     route_table: &Arc<RwLock<HashMap<String, Vec<RouteTarget>>>>,
@@ -66,9 +71,21 @@ pub(crate) async fn handle_request(
     wasm_invoker: Option<&WasmInvoker>,
     counter: &Arc<AtomicUsize>,
     client: &Arc<reqwest::Client>,
+    is_tls: bool,
+    rate_limiter: &RateLimiter,
+    peer: SocketAddr,
 ) -> Result<Response<http_body_util::Full<hyper::body::Bytes>>, hyper::Error> {
+    let start = Instant::now();
     let path = req.uri().path().to_string();
     let method = req.method().to_string();
+
+    // Rate limiting per IP
+    if !rate_limiter.check(peer.ip()) {
+        return Ok(error_response(
+            StatusCode::TOO_MANY_REQUESTS,
+            "rate limit exceeded",
+        ));
+    }
 
     // Check Wasm triggers first (path-based routing takes priority)
     if let Some(invoker) = wasm_invoker {
@@ -80,7 +97,6 @@ pub(crate) async fn handle_request(
 
             debug!("Wasm trigger matched: {path} -> {service_name}");
 
-            // Read request body
             let body_bytes = match req.into_body().collect().await {
                 Ok(collected) => collected.to_bytes(),
                 Err(e) => {
@@ -93,7 +109,6 @@ pub(crate) async fn handle_request(
             };
             let body_str = String::from_utf8_lossy(&body_bytes).to_string();
 
-            // Invoke the Wasm component
             match invoker(runtime_id, method, path, body_str).await {
                 Ok(response_body) => {
                     let body = http_body_util::Full::new(hyper::body::Bytes::from(response_body));
@@ -110,7 +125,7 @@ pub(crate) async fn handle_request(
         }
     }
 
-    // Fall through to Host-based container routing
+    // Extract host header
     let host = req
         .headers()
         .get("host")
@@ -123,6 +138,15 @@ pub(crate) async fn handle_request(
             "missing Host header",
         ));
     };
+
+    // HTTP -> HTTPS redirect: if not TLS and host has routes, redirect
+    if !is_tls {
+        let routes = route_table.read().await;
+        if routes.contains_key(&host) {
+            drop(routes);
+            return Ok(redirect_to_https(&host, &path));
+        }
+    }
 
     let routes = route_table.read().await;
     let Some(targets) = routes.get(&host) else {
@@ -139,7 +163,6 @@ pub(crate) async fn handle_request(
         ));
     }
 
-    // Filter by path pattern (longest prefix wins), then round-robin
     let matched = select_path_targets(targets, &path);
     if matched.is_empty() {
         return Ok(error_response(
@@ -147,24 +170,18 @@ pub(crate) async fn handle_request(
             &format!("no backend for path: {path} on host: {host}"),
         ));
     }
-    let idx = counter.fetch_add(1, Ordering::Relaxed) % matched.len();
-    let target = matched[idx].clone();
+    let base_idx = counter.fetch_add(1, Ordering::Relaxed);
     drop(routes);
 
-    // Forward the request
-    let uri = format!(
-        "http://{}{}",
-        target.address,
-        req.uri()
-            .path_and_query()
-            .map(|pq| pq.as_str())
-            .unwrap_or("/")
-    );
-
-    debug!("Proxying {host}{} -> {uri}", req.uri().path());
-
-    let method_reqwest = req.method().clone();
+    // Read body once for forwarding (and potential retry)
+    let method_reqwest: reqwest::Method = req.method().clone();
     let headers = req.headers().clone();
+    let pq = req
+        .uri()
+        .path_and_query()
+        .map(|pq| pq.as_str())
+        .unwrap_or("/")
+        .to_string();
 
     let body_bytes = match req.into_body().collect().await {
         Ok(collected) => collected.to_bytes(),
@@ -177,30 +194,31 @@ pub(crate) async fn handle_request(
         }
     };
 
-    let mut forward_req = client.request(method_reqwest, &uri);
-    for (key, value) in &headers {
-        if key != "host" {
-            forward_req = forward_req.header(key, value);
-        }
-    }
-    forward_req = forward_req.body(body_bytes);
+    // Forward with retry on 502
+    let resp = forward_with_retry(
+        client,
+        &matched,
+        base_idx,
+        &method_reqwest,
+        &headers,
+        &body_bytes,
+        &pq,
+        &host,
+    )
+    .await;
 
-    match forward_req.send().await {
-        Ok(resp) => {
-            let status = resp.status();
-            let resp_body = resp.bytes().await.unwrap_or_default();
-            let mut response = Response::new(http_body_util::Full::new(resp_body));
-            *response.status_mut() = status;
-            Ok(response)
-        }
-        Err(e) => {
-            error!("Proxy error to {}: {e}", target.address);
-            Ok(error_response(
-                StatusCode::BAD_GATEWAY,
-                &format!("backend error: {e}"),
-            ))
-        }
-    }
+    let elapsed_ms = start.elapsed().as_millis();
+    let status = resp.status().as_u16();
+    info!(
+        method = %method,
+        host = %host,
+        path = %path,
+        status = status,
+        latency_ms = elapsed_ms,
+        "proxy request"
+    );
+
+    Ok(resp)
 }
 
 /// Build a simple error response.

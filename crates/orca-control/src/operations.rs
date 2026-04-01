@@ -11,7 +11,7 @@ use crate::reconciler::{get_runtime, reconcile_service};
 use crate::state::AppState;
 
 /// Graceful shutdown timeout for container stop operations.
-const GRACEFUL_TIMEOUT: Duration = Duration::from_secs(30);
+const GRACEFUL_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Stop a service: scale to 0 and remove from state.
 pub async fn stop(state: &AppState, service_name: &str) -> anyhow::Result<()> {
@@ -192,7 +192,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn graceful_timeout_is_30_seconds() {
-        assert_eq!(GRACEFUL_TIMEOUT, Duration::from_secs(30));
+    fn graceful_timeout_is_5_seconds() {
+        assert_eq!(GRACEFUL_TIMEOUT, Duration::from_secs(5));
     }
 }

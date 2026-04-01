@@ -5,7 +5,9 @@
 //! Supports automatic TLS via ACME/Let's Encrypt (Caddy-style zero-config).
 
 pub mod acme;
+mod forward;
 mod handler;
+pub mod rate_limit;
 mod routing;
 pub mod tls;
 
@@ -24,6 +26,7 @@ use tracing::{debug, error, info, warn};
 
 use acme::AcmeManager;
 use handler::{handle_acme_challenge, handle_request};
+use rate_limit::RateLimiter;
 
 /// A backend target for container routing.
 #[derive(Debug, Clone)]
@@ -200,6 +203,8 @@ async fn serve_loop(
             .expect("failed to build HTTP client"),
     );
     let acme = acme_manager.map(Arc::new);
+    let is_tls = tls_acceptor.is_some();
+    let rate_limiter = RateLimiter::new();
 
     loop {
         let (stream, peer) = match listener.accept().await {
@@ -217,6 +222,7 @@ async fn serve_loop(
         let client = client.clone();
         let acme = acme.clone();
         let tls = tls_acceptor.clone();
+        let rl = rate_limiter.clone();
 
         tokio::spawn(async move {
             let service = service_fn(move |req: Request<Incoming>| {
@@ -226,12 +232,23 @@ async fn serve_loop(
                 let counter = counter.clone();
                 let client = client.clone();
                 let acme = acme.clone();
+                let rl = rl.clone();
                 async move {
                     if let Some(resp) = handle_acme_challenge(&req, acme.as_deref()).await {
                         return Ok(resp);
                     }
-                    handle_request(req, &routes, &triggers, invoker.as_ref(), &counter, &client)
-                        .await
+                    handle_request(
+                        req,
+                        &routes,
+                        &triggers,
+                        invoker.as_ref(),
+                        &counter,
+                        &client,
+                        is_tls,
+                        &rl,
+                        peer,
+                    )
+                    .await
                 }
             });
 
