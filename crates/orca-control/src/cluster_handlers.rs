@@ -54,9 +54,18 @@ pub async fn register_node(
     (StatusCode::OK, Json(serde_json::json!({"status": "ok"})))
 }
 
+/// Status report for a single workload from an agent node.
+#[derive(Deserialize)]
+pub struct WorkloadStatusReport {
+    pub service_name: String,
+    pub status: String,
+}
+
 #[derive(Deserialize)]
 pub struct HeartbeatReq {
     pub node_id: u64,
+    #[serde(default)]
+    pub workloads: Vec<WorkloadStatusReport>,
 }
 
 pub async fn heartbeat(
@@ -68,6 +77,19 @@ pub async fn heartbeat(
         node.last_heartbeat = chrono::Utc::now();
     }
     drop(nodes);
+
+    // Update service instance statuses from agent-reported workloads
+    if !req.workloads.is_empty() {
+        let mut services = state.services.write().await;
+        for report in &req.workloads {
+            if let Some(svc) = services.get_mut(&report.service_name) {
+                let reported_status = parse_workload_status(&report.status);
+                for instance in &mut svc.instances {
+                    instance.status = reported_status;
+                }
+            }
+        }
+    }
 
     // Drain any pending commands for this node
     let commands = {
@@ -82,4 +104,15 @@ pub async fn heartbeat(
         );
     }
     Json(serde_json::json!({"commands": commands}))
+}
+
+/// Parse a status string from agent reports into a `WorkloadStatus`.
+fn parse_workload_status(s: &str) -> orca_core::types::WorkloadStatus {
+    match s {
+        "running" => orca_core::types::WorkloadStatus::Running,
+        "stopped" => orca_core::types::WorkloadStatus::Stopped,
+        "failed" => orca_core::types::WorkloadStatus::Failed,
+        "pending" => orca_core::types::WorkloadStatus::Pending,
+        _ => orca_core::types::WorkloadStatus::Stopped,
+    }
 }

@@ -33,6 +33,7 @@ reqwest = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
+hostname = "0.4"
 rustls = "0.23"
 rustls-pemfile = "2"
 
@@ -42,6 +43,7 @@ tonic-build = "0.13"
 [dev-dependencies]
 http-body-util = "0.1"
 tower = { workspace = true, features = ["util"] }
+bollard = { workspace = true }
 
 [dev-dependencies.tempfile]
 version = "3"
