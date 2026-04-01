@@ -5,3 +5,4 @@
 .env
 *.pem
 *.key
+orca-linux-x86_64
