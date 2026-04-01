@@ -29,7 +29,10 @@ use crate::state::{AppState, WasmTrigger};
 use orca_proxy::RouteTarget;
 
 /// Update the container routing table for a service.
-pub(crate) async fn update_container_routes(state: &AppState, config: &ServiceConfig) {
+///
+/// Filters for healthy/no-check instances only. Called during deploy and
+/// periodically by the watchdog to clean up stale routes.
+pub async fn update_container_routes(state: &AppState, config: &ServiceConfig) {
     let Some(domain) = &config.domain else {
         return;
     };
@@ -166,6 +169,10 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    /// Mutex to serialize tests that use set_current_dir (process-global state).
+    static CWD_LOCK: Mutex<()> = Mutex::new(());
 
     use orca_core::config::ServiceConfig;
     use orca_core::types::Replicas;
@@ -291,16 +298,14 @@ mod tests {
     /// Secret patterns in env vars must be resolved by service_config_to_spec.
     #[test]
     fn config_to_spec_resolves_secrets() {
+        let _lock = CWD_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let secrets_path = dir.path().join("secrets.json");
 
-        // Use the default master key so resolve_secrets() (which calls open())
-        // can decrypt with the same key.
         let mut store = orca_core::secrets::SecretStore::open(&secrets_path).unwrap();
         store.set("DB_PASS", "hunter2").unwrap();
         drop(store);
 
-        // Copy secrets.json to "secrets.json" relative (where resolve_secrets looks)
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(dir.path()).unwrap();
 
@@ -320,6 +325,7 @@ mod tests {
     /// When no secrets file exists, env vars pass through unchanged.
     #[test]
     fn config_to_spec_no_secrets_file_passes_env_through() {
+        let _lock = CWD_LOCK.lock().unwrap();
         let dir = tempfile::tempdir().unwrap();
         let original_dir = std::env::current_dir().unwrap();
         std::env::set_current_dir(dir.path()).unwrap();
@@ -330,7 +336,6 @@ mod tests {
             .insert("SECRET_VAR".into(), "${secrets.MISSING}".into());
 
         let spec = service_config_to_spec(&config).unwrap();
-        // No secrets file -> env returned as-is (clone fallback)
         assert_eq!(spec.env["SECRET_VAR"], "${secrets.MISSING}");
 
         std::env::set_current_dir(original_dir).unwrap();

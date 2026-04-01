@@ -1,4 +1,7 @@
 //! Background health checker for service instances.
+//!
+//! Respects `ProbeConfig` from liveness configuration (interval, timeout,
+//! failure threshold). Falls back to defaults when no liveness probe is set.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -6,17 +9,24 @@ use std::time::Duration;
 
 use tracing::{error, info, warn};
 
+use orca_core::config::ProbeConfig;
 use orca_core::runtime::Runtime;
 use orca_core::types::{HealthState, RuntimeKind, WorkloadStatus};
 
 use crate::routes::service_config_to_spec;
 use crate::state::AppState;
 
-/// Maximum consecutive failures before restarting an instance.
-const MAX_FAILURES: u32 = 3;
+const DEFAULT_FAILURES: u32 = 3;
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
+const DEFAULT_INTERVAL: Duration = Duration::from_secs(10);
 
-/// Timeout for health check HTTP requests.
-const CHECK_TIMEOUT: Duration = Duration::from_secs(3);
+/// Spawn the health checker as a background tokio task.
+pub fn spawn_health_checker(state: Arc<AppState>) {
+    tokio::spawn(async move {
+        let checker = HealthChecker::new(state);
+        checker.run(DEFAULT_INTERVAL).await;
+    });
+}
 
 /// Runs periodic health checks against service instances and restarts failed ones.
 pub struct HealthChecker {
@@ -28,7 +38,8 @@ impl HealthChecker {
     /// Create a new health checker.
     pub fn new(state: Arc<AppState>) -> Self {
         let client = reqwest::Client::builder()
-            .timeout(CHECK_TIMEOUT)
+            .timeout(DEFAULT_TIMEOUT)
+            .no_proxy()
             .build()
             .expect("failed to build reqwest client");
         Self { state, client }
@@ -38,6 +49,7 @@ impl HealthChecker {
     ///
     /// This is intended to be spawned as a background task.
     pub async fn run(&self, interval: Duration) {
+        info!("Health checker started (interval: {}s)", interval.as_secs());
         let mut failure_counts: HashMap<String, u32> = HashMap::new();
 
         loop {
@@ -48,13 +60,18 @@ impl HealthChecker {
 
     /// Check all services and their instances.
     async fn check_all(&self, failure_counts: &mut HashMap<String, u32>) {
-        // Collect service info under a read lock, then drop it.
         let check_targets: Vec<CheckTarget> = {
             let services = self.state.services.read().await;
             services
                 .values()
                 .filter_map(|svc| {
-                    let health_path = svc.config.health.as_deref()?;
+                    // Use liveness probe path, fall back to health path.
+                    let (health_path, probe) = if let Some(lp) = &svc.config.liveness {
+                        (lp.path.clone(), Some(lp.clone()))
+                    } else {
+                        let path = svc.config.health.as_deref()?;
+                        (path.to_string(), None)
+                    };
                     let targets: Vec<InstanceTarget> = svc
                         .instances
                         .iter()
@@ -74,7 +91,8 @@ impl HealthChecker {
                     }
                     Some(CheckTarget {
                         service_name: svc.config.name.clone(),
-                        health_path: health_path.to_string(),
+                        health_path,
+                        probe_config: probe,
                         runtime_kind: svc.config.runtime,
                         targets,
                     })
@@ -83,8 +101,19 @@ impl HealthChecker {
         };
 
         for target in &check_targets {
+            let threshold = target
+                .probe_config
+                .as_ref()
+                .map_or(DEFAULT_FAILURES, |p| p.failure_threshold);
+            let timeout = target
+                .probe_config
+                .as_ref()
+                .map_or(DEFAULT_TIMEOUT, |p| Duration::from_secs(p.timeout_secs));
+
             for inst in &target.targets {
-                let healthy = self.probe(inst.host_port, &target.health_path).await;
+                let healthy = self
+                    .probe_with_timeout(inst.host_port, &target.health_path, timeout)
+                    .await;
                 let count = failure_counts.entry(inst.runtime_id.clone()).or_insert(0);
 
                 if healthy {
@@ -109,11 +138,11 @@ impl HealthChecker {
                     self.set_health(&target.service_name, inst.index, HealthState::Unhealthy)
                         .await;
 
-                    if *count >= MAX_FAILURES {
+                    if *count >= threshold {
                         info!(
                             runtime_id = %inst.runtime_id,
                             service = %target.service_name,
-                            "Restarting instance after {} consecutive failures",
+                            "Restarting after {} consecutive failures",
                             *count
                         );
                         self.restart_instance(
@@ -129,10 +158,15 @@ impl HealthChecker {
         }
     }
 
-    /// Send an HTTP GET probe to the health endpoint.
-    async fn probe(&self, port: u16, path: &str) -> bool {
+    /// Send an HTTP GET probe with a custom timeout.
+    async fn probe_with_timeout(&self, port: u16, path: &str, timeout: Duration) -> bool {
         let url = format!("http://127.0.0.1:{port}{path}");
-        match self.client.get(&url).send().await {
+        let client = reqwest::Client::builder()
+            .timeout(timeout)
+            .no_proxy()
+            .build()
+            .unwrap_or_else(|_| self.client.clone());
+        match client.get(&url).send().await {
             Ok(resp) => resp.status().is_success(),
             Err(_) => false,
         }
@@ -227,6 +261,7 @@ impl HealthChecker {
 struct CheckTarget {
     service_name: String,
     health_path: String,
+    probe_config: Option<ProbeConfig>,
     runtime_kind: RuntimeKind,
     targets: Vec<InstanceTarget>,
 }

@@ -5,14 +5,16 @@ pub(crate) mod cluster_handlers;
 pub mod cluster_state;
 pub mod deploy_history;
 pub mod health;
+pub(crate) mod instance;
 pub(crate) mod operations;
 pub mod proto;
 pub mod raft;
 pub mod reconciler;
-pub(crate) mod routes;
+pub mod routes;
 pub mod scheduler;
 pub mod state;
 pub mod store;
+pub mod watchdog;
 pub mod webhook;
 
 use std::sync::Arc;
@@ -68,6 +70,11 @@ pub async fn run_server_with_acme(
         app_state = app_state.with_acme(acme, resolver);
     }
     let state = Arc::new(app_state);
+
+    // Spawn background resilience tasks.
+    watchdog::spawn_watchdog(state.clone());
+    health::spawn_health_checker(state.clone());
+
     let app = api::router(state.clone());
 
     let addr = format!("0.0.0.0:{}", cluster_config.cluster.api_port);

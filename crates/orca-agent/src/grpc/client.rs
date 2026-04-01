@@ -147,22 +147,38 @@ impl AgentClient {
     }
 
     /// Run the heartbeat loop with a container runtime for executing commands.
+    ///
+    /// Uses exponential backoff on failure (5s to 60s), resets on success.
     pub async fn run_heartbeat_loop(&self, interval: Duration, runtime: Arc<dyn Runtime>) {
+        const MIN_BACKOFF: Duration = Duration::from_secs(5);
+        const MAX_BACKOFF: Duration = Duration::from_secs(60);
+
         info!(
             "Starting heartbeat loop (interval: {}s)",
             interval.as_secs()
         );
+
+        let mut current_interval = interval;
+        let mut was_failing = false;
+
         loop {
-            tokio::time::sleep(interval).await;
+            tokio::time::sleep(current_interval).await;
             match self.heartbeat().await {
                 Ok(resp) => {
+                    if was_failing {
+                        info!("Heartbeat reconnected to leader");
+                        was_failing = false;
+                    }
+                    current_interval = interval;
                     for cmd in resp.commands {
                         info!("Executing command: {} for {}", cmd.action, cmd.spec.name);
                         self.execute_command(&cmd, runtime.as_ref()).await;
                     }
                 }
                 Err(e) => {
+                    was_failing = true;
                     warn!("Heartbeat failed: {e}");
+                    current_interval = (current_interval * 2).max(MIN_BACKOFF).min(MAX_BACKOFF);
                 }
             }
         }

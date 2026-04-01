@@ -6,10 +6,11 @@ use tracing::{error, info};
 
 use orca_core::config::ServiceConfig;
 use orca_core::runtime::Runtime;
-use orca_core::types::{Replicas, RuntimeKind, WorkloadSpec, WorkloadStatus};
+use orca_core::types::{Replicas, RuntimeKind, WorkloadSpec};
 
+use crate::instance::create_and_start_instance;
 use crate::routes::{service_config_to_spec, update_container_routes, update_wasm_triggers};
-use crate::state::{AppState, InstanceState, ServiceState};
+use crate::state::{AppState, ServiceState};
 
 /// Load a BYO TLS certificate and key from PEM files.
 fn load_byo_cert(cert_path: &str, key_path: &str) -> anyhow::Result<rustls::sign::CertifiedKey> {
@@ -103,10 +104,34 @@ pub(crate) async fn reconcile_service(
         .entry(config.name.clone())
         .or_insert_with(|| ServiceState::from_config(config.clone()));
 
+    // Skip scaling if we already have the right number of instances
+    // with the same image — prevents duplicate containers on re-deploy.
+    let same_image =
+        svc_state.config.image == config.image && svc_state.config.module == config.module;
+
     svc_state.config = config.clone();
     svc_state.desired_replicas = desired;
 
     let current = svc_state.instances.len() as u32;
+
+    if current == desired && same_image {
+        info!(
+            "Service {} already at desired state ({} replicas, same image) — skipping",
+            config.name, desired
+        );
+        // Still refresh status of existing instances
+        for instance in &mut svc_state.instances {
+            if let Ok(status) = runtime.status(&instance.handle).await {
+                instance.status = status;
+            }
+        }
+        drop(services);
+        match config.runtime {
+            RuntimeKind::Container => update_container_routes(state, config).await,
+            RuntimeKind::Wasm => update_wasm_triggers(state, config).await,
+        }
+        return Ok(());
+    }
 
     if current < desired {
         let to_create = desired - current;
@@ -190,91 +215,6 @@ pub(crate) async fn reconcile_service(
     }
 
     Ok(())
-}
-
-/// Create, start, and wait for a workload instance to be ready.
-async fn create_and_start_instance(
-    runtime: &dyn Runtime,
-    spec: &WorkloadSpec,
-) -> anyhow::Result<InstanceState> {
-    let handle = runtime.create(spec).await?;
-    runtime.start(&handle).await?;
-
-    let host_port = if let Some(port) = spec.port {
-        runtime
-            .resolve_host_port(&handle, port)
-            .await
-            .ok()
-            .flatten()
-    } else {
-        None
-    };
-
-    let container_address = if let Some(port) = spec.port {
-        let network = super::routes::service_network_name(spec);
-        runtime
-            .resolve_container_address(&handle, port, &network)
-            .await
-            .ok()
-            .flatten()
-    } else {
-        None
-    };
-
-    // Wait for container to be ready before registering routes.
-    // Uses readiness probe if configured, falls back to health path, then port check.
-    if let Some(port) = host_port {
-        let addr = format!("127.0.0.1:{port}");
-        let (path, delay) = if let Some(probe) = &spec.readiness {
-            (probe.path.as_str(), probe.initial_delay_secs)
-        } else {
-            (spec.health.as_deref().unwrap_or("/"), 2)
-        };
-        if delay > 0 {
-            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-        }
-        wait_for_ready(&addr, path).await;
-    }
-
-    // If no health/liveness probe is configured, mark as NoCheck so the
-    // instance is immediately routable. If probes exist, the health checker
-    // will update the state after its first check.
-    let initial_health = if spec.health.is_none() && spec.liveness.is_none() {
-        orca_core::types::HealthState::NoCheck
-    } else {
-        orca_core::types::HealthState::Healthy
-    };
-
-    Ok(InstanceState {
-        handle,
-        status: WorkloadStatus::Running,
-        host_port,
-        container_address,
-        health: initial_health,
-    })
-}
-
-/// Wait for a container to accept connections before registering routes.
-async fn wait_for_ready(addr: &str, path: &str) {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .no_proxy()
-        .build()
-        .unwrap();
-    let url = format!("http://{addr}{path}");
-
-    for attempt in 1..=30 {
-        match client.get(&url).send().await {
-            Ok(resp) if resp.status().is_success() || resp.status().is_redirection() => {
-                tracing::debug!("Container ready at {addr} (attempt {attempt})");
-                return;
-            }
-            _ => {
-                tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            }
-        }
-    }
-    tracing::warn!("Container at {addr} not ready after 15s, registering route anyway");
 }
 
 /// Find a registered node matching the service's placement constraint.
