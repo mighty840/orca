@@ -6,6 +6,7 @@ use serde::Deserialize;
 pub struct ApiClient {
     base_url: String,
     client: reqwest::Client,
+    token: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -42,16 +43,32 @@ pub struct NodeInfo {
 
 impl ApiClient {
     pub fn new(base_url: &str) -> Self {
+        // Read token from ~/.orca/cluster.token or ORCA_TOKEN env
+        let token = std::env::var("ORCA_TOKEN").ok().or_else(|| {
+            let home = std::env::var("HOME").ok()?;
+            std::fs::read_to_string(format!("{home}/.orca/cluster.token"))
+                .ok()
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+        });
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             client: reqwest::Client::new(),
+            token,
+        }
+    }
+
+    fn auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if let Some(t) = &self.token {
+            req.bearer_auth(t)
+        } else {
+            req
         }
     }
 
     pub async fn status(&self) -> anyhow::Result<StatusResponse> {
         let resp = self
-            .client
-            .get(format!("{}/api/v1/status", self.base_url))
+            .auth(self.client.get(format!("{}/api/v1/status", self.base_url)))
             .send()
             .await?
             .error_for_status()?;
@@ -60,8 +77,10 @@ impl ApiClient {
 
     pub async fn cluster_info(&self) -> anyhow::Result<ClusterInfo> {
         let resp = self
-            .client
-            .get(format!("{}/api/v1/cluster/info", self.base_url))
+            .auth(
+                self.client
+                    .get(format!("{}/api/v1/cluster/info", self.base_url)),
+            )
             .send()
             .await?
             .error_for_status()?;
@@ -70,37 +89,35 @@ impl ApiClient {
 
     pub async fn logs(&self, service: &str, tail: u64) -> anyhow::Result<String> {
         let resp = self
-            .client
-            .get(format!(
+            .auth(self.client.get(format!(
                 "{}/api/v1/services/{service}/logs?tail={tail}&follow=false",
                 self.base_url
-            ))
+            )))
             .send()
             .await?
             .error_for_status()?;
         Ok(resp.text().await?)
     }
 
-    /// Trigger a redeploy for a service.
     pub async fn deploy(&self, service: &str) -> anyhow::Result<()> {
-        self.client
-            .post(format!(
-                "{}/api/v1/services/{service}/deploy",
-                self.base_url
-            ))
-            .send()
-            .await?
-            .error_for_status()?;
+        self.auth(self.client.post(format!(
+            "{}/api/v1/services/{service}/deploy",
+            self.base_url
+        )))
+        .send()
+        .await?
+        .error_for_status()?;
         Ok(())
     }
 
-    /// Stop a service (scale to 0).
     pub async fn stop(&self, service: &str) -> anyhow::Result<()> {
-        self.client
-            .post(format!("{}/api/v1/services/{service}/stop", self.base_url))
-            .send()
-            .await?
-            .error_for_status()?;
+        self.auth(
+            self.client
+                .post(format!("{}/api/v1/services/{service}/stop", self.base_url)),
+        )
+        .send()
+        .await?
+        .error_for_status()?;
         Ok(())
     }
 }
