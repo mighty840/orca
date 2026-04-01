@@ -88,12 +88,16 @@ impl AgentClient {
             "labels": labels,
         });
 
-        let resp = self
+        let mut req = self
             .client
             .post(format!("{}/api/v1/cluster/register", self.leader_url))
-            .json(&body)
-            .send()
-            .await?;
+            .json(&body);
+
+        if let Ok(token) = std::env::var("ORCA_TOKEN") {
+            req = req.bearer_auth(token);
+        }
+
+        let resp = req.send().await?;
 
         if resp.status().is_success() {
             info!("Registered with leader as node {}", self.node_id);
@@ -122,12 +126,16 @@ impl AgentClient {
             workloads: reports,
         };
 
-        let resp = self
+        let mut hb_req = self
             .client
             .post(format!("{}/api/v1/cluster/heartbeat", self.leader_url))
-            .json(&req)
-            .send()
-            .await?;
+            .json(&req);
+
+        if let Ok(token) = std::env::var("ORCA_TOKEN") {
+            hb_req = hb_req.bearer_auth(token);
+        }
+
+        let resp = hb_req.send().await?;
 
         if resp.status().is_success() {
             Ok(resp.json().await?)
