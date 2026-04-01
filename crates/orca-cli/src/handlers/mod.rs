@@ -6,6 +6,7 @@ pub mod deploy;
 pub mod exec;
 pub mod join;
 pub mod ops;
+mod port;
 pub mod reload;
 pub mod server;
 pub mod status;

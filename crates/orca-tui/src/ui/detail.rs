@@ -34,46 +34,51 @@ pub fn draw_detail(f: &mut Frame, area: Rect, state: &AppState) {
     let s_color = status_color(&svc.status);
     let domain = svc.domain.as_deref().unwrap_or("-");
 
+    let health_str = if svc.running_replicas == svc.desired_replicas {
+        "healthy"
+    } else {
+        "unhealthy"
+    };
+    let health_color = if health_str == "healthy" {
+        Color::Green
+    } else {
+        Color::Red
+    };
+
+    let label = Style::default().fg(Color::DarkGray);
+    let val = Style::default().fg(Color::White);
+    let accent = Style::default()
+        .fg(Color::Cyan)
+        .add_modifier(Modifier::BOLD);
+
     let info_lines = vec![
+        Line::from(""),
         Line::from(vec![
-            Span::styled("  Name:     ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  Name:      ", label),
+            Span::styled(svc.name.clone(), accent),
+        ]),
+        Line::from(vec![
+            Span::styled("  Runtime:   ", label),
+            Span::styled(svc.runtime.clone(), val),
+        ]),
+        Line::from(vec![
+            Span::styled("  Replicas:  ", label),
             Span::styled(
-                svc.name.clone(),
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
+                format!("{}/{}", svc.running_replicas, svc.desired_replicas),
+                val,
             ),
         ]),
         Line::from(vec![
-            Span::styled("  Runtime:  ", Style::default().fg(Color::DarkGray)),
-            Span::raw(svc.runtime.clone()),
-        ]),
-        Line::from(vec![
-            Span::styled("  Replicas: ", Style::default().fg(Color::DarkGray)),
-            Span::raw(format!("{}/{}", svc.running_replicas, svc.desired_replicas)),
-        ]),
-        Line::from(vec![
-            Span::styled("  Status:   ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  Status:    ", label),
             Span::styled(svc.status.clone(), Style::default().fg(s_color)),
         ]),
         Line::from(vec![
-            Span::styled("  Domain:   ", Style::default().fg(Color::DarkGray)),
-            Span::raw(domain.to_string()),
+            Span::styled("  Domain:    ", label),
+            Span::styled(domain.to_string(), Style::default().fg(Color::Blue)),
         ]),
         Line::from(vec![
-            Span::styled("  Health:   ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                if svc.running_replicas == svc.desired_replicas {
-                    "healthy"
-                } else {
-                    "unhealthy"
-                },
-                Style::default().fg(if svc.running_replicas == svc.desired_replicas {
-                    Color::Green
-                } else {
-                    Color::Red
-                }),
-            ),
+            Span::styled("  Health:    ", label),
+            Span::styled(health_str, Style::default().fg(health_color)),
         ]),
     ];
 

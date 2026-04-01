@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use tracing::info;
 
+use super::port::{is_permission_denied, setup_port_redirect};
+
 /// Handle the `orca server` command.
 pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> {
     let cluster_config = match orca_core::config::ClusterConfig::load(config.as_ref()) {
@@ -88,17 +90,47 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
             None
         };
 
+        let actual_port = match orca_proxy::run_proxy(
+            proxy_routes.clone(),
+            proxy_triggers.clone(),
+            wasm_invoker.clone(),
+            proxy_port,
+            None,
+            acme.clone(),
+        )
+        .await
+        {
+            Ok(()) => return,
+            Err(e) if is_permission_denied(&e) && (proxy_port == 80 || proxy_port == 443) => {
+                let high_port = setup_port_redirect(proxy_port);
+                if high_port == proxy_port {
+                    tracing::error!("Proxy error: {e}");
+                    tracing::error!(
+                        "Port {proxy_port} requires root. Run with sudo or use --proxy-port {}",
+                        if proxy_port == 80 { 8080 } else { 8443 }
+                    );
+                    return;
+                }
+                high_port
+            }
+            Err(e) => {
+                tracing::error!("Proxy error: {e}");
+                return;
+            }
+        };
+
+        info!("Retrying proxy on port {actual_port} (iptables redirect from {proxy_port})");
         if let Err(e) = orca_proxy::run_proxy(
             proxy_routes,
             proxy_triggers,
             wasm_invoker,
-            proxy_port,
+            actual_port,
             None,
             acme,
         )
         .await
         {
-            tracing::error!("Proxy error: {e}");
+            tracing::error!("Proxy error on fallback port {actual_port}: {e}");
         }
     });
 

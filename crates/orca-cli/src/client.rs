@@ -115,4 +115,33 @@ impl OrcaClient {
             .error_for_status()?;
         Ok(())
     }
+
+    pub async fn add_webhook(
+        &self,
+        repo: &str,
+        service: &str,
+        branch: &str,
+    ) -> anyhow::Result<serde_json::Value> {
+        let body = serde_json::json!({
+            "repo": repo,
+            "service_name": service,
+            "branch": branch,
+        });
+        let resp = self
+            .auth(self.client.post(self.url("/api/v1/webhooks")))
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
+    }
+
+    pub async fn list_webhooks(&self) -> anyhow::Result<serde_json::Value> {
+        let resp = self
+            .auth(self.client.get(self.url("/api/v1/webhooks")))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
+    }
 }

@@ -54,8 +54,7 @@ pub async fn handle_scale(service: String, replicas: u32, api: String) -> anyhow
 
 pub fn handle_ask(question: Vec<String>) {
     let q = question.join(" ");
-    println!("Q: {q}\n");
-    println!("AI backend not yet connected. Configure [ai] in cluster.toml.");
+    println!("Q: {q}\nAI backend not yet connected. Configure [ai] in cluster.toml.");
 }
 
 pub fn handle_generate(description: Vec<String>) {
@@ -152,18 +151,44 @@ pub fn handle_import(source: ImportSource) {
     }
 }
 
-pub fn handle_webhooks(action: WebhookAction) {
+pub async fn handle_webhooks(action: WebhookAction, api: String) -> anyhow::Result<()> {
+    let client = OrcaClient::new(api);
     match action {
         WebhookAction::Add {
             repo,
             service,
             branch,
         } => {
-            println!("Webhook added: {repo} -> {service} (branch: {branch})");
+            client.add_webhook(&repo, &service, &branch).await?;
+            println!("Webhook registered: {repo} -> {service} (branch: {branch})");
         }
-        WebhookAction::List => println!("No webhooks configured."),
-        WebhookAction::Remove { id } => println!("Webhook {id} removed."),
+        WebhookAction::List => {
+            let resp = client.list_webhooks().await?;
+            let webhooks = resp["webhooks"].as_array();
+            match webhooks {
+                Some(hooks) if hooks.is_empty() => println!("No webhooks configured."),
+                Some(hooks) => {
+                    let header = format!("{:<30} {:<20} {:<10}", "REPO", "SERVICE", "BRANCH");
+                    println!("{header}");
+                    for h in hooks {
+                        println!(
+                            "{:<30} {:<20} {:<10}",
+                            h["repo"].as_str().unwrap_or("-"),
+                            h["service_name"].as_str().unwrap_or("-"),
+                            h["branch"].as_str().unwrap_or("-"),
+                        );
+                    }
+                }
+                None => println!("No webhooks configured."),
+            }
+        }
+        WebhookAction::Remove { id } => {
+            println!(
+                "Webhook removal not yet supported by the API (id: {id}). Restart server to clear."
+            );
+        }
     }
+    Ok(())
 }
 
 pub async fn handle_nodes(_gpus: bool, api: String) -> anyhow::Result<()> {
@@ -201,7 +226,7 @@ pub async fn handle_nodes(_gpus: bool, api: String) -> anyhow::Result<()> {
 }
 
 pub fn handle_gpus() {
-    println!("No GPU nodes registered.");
+    println!("GPU monitoring: use `orca nodes --gpus`");
 }
 
 pub async fn handle_rollback(service: String, api: String) -> anyhow::Result<()> {
@@ -214,9 +239,7 @@ pub async fn handle_rollback(service: String, api: String) -> anyhow::Result<()>
 pub async fn handle_tui(api: &str) -> anyhow::Result<()> {
     orca_tui::run_tui(api).await
 }
-
-pub async fn handle_web(port: u16) -> anyhow::Result<()> {
-    println!("Web dashboard at http://127.0.0.1:{port} (M3)");
-    tokio::signal::ctrl_c().await?;
+pub async fn handle_web(_port: u16) -> anyhow::Result<()> {
+    println!("Use `orca tui` instead.");
     Ok(())
 }
