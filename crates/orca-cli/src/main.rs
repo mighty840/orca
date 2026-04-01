@@ -88,6 +88,10 @@ async fn main() -> anyhow::Result<()> {
         Command::Webhooks { action } => handlers::ops::handle_webhooks(action),
         Command::Nodes { gpus } => handlers::ops::handle_nodes(gpus, cli.api).await?,
         Command::Gpus => handlers::ops::handle_gpus(),
+        Command::Reload => handlers::reload::handle_reload().await?,
+        Command::Exec { service, cmd } => {
+            handlers::exec::handle_exec(&service, &cmd)?;
+        }
         Command::Stop { service } => {
             handlers::ops::handle_stop(service, cli.api).await?;
         }

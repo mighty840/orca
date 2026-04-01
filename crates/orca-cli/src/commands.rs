@@ -48,6 +48,18 @@ pub enum Command {
         replicas: u32,
     },
 
+    /// Reload: restart the server daemon and redeploy all services
+    Reload,
+
+    /// Execute a command inside a running container
+    Exec {
+        /// Service name
+        service: String,
+        /// Command to run
+        #[arg(trailing_var_arg = true)]
+        cmd: Vec<String>,
+    },
+
     /// Stop a service or all services
     Stop {
         /// Service name (omit for all services)

@@ -18,6 +18,10 @@ use state::{AppState, InputMode, Panel};
 
 /// Run the TUI dashboard against the given API URL.
 pub async fn run_tui(api_url: &str) -> anyhow::Result<()> {
+    if !std::io::IsTerminal::is_terminal(&std::io::stdout()) {
+        anyhow::bail!("TUI requires an interactive terminal. Use `ssh -t` for remote access.");
+    }
+
     let client = ApiClient::new(api_url);
     let mut state = AppState::new();
 
