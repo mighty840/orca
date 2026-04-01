@@ -73,14 +73,14 @@ impl Notifier {
                 NotificationChannel::Webhook { url } => {
                     self.send_webhook(url, title, message, severity).await;
                 }
-                NotificationChannel::Email { to, .. } => {
-                    info!(
-                        to = %to,
-                        title = %title,
-                        severity = %severity,
-                        "would send email to {} — SMTP delivery deferred to M5",
-                        to
-                    );
+                NotificationChannel::Email {
+                    smtp_host,
+                    smtp_port,
+                    from,
+                    to,
+                } => {
+                    self.send_email(smtp_host, *smtp_port, from, to, title, message, severity)
+                        .await;
                 }
             }
         }
@@ -107,6 +107,105 @@ impl Notifier {
                 warn!(url = %url, error = %e, "failed to send webhook notification");
             }
         }
+    }
+
+    /// Send email notification via the `sendmail` command if available,
+    /// falling back to raw SMTP over TCP for internal relays.
+    #[allow(clippy::too_many_arguments)]
+    async fn send_email(
+        &self,
+        smtp_host: &str,
+        smtp_port: u16,
+        from: &str,
+        to: &str,
+        title: &str,
+        message: &str,
+        severity: &str,
+    ) {
+        let body = format!(
+            "Subject: [orca/{severity}] {title}\r\nFrom: {from}\r\nTo: {to}\r\n\r\n{message}\r\n"
+        );
+
+        // Try sendmail first (most reliable for self-hosted setups)
+        if Self::try_sendmail(to, &body) {
+            info!(to = %to, "email sent via sendmail");
+            return;
+        }
+
+        // Fall back to raw SMTP
+        match Self::try_raw_smtp(smtp_host, smtp_port, from, to, &body).await {
+            Ok(()) => info!(to = %to, "email sent via SMTP to {smtp_host}:{smtp_port}"),
+            Err(e) => warn!(to = %to, error = %e, "failed to send email"),
+        }
+    }
+
+    /// Attempt to send via the local sendmail binary.
+    fn try_sendmail(to: &str, body: &str) -> bool {
+        use std::io::Write;
+        let Ok(mut child) = std::process::Command::new("sendmail")
+            .arg("-t")
+            .arg(to)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+        else {
+            return false;
+        };
+        if let Some(ref mut stdin) = child.stdin {
+            let _ = stdin.write_all(body.as_bytes());
+        }
+        child.wait().is_ok_and(|s| s.success())
+    }
+
+    /// Send via raw SMTP (no TLS, suitable for internal relays).
+    async fn try_raw_smtp(
+        host: &str,
+        port: u16,
+        from: &str,
+        to: &str,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::TcpStream;
+
+        let stream = TcpStream::connect((host, port)).await?;
+        let (reader, mut writer) = stream.into_split();
+        let mut reader = BufReader::new(reader);
+        let mut line = String::new();
+
+        // Read greeting
+        reader.read_line(&mut line).await?;
+        line.clear();
+
+        writer.write_all(b"HELO orca\r\n").await?;
+        reader.read_line(&mut line).await?;
+        line.clear();
+
+        writer
+            .write_all(format!("MAIL FROM:<{from}>\r\n").as_bytes())
+            .await?;
+        reader.read_line(&mut line).await?;
+        line.clear();
+
+        writer
+            .write_all(format!("RCPT TO:<{to}>\r\n").as_bytes())
+            .await?;
+        reader.read_line(&mut line).await?;
+        line.clear();
+
+        writer.write_all(b"DATA\r\n").await?;
+        reader.read_line(&mut line).await?;
+        line.clear();
+
+        writer.write_all(body.as_bytes()).await?;
+        writer.write_all(b"\r\n.\r\n").await?;
+        reader.read_line(&mut line).await?;
+        line.clear();
+
+        writer.write_all(b"QUIT\r\n").await?;
+
+        Ok(())
     }
 
     /// Returns the number of configured channels.

@@ -9,6 +9,9 @@ use orca_core::types::Replicas;
 use crate::reconciler::{get_runtime, reconcile_service};
 use crate::state::AppState;
 
+/// Graceful shutdown timeout for container stop operations.
+const GRACEFUL_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Stop a service: scale to 0 and remove from state.
 pub async fn stop(state: &AppState, service_name: &str) -> anyhow::Result<()> {
     scale(state, service_name, 0).await?;
@@ -39,7 +42,8 @@ pub async fn stop_all(state: &AppState) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Redeploy a service: stop all instances and recreate with fresh image pull.
+/// Redeploy a service using a rolling update: start new instances before
+/// stopping old ones, with a 30-second graceful shutdown timeout.
 pub async fn redeploy(state: &AppState, service_name: &str) -> anyhow::Result<()> {
     let config = {
         let services = state.services.read().await;
@@ -49,18 +53,33 @@ pub async fn redeploy(state: &AppState, service_name: &str) -> anyhow::Result<()
         svc.config.clone()
     };
     let runtime = get_runtime(state, config.runtime)?;
+
+    // Collect old instance handles before creating new ones.
+    let old_handles: Vec<_> = {
+        let services = state.services.read().await;
+        services
+            .get(service_name)
+            .map(|svc| svc.instances.iter().map(|i| i.handle.clone()).collect())
+            .unwrap_or_default()
+    };
+
+    // Clear instance list so reconcile creates fresh replicas.
     {
         let mut services = state.services.write().await;
         if let Some(svc) = services.get_mut(service_name) {
-            for instance in svc.instances.drain(..) {
-                let _ = runtime
-                    .stop(&instance.handle, Duration::from_secs(10))
-                    .await;
-                let _ = runtime.remove(&instance.handle).await;
-            }
+            svc.instances.clear();
         }
     }
+
+    // Start new instances (reconcile will create the desired count).
     reconcile_service(state, &config).await?;
+
+    // Gracefully stop old instances with a 30-second timeout.
+    for handle in &old_handles {
+        let _ = runtime.stop(handle, GRACEFUL_TIMEOUT).await;
+        let _ = runtime.remove(handle).await;
+    }
+
     info!("Redeployed service: {service_name}");
     Ok(())
 }
@@ -106,4 +125,14 @@ pub async fn scale(state: &AppState, service_name: &str, replicas: u32) -> anyho
         config
     };
     reconcile_service(state, &config).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn graceful_timeout_is_30_seconds() {
+        assert_eq!(GRACEFUL_TIMEOUT, Duration::from_secs(30));
+    }
 }

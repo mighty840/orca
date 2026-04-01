@@ -80,6 +80,7 @@ pub(crate) async fn reconcile_service(
             config.name, config.runtime, current, desired, to_create
         );
 
+        let mut failures = 0u32;
         for i in current..desired {
             let mut replica_spec = spec.clone();
             if desired > 1 {
@@ -92,9 +93,12 @@ pub(crate) async fn reconcile_service(
                 }
                 Err(e) => {
                     error!("Failed to create instance {}-{i}: {e}", config.name);
-                    return Err(e);
+                    failures += 1;
                 }
             }
+        }
+        if failures > 0 {
+            tracing::warn!("{failures}/{to_create} replicas failed for {}", config.name);
         }
     } else if current > desired {
         let to_remove = current - desired;

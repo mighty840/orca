@@ -5,10 +5,11 @@
 
 use std::sync::Arc;
 
+use axum::extract::Path;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::post;
+use axum::routing::{delete, post};
 use axum::{Json, Router};
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
@@ -100,6 +101,7 @@ pub fn webhook_router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/api/v1/webhooks/github", post(handle_push))
         .route("/api/v1/webhooks", post(register).get(list))
+        .route("/api/v1/webhooks/{id}", delete(remove_webhook))
 }
 
 pub async fn handle_push(
@@ -226,6 +228,34 @@ pub async fn register(
 pub async fn list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let webhooks = state.webhooks.read().await;
     Json(serde_json::json!({ "webhooks": *webhooks }))
+}
+
+/// Remove a webhook by service name.
+///
+/// Mounted at `DELETE /api/v1/webhooks/{id}` where id is the service_name.
+pub async fn remove_webhook(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    let mut webhooks = state.webhooks.write().await;
+    let before = webhooks.len();
+    webhooks.retain(|w| w.service_name != id);
+    let removed = before - webhooks.len();
+
+    if removed == 0 {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": format!("no webhook for service '{id}'")})),
+        )
+            .into_response()
+    } else {
+        info!("Webhook: removed {removed} webhook(s) for service '{id}'");
+        (
+            StatusCode::OK,
+            Json(serde_json::json!({"status": "removed", "count": removed})),
+        )
+            .into_response()
+    }
 }
 
 #[cfg(test)]

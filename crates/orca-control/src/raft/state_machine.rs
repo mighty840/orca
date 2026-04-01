@@ -147,9 +147,11 @@ impl RaftStateMachine<C> for StateMachine {
         snapshot: Box<Cursor<Vec<u8>>>,
     ) -> Result<(), StorageError<u64>> {
         let data = snapshot.into_inner();
-        let _snap: RaftSnapshot = serde_json::from_slice(&data).map_err(|e| sm_read_err(&e))?;
+        let snap: RaftSnapshot = serde_json::from_slice(&data).map_err(|e| sm_read_err(&e))?;
 
-        // TODO: rebuild ClusterStore from snapshot data
+        self.store
+            .restore_from_snapshot(&snap)
+            .map_err(|e| sm_read_err(&e))?;
 
         *self.last_applied.lock().await = meta.last_log_id;
         *self.last_membership.lock().await = meta.last_membership.clone();

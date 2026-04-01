@@ -144,4 +144,16 @@ impl OrcaClient {
             .error_for_status()?;
         Ok(resp.json().await?)
     }
+
+    pub async fn remove_webhook(&self, id: &str) -> anyhow::Result<serde_json::Value> {
+        let resp = self
+            .auth(
+                self.client
+                    .delete(self.url(&format!("/api/v1/webhooks/{id}"))),
+            )
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
+    }
 }

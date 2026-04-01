@@ -1,6 +1,7 @@
 //! Persistent cluster store backed by redb.
 
 mod kv;
+mod restore;
 mod types;
 
 pub use kv::ClusterStore;
