@@ -62,3 +62,41 @@ pub fn setup_port_redirect(target_port: u16) -> u16 {
     info!("Port redirect {target_port} -> {high_port} set up via iptables");
     high_port
 }
+
+/// Check if the current binary has `cap_net_bind_service` capability.
+/// Returns `true` if the capability is detected or cannot be determined.
+fn has_net_bind_capability() -> bool {
+    // Try reading /proc/self/status CapEff field
+    if let Ok(status) = std::fs::read_to_string("/proc/self/status") {
+        for line in status.lines() {
+            if let Some(hex) = line.strip_prefix("CapEff:\t")
+                && let Ok(caps) = u64::from_str_radix(hex.trim(), 16)
+            {
+                // CAP_NET_BIND_SERVICE is bit 10
+                return caps & (1 << 10) != 0;
+            }
+        }
+    }
+    // Fallback: try `getcap` on the binary
+    if let Ok(exe) = std::env::current_exe()
+        && let Ok(output) = std::process::Command::new("getcap").arg(&exe).output()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return stdout.contains("cap_net_bind_service");
+    }
+    // Cannot determine — assume capable (will fail at bind time with a clear error)
+    true
+}
+
+/// If using a privileged port, check capabilities upfront and print guidance.
+pub fn check_privileged_port(proxy_port: u16) {
+    if (proxy_port == 80 || proxy_port == 443) && !has_net_bind_capability() {
+        let exe = std::env::current_exe()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "orca".to_string());
+        tracing::warn!(
+            "Port {proxy_port} requires elevated privileges. Run once:\n  \
+             sudo setcap 'cap_net_bind_service=+ep' {exe}"
+        );
+    }
+}
