@@ -1,152 +1,19 @@
 use std::sync::Arc;
 
+use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use axum::routing::{delete, get, post};
-use axum::{Json, Router};
-use serde::Deserialize;
 use tracing::error;
 
-use orca_core::api_types::{
-    DeployRequest, DeployResponse, LogsQuery, ScaleRequest, ScaleResponse, ServiceStatus,
-    StatusResponse,
-};
+use orca_core::api_types::{LogsQuery, ScaleRequest, ScaleResponse};
 use orca_core::types::WorkloadStatus;
 
-use crate::auth::auth_middleware;
-use crate::cluster_handlers;
 use crate::reconciler;
 use crate::state::AppState;
-use crate::webhook;
-
-/// Build the axum router for the API.
-pub fn router(state: Arc<AppState>) -> Router {
-    // Unauthenticated routes (metrics for Prometheus scraping).
-    let public = Router::new()
-        .route("/metrics", get(crate::metrics::metrics_handler))
-        .with_state(state.clone());
-
-    let authed = Router::new()
-        .route("/api/v1/health", get(health))
-        .route("/api/v1/deploy", post(deploy))
-        .route("/api/v1/status", get(status))
-        .route("/api/v1/services/{name}/logs", get(logs))
-        .route("/api/v1/services/{name}/scale", post(scale))
-        .route("/api/v1/services/{name}/rollback", post(rollback))
-        .route("/api/v1/services/{name}/promote", post(promote))
-        .route("/api/v1/services/{name}", delete(stop_service))
-        .route("/api/v1/projects/{project}", delete(stop_project))
-        .route("/api/v1/stop", post(stop_all))
-        .merge(webhook::webhook_router())
-        .merge(cluster_handlers::cluster_router())
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            auth_middleware,
-        ))
-        .with_state(state);
-
-    public.merge(authed)
-}
-
-/// Health check endpoint.
-async fn health() -> impl IntoResponse {
-    Json(serde_json::json!({ "status": "ok" }))
-}
-
-/// Deploy services from the request body.
-async fn deploy(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<DeployRequest>,
-) -> impl IntoResponse {
-    let (deployed, errors) = reconciler::reconcile(&state, &req.services).await;
-
-    // Persist deployed services to store
-    if let Some(store) = &state.store {
-        for config in &req.services {
-            if deployed.contains(&config.name)
-                && let Err(e) = store.set_service(&config.name, config)
-            {
-                tracing::warn!("Failed to persist {}: {e}", config.name);
-            }
-        }
-    }
-
-    let status_code = if errors.is_empty() {
-        StatusCode::OK
-    } else if deployed.is_empty() {
-        StatusCode::INTERNAL_SERVER_ERROR
-    } else {
-        StatusCode::PARTIAL_CONTENT
-    };
-
-    (status_code, Json(DeployResponse { deployed, errors }))
-}
-
-/// Query params for status filtering.
-#[derive(Debug, Deserialize, Default)]
-struct StatusQuery {
-    #[serde(default)]
-    project: Option<String>,
-}
-
-/// Get cluster and service status, optionally filtered by project.
-async fn status(
-    State(state): State<Arc<AppState>>,
-    axum::extract::Query(query): axum::extract::Query<StatusQuery>,
-) -> impl IntoResponse {
-    let services = state.services.read().await;
-    let stats_cache = state.container_stats.read().await;
-
-    let service_statuses: Vec<ServiceStatus> = services
-        .values()
-        .filter(|svc| {
-            query
-                .project
-                .as_ref()
-                .is_none_or(|p| svc.config.project.as_deref() == Some(p.as_str()))
-        })
-        .map(|svc| {
-            let running = svc.running_count();
-            let overall_status = if running == 0 && svc.desired_replicas > 0 {
-                "stopped"
-            } else if running < svc.desired_replicas {
-                "degraded"
-            } else {
-                "running"
-            };
-
-            // Look up cached stats for this service.
-            let cached = stats_cache.get(&svc.config.name);
-
-            ServiceStatus {
-                name: svc.config.name.clone(),
-                image: svc
-                    .config
-                    .image
-                    .clone()
-                    .or_else(|| svc.config.module.clone())
-                    .unwrap_or_default(),
-                runtime: svc.config.runtime,
-                desired_replicas: svc.desired_replicas,
-                running_replicas: running,
-                status: overall_status.to_string(),
-                domain: svc.config.domain.clone(),
-                project: svc.config.project.clone(),
-                memory_usage: cached.map(|s| s.memory_usage.clone()),
-                cpu_percent: cached.map(|s| s.cpu_percent),
-            }
-        })
-        .collect();
-
-    Json(StatusResponse {
-        cluster_name: state.cluster_config.cluster.name.clone(),
-        services: service_statuses,
-    })
-}
 
 /// Stream or fetch logs from a service.
-async fn logs(
+pub(crate) async fn logs(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
     Query(query): Query<LogsQuery>,
@@ -232,7 +99,7 @@ async fn logs(
     }
 }
 
-async fn scale(
+pub(crate) async fn scale(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
     Json(req): Json<ScaleRequest>,
@@ -254,7 +121,7 @@ async fn scale(
     }
 }
 
-async fn rollback(
+pub(crate) async fn rollback(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> impl IntoResponse {
@@ -264,7 +131,7 @@ async fn rollback(
     )
 }
 
-async fn promote(
+pub(crate) async fn promote(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> impl IntoResponse {
@@ -274,7 +141,7 @@ async fn promote(
     )
 }
 
-async fn stop_service(
+pub(crate) async fn stop_service(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> impl IntoResponse {
@@ -285,7 +152,7 @@ async fn stop_service(
 }
 
 /// Stop all services in a project.
-async fn stop_project(
+pub(crate) async fn stop_project(
     State(state): State<Arc<AppState>>,
     Path(project): Path<String>,
 ) -> impl IntoResponse {
@@ -305,7 +172,7 @@ async fn stop_project(
     Json(serde_json::json!({"ok": format!("stopped project {project}"), "stopped": names}))
 }
 
-async fn stop_all(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+pub(crate) async fn stop_all(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     ok_or_500(reconciler::stop_all(&state).await, "stop all")
 }
 

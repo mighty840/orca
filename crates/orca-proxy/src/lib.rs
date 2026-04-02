@@ -254,7 +254,6 @@ async fn serve_loop(
                     .await
                 }
             });
-
             if let Some(acceptor) = tls {
                 match acceptor.accept(stream).await {
                     Ok(tls_stream) => {

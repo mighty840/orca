@@ -271,6 +271,4 @@ async fn queue_remote_deploy(state: &AppState, node_id: u64, spec: &WorkloadSpec
     let mut pending = state.pending_commands.write().await;
     pending.entry(node_id).or_default().push(cmd);
 }
-
-// stop, stop_all, redeploy, rollback, scale, promote moved to operations.rs
 pub use crate::operations::{promote, redeploy, rollback, scale, stop, stop_all};
