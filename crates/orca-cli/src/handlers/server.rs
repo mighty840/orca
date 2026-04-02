@@ -251,18 +251,6 @@ fn ensure_cluster_token() -> String {
     token
 }
 
-/// Show the cluster token.
-pub fn show_token() {
-    let path = token_path();
-    if path.exists() {
-        if let Ok(token) = std::fs::read_to_string(&path) {
-            println!("{}", token.trim());
-        }
-    } else {
-        println!("No cluster token found. Start the server first.");
-    }
-}
-
 /// Read token from file, env var, or CLI flag.
 pub fn read_token(flag: Option<&str>) -> Option<String> {
     if let Some(t) = flag {

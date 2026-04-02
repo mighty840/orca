@@ -1,7 +1,7 @@
 use clap::Subcommand;
 
 pub use crate::subcommands::{
-    AlertsAction, BackupAction, DbAction, ImportSource, SecretsAction, WebhookAction,
+    AlertsAction, BackupAction, DbAction, ImportSource, SecretsAction, TokenAction, WebhookAction,
 };
 
 #[derive(Subcommand)]
@@ -137,8 +137,11 @@ pub enum Command {
         setup_key: Option<String>,
     },
 
-    /// Show the cluster token
-    Token,
+    /// Manage API tokens
+    Token {
+        #[command(subcommand)]
+        action: TokenAction,
+    },
 
     /// Launch the TUI dashboard
     Tui,

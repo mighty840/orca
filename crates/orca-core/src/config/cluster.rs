@@ -18,8 +18,12 @@ pub struct ClusterConfig {
     #[serde(default)]
     pub backup: Option<BackupConfig>,
     /// API bearer tokens for authentication. Empty = allow all requests.
+    /// Deprecated: use `[[token]]` entries with roles instead.
     #[serde(default)]
     pub api_tokens: Vec<String>,
+    /// Named API tokens with role-based access control.
+    #[serde(default)]
+    pub token: Vec<ApiToken>,
     /// Mesh networking configuration (NetBird).
     #[serde(default)]
     pub network: Option<NetworkConfig>,
@@ -35,6 +39,49 @@ pub struct NetworkConfig {
     pub setup_key: Option<String>,
     /// NetBird management URL (default: api.netbird.io).
     pub management_url: Option<String>,
+}
+
+/// Named API token with role-based access control.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiToken {
+    /// Human-readable name (e.g., "sharang", "gitea-ci").
+    pub name: String,
+    /// Bearer token value.
+    pub value: String,
+    /// Role: admin, deployer, or viewer.
+    #[serde(default = "default_role")]
+    pub role: Role,
+}
+
+/// Access control role.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    /// Full access: deploy, stop, scale, drain, manage tokens.
+    #[default]
+    Admin,
+    /// Deploy, stop, scale, logs, status. For CI/CD service accounts.
+    Deployer,
+    /// Read-only: status, logs, metrics. For dashboards.
+    Viewer,
+}
+
+impl Role {
+    /// Check if this role can perform the given action.
+    pub fn can(self, action: &str) -> bool {
+        match self {
+            Role::Admin => true,
+            Role::Deployer => matches!(
+                action,
+                "deploy" | "stop" | "scale" | "rollback" | "status" | "logs" | "cluster_info"
+            ),
+            Role::Viewer => matches!(action, "status" | "logs" | "cluster_info"),
+        }
+    }
+}
+
+fn default_role() -> Role {
+    Role::Admin
 }
 
 fn default_network_provider() -> String {

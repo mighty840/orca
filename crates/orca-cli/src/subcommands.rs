@@ -80,6 +80,23 @@ pub enum DbAction {
 }
 
 #[derive(Subcommand)]
+pub enum TokenAction {
+    /// Show the current cluster token
+    Show,
+    /// Create a new named API token with a role
+    Create {
+        /// Token name (e.g., "sharang", "gitea-ci")
+        #[arg(long)]
+        name: String,
+        /// Role: admin, deployer, or viewer
+        #[arg(long, default_value = "deployer")]
+        role: String,
+    },
+    /// List all configured tokens
+    List,
+}
+
+#[derive(Subcommand)]
 pub enum WebhookAction {
     Add {
         #[arg(long)]
