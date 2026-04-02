@@ -13,7 +13,10 @@ use crate::routes::{service_config_to_spec, update_container_routes, update_wasm
 use crate::state::{AppState, ServiceState};
 
 /// Load a BYO TLS certificate and key from PEM files.
-fn load_byo_cert(cert_path: &str, key_path: &str) -> anyhow::Result<rustls::sign::CertifiedKey> {
+pub fn load_byo_cert(
+    cert_path: &str,
+    key_path: &str,
+) -> anyhow::Result<rustls::sign::CertifiedKey> {
     let cert_pem = std::fs::read(cert_path)?;
     let key_pem = std::fs::read(key_path)?;
     let certs: Vec<_> =

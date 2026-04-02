@@ -59,7 +59,7 @@ impl HealthChecker {
     }
 
     /// Check all services and their instances.
-    async fn check_all(&self, failure_counts: &mut HashMap<String, u32>) {
+    pub async fn check_all(&self, failure_counts: &mut HashMap<String, u32>) {
         let check_targets: Vec<CheckTarget> = {
             let services = self.state.services.read().await;
             services

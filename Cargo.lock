@@ -2460,6 +2460,7 @@ dependencies = [
  "orca-core",
  "orca-proxy",
  "prost",
+ "rcgen 0.13.2",
  "redb",
  "reqwest",
  "rustls",

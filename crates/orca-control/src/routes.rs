@@ -264,7 +264,7 @@ mod tests {
     /// Only Healthy and NoCheck instances should be routable.
     #[test]
     fn health_filter_includes_healthy_and_nocheck() {
-        let instances = vec![
+        let instances = [
             make_instance(HealthState::Healthy, Some(8080)),
             make_instance(HealthState::NoCheck, Some(8081)),
             make_instance(HealthState::Unhealthy, Some(8082)),
@@ -283,7 +283,7 @@ mod tests {
     /// All-unhealthy instances should produce an empty route set.
     #[test]
     fn health_filter_excludes_all_unhealthy() {
-        let instances = vec![
+        let instances = [
             make_instance(HealthState::Unhealthy, Some(8080)),
             make_instance(HealthState::Unknown, Some(8081)),
         ];

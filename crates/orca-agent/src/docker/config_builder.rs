@@ -231,22 +231,35 @@ mod tests {
     }
 
     #[test]
-    fn test_log_config_json_file() {
+    fn test_log_config() {
         let cfg = build_log_config();
         assert_eq!(cfg.typ.as_deref(), Some("json-file"));
-    }
-
-    #[test]
-    fn test_log_config_max_size() {
-        let cfg = build_log_config();
         let opts = cfg.config.as_ref().unwrap();
         assert_eq!(opts.get("max-size").map(|s| s.as_str()), Some("10m"));
+        assert_eq!(opts.get("max-file").map(|s| s.as_str()), Some("3"));
     }
 
     #[test]
-    fn test_log_config_max_file() {
-        let cfg = build_log_config();
-        let opts = cfg.config.as_ref().unwrap();
-        assert_eq!(opts.get("max-file").map(|s| s.as_str()), Some("3"));
+    fn test_memory_limit_zero() {
+        // "0" should parse as 0 bytes (no effective limit).
+        assert_eq!(parse_memory_string("0"), Some(0));
+    }
+
+    #[test]
+    fn test_cpu_limit_zero() {
+        let mut spec = minimal_spec();
+        spec.resources = Some(ResourceLimits {
+            memory: None,
+            cpu: Some(0.0),
+            gpu: None,
+        });
+        let (_mem, nano_cpus) = parse_resource_limits(&spec);
+        assert_eq!(nano_cpus, Some(0), "cpu=0.0 should produce 0 nano_cpus");
+    }
+
+    #[test]
+    fn test_very_large_memory() {
+        // 128Gi = 128 * 1024^3 = 137438953472
+        assert_eq!(parse_memory_string("128Gi"), Some(137_438_953_472));
     }
 }

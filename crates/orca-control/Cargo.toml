@@ -47,3 +47,6 @@ bollard = { workspace = true }
 
 [dev-dependencies.tempfile]
 version = "3"
+
+[dev-dependencies.rcgen]
+version = "0.13"

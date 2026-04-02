@@ -229,3 +229,35 @@ impl AgentClient {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    /// Verify the exponential backoff logic: starts at 5s, doubles, capped at 60s.
+    #[test]
+    fn test_backoff_doubles() {
+        let min_backoff = Duration::from_secs(5);
+        let max_backoff = Duration::from_secs(60);
+
+        // Simulate the backoff calculation from run_heartbeat_loop
+        let mut interval = min_backoff;
+        assert_eq!(interval, Duration::from_secs(5));
+
+        interval = (interval * 2).max(min_backoff).min(max_backoff);
+        assert_eq!(interval, Duration::from_secs(10));
+
+        interval = (interval * 2).max(min_backoff).min(max_backoff);
+        assert_eq!(interval, Duration::from_secs(20));
+
+        interval = (interval * 2).max(min_backoff).min(max_backoff);
+        assert_eq!(interval, Duration::from_secs(40));
+
+        interval = (interval * 2).max(min_backoff).min(max_backoff);
+        assert_eq!(interval, Duration::from_secs(60), "should be capped at 60s");
+
+        // Further doublings should stay at 60s
+        interval = (interval * 2).max(min_backoff).min(max_backoff);
+        assert_eq!(interval, Duration::from_secs(60), "should remain at cap");
+    }
+}

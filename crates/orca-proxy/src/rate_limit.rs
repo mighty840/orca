@@ -142,4 +142,26 @@ mod tests {
             "should be allowed again after token refill"
         );
     }
+
+    #[test]
+    fn test_rate_limiter_stress() {
+        let limiter = RateLimiter::new();
+        let ip = IpAddr::V4(Ipv4Addr::new(10, 99, 0, 1));
+        let mut allowed = 0u32;
+        let mut blocked = 0u32;
+        for _ in 0..200 {
+            if limiter.check(ip) {
+                allowed += 1;
+            } else {
+                blocked += 1;
+            }
+        }
+        // MAX_TOKENS is 100, so first 100 pass, remaining ~100 blocked.
+        // Timing jitter from refill may shift counts slightly.
+        assert!(
+            allowed >= 100,
+            "expected at least 100 allowed, got {allowed}"
+        );
+        assert!(blocked >= 50, "expected at least 50 blocked, got {blocked}");
+    }
 }
