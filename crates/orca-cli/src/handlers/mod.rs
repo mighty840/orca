@@ -1,3 +1,4 @@
+pub mod ai_ops;
 pub mod backup;
 pub mod build;
 pub mod cleanup;

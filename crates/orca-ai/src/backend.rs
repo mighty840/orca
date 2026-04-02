@@ -36,6 +36,7 @@ pub struct OpenAiCompatibleBackend {
     endpoint: String,
     model: String,
     api_key: Option<String>,
+    max_tokens: u32,
 }
 
 impl OpenAiCompatibleBackend {
@@ -45,7 +46,14 @@ impl OpenAiCompatibleBackend {
             endpoint,
             model,
             api_key,
+            max_tokens: 4000,
         }
+    }
+
+    /// Set the max_tokens parameter for completions.
+    pub fn with_max_tokens(mut self, max_tokens: u32) -> Self {
+        self.max_tokens = max_tokens;
+        self
     }
 }
 
@@ -54,6 +62,7 @@ struct ChatRequest<'a> {
     model: &'a str,
     messages: &'a [ChatMessage],
     temperature: f64,
+    max_tokens: u32,
 }
 
 #[derive(Deserialize)]
@@ -89,6 +98,7 @@ impl LlmBackend for OpenAiCompatibleBackend {
             model: &self.model,
             messages,
             temperature: 0.3,
+            max_tokens: self.max_tokens,
         });
 
         if let Some(key) = &self.api_key {

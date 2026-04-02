@@ -52,17 +52,6 @@ pub async fn handle_scale(service: String, replicas: u32, api: String) -> anyhow
     Ok(())
 }
 
-pub fn handle_ask(question: Vec<String>) {
-    let q = question.join(" ");
-    println!("Q: {q}\nAI backend not yet connected. Configure [ai] in cluster.toml.");
-}
-
-pub fn handle_generate(description: Vec<String>) {
-    let desc = description.join(" ");
-    println!("Generating config for: {desc}\n");
-    println!("AI backend not yet connected. Configure [ai] in cluster.toml.");
-}
-
 pub fn handle_alerts(action: AlertsAction) {
     match action {
         AlertsAction::List { all } => {

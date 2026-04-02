@@ -83,8 +83,8 @@ async fn main() -> anyhow::Result<()> {
         Command::Scale { service, replicas } => {
             handlers::ops::handle_scale(service, replicas, cli.api).await?;
         }
-        Command::Ask { question } => handlers::ops::handle_ask(question),
-        Command::Generate { description } => handlers::ops::handle_generate(description),
+        Command::Ask { question } => handlers::ai_ops::handle_ask(question, cli.api).await?,
+        Command::Generate { description } => handlers::ai_ops::handle_generate(description).await?,
         Command::Alerts { action } => handlers::ops::handle_alerts(action),
         Command::Secrets { action } => handlers::ops::handle_secrets(action),
         Command::Import { source } => handlers::import::handle_import(source),
