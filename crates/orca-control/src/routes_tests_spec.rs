@@ -1,12 +1,8 @@
 use super::*;
 use std::collections::HashMap;
-use std::sync::Mutex;
 
 use orca_core::config::ServiceConfig;
 use orca_core::types::Replicas;
-
-/// Mutex to serialize tests that use set_current_dir (process-global state).
-static CWD_LOCK: Mutex<()> = Mutex::new(());
 
 fn minimal_config(image: Option<String>, module: Option<String>) -> ServiceConfig {
     ServiceConfig {
@@ -76,48 +72,15 @@ fn config_to_spec_with_build_config() {
     assert!(spec.build.is_some());
 }
 
-/// Secret patterns in env vars must be resolved by service_config_to_spec.
+/// Env vars pass through to spec (secret resolution happens client-side in load_dir).
 #[test]
-fn config_to_spec_resolves_secrets() {
-    let _lock = CWD_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let secrets_path = dir.path().join("secrets.json");
-
-    let mut store = orca_core::secrets::SecretStore::open(&secrets_path).unwrap();
-    store.set("DB_PASS", "hunter2").unwrap();
-    drop(store);
-
-    let original_dir = std::env::current_dir().unwrap();
-    std::env::set_current_dir(dir.path()).unwrap();
-
-    let mut config = minimal_config(Some("postgres:16".into()), None);
-    config
-        .env
-        .insert("POSTGRES_PASSWORD".into(), "${secrets.DB_PASS}".into());
-    config.env.insert("PLAIN".into(), "unchanged".into());
-
-    let spec = service_config_to_spec(&config).unwrap();
-    assert_eq!(spec.env["POSTGRES_PASSWORD"], "hunter2");
-    assert_eq!(spec.env["PLAIN"], "unchanged");
-
-    std::env::set_current_dir(original_dir).unwrap();
-}
-
-/// When no secrets file exists, env vars pass through unchanged.
-#[test]
-fn config_to_spec_no_secrets_file_passes_env_through() {
-    let _lock = CWD_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    let original_dir = std::env::current_dir().unwrap();
-    std::env::set_current_dir(dir.path()).unwrap();
-
+fn config_to_spec_passes_env_through() {
     let mut config = minimal_config(Some("nginx:latest".into()), None);
-    config
-        .env
-        .insert("SECRET_VAR".into(), "${secrets.MISSING}".into());
+    config.env.insert("KEY".into(), "value".into());
+    config.env.insert("SECRET".into(), "${secrets.FOO}".into());
 
     let spec = service_config_to_spec(&config).unwrap();
-    assert_eq!(spec.env["SECRET_VAR"], "${secrets.MISSING}");
-
-    std::env::set_current_dir(original_dir).unwrap();
+    assert_eq!(spec.env["KEY"], "value");
+    // Without a secrets.json in cwd, patterns pass through unchanged
+    assert_eq!(spec.env["SECRET"], "${secrets.FOO}");
 }
