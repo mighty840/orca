@@ -117,6 +117,7 @@ async fn register_master_node(state: &state::AppState, api_port: u16) {
         address: format!("localhost:{api_port}"),
         labels,
         last_heartbeat: chrono::Utc::now(),
+        drain: false,
     };
     let mut nodes = state.registered_nodes.write().await;
     nodes.insert(node_id, node);

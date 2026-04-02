@@ -29,5 +29,6 @@ reqwest = { workspace = true }
 hostname = "0.4"
 bollard = { workspace = true }
 dirs-next = "2"
+futures-util = "0.3"
 libc = "0.2"
 rand = "0.9"

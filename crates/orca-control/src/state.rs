@@ -51,7 +51,7 @@ pub struct AppState {
 }
 
 /// A node registered in the cluster.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RegisteredNode {
     /// Node ID.
     pub node_id: u64,
@@ -61,6 +61,9 @@ pub struct RegisteredNode {
     pub labels: HashMap<String, String>,
     /// Last heartbeat time.
     pub last_heartbeat: chrono::DateTime<chrono::Utc>,
+    /// Whether the node is in drain mode (no new workloads scheduled).
+    #[serde(default)]
+    pub drain: bool,
 }
 
 /// State of a deployed service.

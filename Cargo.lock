@@ -2113,6 +2113,7 @@ dependencies = [
  "bollard",
  "clap",
  "dirs-next",
+ "futures-util",
  "hostname",
  "libc",
  "orca-agent",

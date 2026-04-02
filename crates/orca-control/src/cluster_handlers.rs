@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
@@ -18,6 +18,11 @@ pub fn cluster_router() -> Router<Arc<AppState>> {
         .route("/api/v1/cluster/info", get(cluster_info))
         .route("/api/v1/cluster/register", post(register_node))
         .route("/api/v1/cluster/heartbeat", post(heartbeat))
+        .route("/api/v1/cluster/nodes/{node_id}/drain", post(drain_node))
+        .route(
+            "/api/v1/cluster/nodes/{node_id}/undrain",
+            post(undrain_node),
+        )
 }
 
 pub async fn cluster_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
@@ -47,6 +52,7 @@ pub async fn register_node(
         address: req.address.clone(),
         labels: req.labels,
         last_heartbeat: chrono::Utc::now(),
+        drain: false,
     };
     let mut nodes = state.registered_nodes.write().await;
     nodes.insert(req.node_id, node);
@@ -104,6 +110,39 @@ pub async fn heartbeat(
         );
     }
     Json(serde_json::json!({"commands": commands}))
+}
+
+pub async fn drain_node(
+    State(state): State<Arc<AppState>>,
+    Path(node_id): Path<u64>,
+) -> impl IntoResponse {
+    set_node_drain(&state, node_id, true).await
+}
+
+pub async fn undrain_node(
+    State(state): State<Arc<AppState>>,
+    Path(node_id): Path<u64>,
+) -> impl IntoResponse {
+    set_node_drain(&state, node_id, false).await
+}
+
+async fn set_node_drain(
+    state: &AppState,
+    node_id: u64,
+    drain: bool,
+) -> (StatusCode, Json<serde_json::Value>) {
+    let mut nodes = state.registered_nodes.write().await;
+    if let Some(node) = nodes.get_mut(&node_id) {
+        node.drain = drain;
+        let action = if drain { "drained" } else { "undrained" };
+        tracing::info!("Node {node_id} {action}");
+        (StatusCode::OK, Json(serde_json::json!({"status": action})))
+    } else {
+        (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "node not found"})),
+        )
+    }
 }
 
 /// Parse a status string from agent reports into a `WorkloadStatus`.

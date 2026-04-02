@@ -124,6 +124,7 @@ async fn main() -> anyhow::Result<()> {
             .await?;
         }
         Command::Backup { action } => handlers::backup::handle_backup(action),
+        Command::Update => handlers::update::handle_update().await?,
         Command::Cleanup => {
             handlers::cleanup::handle_cleanup().await?;
         }

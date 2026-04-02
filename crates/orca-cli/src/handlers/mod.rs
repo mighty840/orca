@@ -12,3 +12,5 @@ mod port;
 pub mod reload;
 pub mod server;
 pub mod status;
+pub mod update;
+pub(crate) mod volume_backup;

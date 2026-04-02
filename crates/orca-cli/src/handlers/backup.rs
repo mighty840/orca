@@ -1,9 +1,38 @@
 use crate::commands::BackupAction;
 use orca_core::backup::{BackupConfig, BackupManager, BackupTarget};
 
+use super::volume_backup;
+
 pub fn handle_backup(action: BackupAction) {
+    match &action {
+        BackupAction::All => {
+            let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+            rt.block_on(volume_backup::backup_all_volumes());
+            return;
+        }
+        BackupAction::RestoreVolume { volume_name } => {
+            let name = volume_name.clone();
+            let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+            rt.block_on(volume_backup::restore_volume(&name));
+            return;
+        }
+        _ => {}
+    }
+
+    let backup_cfg = load_backup_config();
+    let mgr = BackupManager::new(backup_cfg.clone());
+
+    match action {
+        BackupAction::Create => handle_create(&mgr),
+        BackupAction::List => handle_list(&mgr, &backup_cfg),
+        BackupAction::Restore { id } => restore_backup(&mgr, &backup_cfg, &id),
+        BackupAction::All | BackupAction::RestoreVolume { .. } => unreachable!(),
+    }
+}
+
+fn load_backup_config() -> BackupConfig {
     let config = std::path::Path::new("cluster.toml");
-    let backup_cfg = if config.exists() {
+    if config.exists() {
         match orca_core::config::ClusterConfig::load(config) {
             Ok(cc) => cc.backup.unwrap_or_else(default_backup_config),
             Err(e) => {
@@ -13,51 +42,45 @@ pub fn handle_backup(action: BackupAction) {
         }
     } else {
         default_backup_config()
-    };
+    }
+}
 
-    let mgr = BackupManager::new(backup_cfg.clone());
-
-    match action {
-        BackupAction::Create => {
-            let files = ["secrets.json", "cluster.toml", "services.toml"];
-            let mut count = 0u32;
-            for file in &files {
-                let path = std::path::Path::new(file);
-                if path.exists() {
-                    match mgr.backup_file(file, path) {
-                        Ok(()) => {
-                            println!("Backed up: {file}");
-                            count += 1;
-                        }
-                        Err(e) => tracing::error!("Failed to backup {file}: {e}"),
-                    }
+fn handle_create(mgr: &BackupManager) {
+    let files = ["secrets.json", "cluster.toml", "services.toml"];
+    let mut count = 0u32;
+    for file in &files {
+        let path = std::path::Path::new(file);
+        if path.exists() {
+            match mgr.backup_file(file, path) {
+                Ok(()) => {
+                    println!("Backed up: {file}");
+                    count += 1;
                 }
-            }
-            if count == 0 {
-                println!("No files found to backup.");
-            } else {
-                println!("Backup complete: {count} file(s).");
+                Err(e) => tracing::error!("Failed to backup {file}: {e}"),
             }
         }
-        BackupAction::List => {
-            for target in &backup_cfg.targets {
-                match &target {
-                    BackupTarget::Local { path } => println!("Local backups in {path}:"),
-                    BackupTarget::S3 { bucket, .. } => println!("S3 backups in {bucket}:"),
-                }
-                match mgr.list_backups(target) {
-                    Ok(entries) if entries.is_empty() => println!("  (none)"),
-                    Ok(entries) => {
-                        for e in entries {
-                            println!("  {e}");
-                        }
-                    }
-                    Err(e) => tracing::error!("Failed to list backups: {e}"),
+    }
+    if count == 0 {
+        println!("No files found to backup.");
+    } else {
+        println!("Backup complete: {count} file(s).");
+    }
+}
+
+fn handle_list(mgr: &BackupManager, backup_cfg: &BackupConfig) {
+    for target in &backup_cfg.targets {
+        match &target {
+            BackupTarget::Local { path } => println!("Local backups in {path}:"),
+            BackupTarget::S3 { bucket, .. } => println!("S3 backups in {bucket}:"),
+        }
+        match mgr.list_backups(target) {
+            Ok(entries) if entries.is_empty() => println!("  (none)"),
+            Ok(entries) => {
+                for e in entries {
+                    println!("  {e}");
                 }
             }
-        }
-        BackupAction::Restore { id } => {
-            restore_backup(&mgr, &backup_cfg, &id);
+            Err(e) => tracing::error!("Failed to list backups: {e}"),
         }
     }
 }

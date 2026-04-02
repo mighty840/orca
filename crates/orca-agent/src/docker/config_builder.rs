@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use bollard::container::Config;
-use bollard::models::{HostConfig, PortBinding};
+use bollard::models::{HostConfig, HostConfigLogConfig, PortBinding};
 
 use super::ORCA_LABEL;
 use orca_core::types::WorkloadSpec;
@@ -19,6 +19,8 @@ pub(crate) fn build_container_config(spec: &WorkloadSpec) -> Config<String> {
 
     let (memory_limit, nano_cpus) = parse_resource_limits(spec);
 
+    let log_config = build_log_config();
+
     let host_config = HostConfig {
         port_bindings: Some(port_bindings),
         binds: if binds.is_empty() { None } else { Some(binds) },
@@ -29,6 +31,7 @@ pub(crate) fn build_container_config(spec: &WorkloadSpec) -> Config<String> {
         },
         memory: memory_limit,
         nano_cpus,
+        log_config: Some(log_config),
         ..Default::default()
     };
 
@@ -133,6 +136,16 @@ fn parse_memory_string(s: &str) -> Option<i64> {
         val.parse::<u64>().ok().map(|v| (v * 1024) as i64)
     } else {
         s.parse::<i64>().ok()
+    }
+}
+
+fn build_log_config() -> HostConfigLogConfig {
+    let mut config = HashMap::new();
+    config.insert("max-size".to_string(), "10m".to_string());
+    config.insert("max-file".to_string(), "3".to_string());
+    HostConfigLogConfig {
+        typ: Some("json-file".to_string()),
+        config: Some(config),
     }
 }
 

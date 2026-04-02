@@ -168,6 +168,9 @@ pub enum Command {
         action: DbAction,
     },
 
+    /// Self-update orca to the latest release
+    Update,
+
     /// Build a Docker image from source for a service
     Build {
         /// Service name to build (builds all if omitted)

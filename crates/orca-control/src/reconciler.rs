@@ -237,6 +237,9 @@ async fn find_target_node(state: &AppState, config: &ServiceConfig) -> Option<u6
     let target = placement.node.as_ref()?;
     let nodes = state.registered_nodes.read().await;
     for node in nodes.values() {
+        if node.drain {
+            continue;
+        }
         if node.address.contains(target.as_str()) || target == &node.node_id.to_string() {
             return Some(node.node_id);
         }

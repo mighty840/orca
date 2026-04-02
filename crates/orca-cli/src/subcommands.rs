@@ -57,7 +57,15 @@ pub enum ImportSource {
 pub enum BackupAction {
     Create,
     List,
-    Restore { id: String },
+    Restore {
+        id: String,
+    },
+    /// Backup all orca Docker volumes
+    All,
+    /// Restore a Docker volume from the latest backup
+    RestoreVolume {
+        volume_name: String,
+    },
 }
 
 #[derive(Subcommand)]
