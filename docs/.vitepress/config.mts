@@ -3,7 +3,8 @@ import { defineConfig } from 'vitepress'
 export default defineConfig({
   title: 'Orca',
   description: 'Container + Wasm orchestrator with AI ops',
-  head: [['link', { rel: 'icon', href: '/logo.svg' }]],
+  base: '/orca/',
+  head: [['link', { rel: 'icon', href: '/orca/logo.svg' }]],
 
   appearance: 'dark',
 
