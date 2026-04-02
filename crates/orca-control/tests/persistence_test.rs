@@ -65,7 +65,7 @@ async fn test_deploy_persists_to_store() {
 }
 
 #[tokio::test]
-async fn test_stop_removes_from_store() {
+async fn test_stop_keeps_in_store() {
     let dir = tempfile::tempdir().unwrap();
     let store = open_store(dir.path());
     let state = test_state_with_store(store.clone());
@@ -73,7 +73,7 @@ async fn test_stop_removes_from_store() {
     deploy_service(&state, "web", "nginx:latest").await;
     assert!(store.get_service("web").unwrap().is_some());
 
-    // Stop via DELETE
+    // Stop via DELETE — should stop containers but keep config in store
     let app = router(state.clone());
     let req = Request::delete("/api/v1/services/web")
         .body(Body::empty())
@@ -81,9 +81,9 @@ async fn test_stop_removes_from_store() {
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 
-    // Verify removed from store
+    // Config should still be in store (stop != delete)
     let stored = store.get_service("web").unwrap();
-    assert!(stored.is_none(), "service should be removed from store");
+    assert!(stored.is_some(), "stop should not remove from store");
 }
 
 #[tokio::test]

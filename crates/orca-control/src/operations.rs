@@ -25,11 +25,7 @@ pub async fn stop(state: &AppState, service_name: &str) -> anyhow::Result<()> {
     });
     let mut triggers = state.wasm_triggers.write().await;
     triggers.retain(|t| t.service_name != service_name);
-    // Remove from persistent store
-    if let Some(store) = &state.store {
-        let _ = store.remove_service(service_name);
-    }
-    info!("Stopped and removed service: {service_name}");
+    info!("Stopped service: {service_name}");
     Ok(())
 }
 
