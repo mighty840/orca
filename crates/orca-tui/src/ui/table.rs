@@ -12,11 +12,7 @@ use super::{status_color, status_icon};
 /// Draw the full-width service table with scroll support.
 pub fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
     let filtered = state.filtered_services();
-    let title = if state.filter.is_empty() {
-        format!(" Services ({}) ", filtered.len())
-    } else {
-        format!(" Services [{}] ({}) ", state.filter, filtered.len())
-    };
+    let title = build_title(state, filtered.len());
 
     // Calculate visible area (subtract 3 for borders + header row)
     let visible_rows = if area.height > 4 {
@@ -37,6 +33,7 @@ pub fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
             let icon = status_icon(&svc.status);
             let s_color = status_color(&svc.status);
             let domain = svc.domain.as_deref().unwrap_or("-");
+            let project = svc.project.as_deref().unwrap_or("-");
 
             let style = if sel {
                 Style::default()
@@ -51,6 +48,7 @@ pub fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
 
             Row::new(vec![
                 format!("{pointer} {icon} {}", svc.name),
+                project.to_string(),
                 svc.image.clone(),
                 svc.runtime.clone(),
                 format!("{}/{}", svc.running_replicas, svc.desired_replicas),
@@ -62,7 +60,7 @@ pub fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
         .collect();
 
     let header = Row::new(vec![
-        "  NAME", "IMAGE", "RUNTIME", "REPLICAS", "STATUS", "DOMAIN",
+        "  NAME", "PROJECT", "IMAGE", "RUNTIME", "REPLICAS", "STATUS", "DOMAIN",
     ])
     .style(
         Style::default()
@@ -72,12 +70,13 @@ pub fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
     .bottom_margin(0);
 
     let widths = [
-        Constraint::Min(20),
-        Constraint::Min(20),
-        Constraint::Length(12),
+        Constraint::Min(18),
+        Constraint::Min(12),
+        Constraint::Min(18),
         Constraint::Length(10),
         Constraint::Length(10),
-        Constraint::Min(16),
+        Constraint::Length(10),
+        Constraint::Min(14),
     ];
 
     let scroll_indicator = if filtered.len() > visible_rows {
@@ -99,6 +98,21 @@ pub fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
 
     let table = Table::new(rows, widths).header(header).block(block);
     f.render_widget(table, area);
+}
+
+fn build_title(state: &AppState, count: usize) -> String {
+    let mut parts = Vec::new();
+    if !state.filter.is_empty() {
+        parts.push(format!("filter:{}", state.filter));
+    }
+    if let Some(ref proj) = state.project_filter {
+        parts.push(format!("project:{proj}"));
+    }
+    if parts.is_empty() {
+        format!(" Services ({count}) ")
+    } else {
+        format!(" Services [{}] ({count}) ", parts.join(" "))
+    }
 }
 
 /// Compute the scroll offset to keep `selected` visible within `visible` rows.

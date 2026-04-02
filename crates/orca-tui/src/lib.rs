@@ -1,4 +1,5 @@
 pub mod api;
+mod commands;
 mod keys;
 pub mod state;
 pub mod ui;
@@ -104,12 +105,6 @@ fn current_service_name(state: &AppState) -> Option<String> {
     }
 }
 
-/// Get service data for the current context.
-fn current_service_data(state: &AppState) -> Option<&api::ServiceStatus> {
-    let name = current_service_name(state)?;
-    state.services.iter().find(|s| s.name == name)
-}
-
 async fn refresh(client: &ApiClient, state: &mut AppState) {
     state.error = None;
     match client.status().await {
@@ -135,15 +130,6 @@ async fn refresh_logs_named(client: &ApiClient, state: &mut AppState, name: &str
     match client.logs(name, 50).await {
         Ok(logs) => state.logs = logs,
         Err(e) => state.logs = format!("Failed to fetch logs: {e}"),
-    }
-}
-
-async fn handle_deploy(client: &ApiClient, state: &mut AppState) {
-    if let Some(name) = current_service_name(state) {
-        match client.deploy(&name).await {
-            Ok(()) => state.flash(format!("Deployed {name}")),
-            Err(e) => state.error = Some(format!("Deploy failed: {e}")),
-        }
     }
 }
 

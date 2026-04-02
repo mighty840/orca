@@ -30,25 +30,26 @@ pub fn draw_detail(f: &mut Frame, area: Rect, state: &AppState, service_name: &s
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(12), // service info
+            Constraint::Length(14), // service info
             Constraint::Min(5),     // recent logs
             Constraint::Length(1),  // action bar
         ])
         .split(area);
 
-    // --- Service info ---
     draw_info(f, chunks[0], svc);
-
-    // --- Recent logs ---
     draw_recent_logs(f, chunks[1], state);
-
-    // --- Action bar ---
     draw_actions(f, chunks[2]);
 }
 
 fn draw_info(f: &mut Frame, area: Rect, svc: &crate::api::ServiceStatus) {
     let s_color = status_color(&svc.status);
     let domain = svc.domain.as_deref().unwrap_or("-");
+    let project = svc.project.as_deref().unwrap_or("-");
+    let memory = svc.memory_usage.as_deref().unwrap_or("-");
+    let cpu = svc
+        .cpu_percent
+        .map(|c| format!("{c:.1}%"))
+        .unwrap_or_else(|| "-".into());
     let label = Style::default().fg(Color::DarkGray);
     let val = Style::default().fg(Color::White);
     let accent = Style::default()
@@ -73,6 +74,10 @@ fn draw_info(f: &mut Frame, area: Rect, svc: &crate::api::ServiceStatus) {
             Span::styled(svc.name.clone(), accent),
         ]),
         Line::from(vec![
+            Span::styled("  Project:   ", label),
+            Span::styled(project.to_string(), val),
+        ]),
+        Line::from(vec![
             Span::styled("  Image:     ", label),
             Span::styled(svc.image.clone(), val),
         ]),
@@ -92,12 +97,18 @@ fn draw_info(f: &mut Frame, area: Rect, svc: &crate::api::ServiceStatus) {
             Span::styled(svc.status.clone(), Style::default().fg(s_color)),
         ]),
         Line::from(vec![
+            Span::styled("  Health:    ", label),
+            Span::styled(health_str, Style::default().fg(health_color)),
+        ]),
+        Line::from(vec![
             Span::styled("  Domain:    ", label),
             Span::styled(domain.to_string(), Style::default().fg(Color::Blue)),
         ]),
         Line::from(vec![
-            Span::styled("  Health:    ", label),
-            Span::styled(health_str, Style::default().fg(health_color)),
+            Span::styled("  Memory:    ", label),
+            Span::styled(memory.to_string(), val),
+            Span::styled("  CPU: ", label),
+            Span::styled(cpu, val),
         ]),
     ];
 
@@ -152,9 +163,7 @@ fn draw_actions(f: &mut Frame, area: Rect) {
     let desc = Style::default().fg(Color::DarkGray);
 
     let bar = Line::from(vec![
-        Span::styled(" [d]", key),
-        Span::styled("eploy ", desc),
-        Span::styled("[s]", key),
+        Span::styled(" [s]", key),
         Span::styled("cale ", desc),
         Span::styled("[x]", key),
         Span::styled("stop ", desc),

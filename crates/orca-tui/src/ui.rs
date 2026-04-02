@@ -3,6 +3,7 @@
 pub mod detail;
 pub mod help;
 pub mod logs;
+pub mod metrics;
 pub mod nodes;
 pub mod table;
 
@@ -21,7 +22,7 @@ pub fn draw(f: &mut Frame, state: &AppState) {
         vec![
             Constraint::Length(1), // header
             Constraint::Length(1), // breadcrumb
-            Constraint::Length(1), // command input (above content)
+            Constraint::Length(1), // command input
             Constraint::Min(5),    // main content
             Constraint::Length(1), // footer
         ]
@@ -43,25 +44,22 @@ pub fn draw(f: &mut Frame, state: &AppState) {
 
     if show_cmd {
         draw_command_bar(f, chunks[2], state);
-        let content = chunks[3];
-        match &state.view {
-            View::Services => table::draw_table(f, content, state),
-            View::Nodes => nodes::draw_nodes(f, content, state),
-            View::Logs { service } => logs::draw_logs(f, content, state, service),
-            View::Detail { service } => detail::draw_detail(f, content, state, service),
-            View::Help => help::draw_help(f, content, state),
-        }
+        draw_content(f, chunks[3], state);
         draw_footer(f, chunks[4], state);
     } else {
-        let content = chunks[2];
-        match &state.view {
-            View::Services => table::draw_table(f, content, state),
-            View::Nodes => nodes::draw_nodes(f, content, state),
-            View::Logs { service } => logs::draw_logs(f, content, state, service),
-            View::Detail { service } => detail::draw_detail(f, content, state, service),
-            View::Help => help::draw_help(f, content, state),
-        }
+        draw_content(f, chunks[2], state);
         draw_footer(f, chunks[3], state);
+    }
+}
+
+fn draw_content(f: &mut Frame, area: Rect, state: &AppState) {
+    match &state.view {
+        View::Services => table::draw_table(f, area, state),
+        View::Nodes => nodes::draw_nodes(f, area, state),
+        View::Logs { service } => logs::draw_logs(f, area, state, service),
+        View::Detail { service } => detail::draw_detail(f, area, state, service),
+        View::Help => help::draw_help(f, area, state),
+        View::Metrics => metrics::draw_metrics(f, area, state),
     }
 }
 
@@ -73,16 +71,16 @@ fn draw_header(f: &mut Frame, area: Rect, state: &AppState) {
     let (dot, dot_color) = match state.connection {
         ConnectionStatus::Connected => {
             if blink_on {
-                ("●", Color::Green)
+                ("\u{25cf}", Color::Green)
             } else {
-                ("●", Color::DarkGray)
+                ("\u{25cf}", Color::DarkGray)
             }
         }
         ConnectionStatus::Disconnected => {
             if blink_on {
-                ("●", Color::Red)
+                ("\u{25cf}", Color::Red)
             } else {
-                ("●", Color::DarkGray)
+                ("\u{25cf}", Color::DarkGray)
             }
         }
     };
@@ -141,6 +139,7 @@ fn draw_breadcrumb(f: &mut Frame, area: Rect, state: &AppState) {
         View::Logs { service } => format!("Services > {service} > Logs"),
         View::Detail { service } => format!("Services > {service}"),
         View::Help => "Help".to_string(),
+        View::Metrics => "Metrics".to_string(),
     };
     let line = Line::from(vec![
         Span::styled(" ", Style::default()),
@@ -172,7 +171,7 @@ fn draw_command_bar(f: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
-    // Error
+    // Error takes priority
     if let Some(err) = &state.error {
         let line = Line::from(Span::styled(
             format!(" {err}"),
@@ -182,7 +181,7 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
         return;
     }
 
-    // Flash message
+    // Flash message takes second priority
     if let Some(msg) = &state.status_msg {
         let line = Line::from(Span::styled(
             format!(" {msg}"),
@@ -192,16 +191,50 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
         return;
     }
 
-    // Context-specific key hints
+    // Status bar with view, connection, counts, filter, keys
+    let dim = Style::default().fg(Color::DarkGray);
+    let mut spans: Vec<Span> = Vec::new();
+
+    // View name
+    spans.push(Span::styled(
+        format!(" [{}]", state.view_name()),
+        Style::default().fg(Color::Cyan),
+    ));
+
+    // Service counts
+    let (running, _, _) = state.status_counts();
+    spans.push(Span::styled(
+        format!(" {running}/{} svc", state.services.len()),
+        dim,
+    ));
+
+    // Active filters
+    if let Some(ref proj) = state.project_filter {
+        spans.push(Span::styled(
+            format!(" proj:{proj}"),
+            Style::default().fg(Color::Yellow),
+        ));
+    }
+    if !state.filter.is_empty() {
+        spans.push(Span::styled(
+            format!(" /{}", state.filter),
+            Style::default().fg(Color::Yellow),
+        ));
+    }
+
+    // Separator + key hints
+    spans.push(Span::styled(" | ", dim));
     let keys = match &state.view {
-        View::Services => " :command  /filter  j/k:nav  Enter:detail  l:logs  ?:help  q:quit",
-        View::Nodes => " :command  Esc:back  ?:help  q:quit",
-        View::Logs { .. } => " Esc:back  w:wrap  ?:help  q:quit",
-        View::Detail { .. } => " Esc:back  d:deploy  s:scale  x:stop  l:logs  ?:help  q:quit",
-        View::Help => " Esc:back  q:quit",
+        View::Services => "1-3:views /filter s:scale x:stop p:project ?:help",
+        View::Nodes => "Esc:back :drain/:undrain ?:help",
+        View::Logs { .. } => "Esc:back w:wrap ?:help",
+        View::Detail { .. } => "Esc:back s:scale x:stop l:logs ?:help",
+        View::Help => "Esc:back",
+        View::Metrics => "Esc:back r:refresh ?:help",
     };
-    let line = Line::from(Span::styled(keys, Style::default().fg(Color::DarkGray)));
-    f.render_widget(Paragraph::new(line), area);
+    spans.push(Span::styled(keys, dim));
+
+    f.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
 /// Color for a service status string.
@@ -218,10 +251,10 @@ pub fn status_color(status: &str) -> Color {
 /// Status indicator character for service status.
 pub fn status_icon(status: &str) -> &'static str {
     match status {
-        "running" => "\u{25cf}",               // ●
-        "degraded" => "\u{25d0}",              // ◐
-        "stopped" | "failed" => "\u{25cb}",    // ○
-        "creating" | "starting" => "\u{25d0}", // ◐
-        _ => "\u{25cb}",                       // ○
+        "running" => "\u{25cf}",               // filled circle
+        "degraded" => "\u{25d0}",              // half circle
+        "stopped" | "failed" => "\u{25cb}",    // empty circle
+        "creating" | "starting" => "\u{25d0}", // half circle
+        _ => "\u{25cb}",                       // empty circle
     }
 }

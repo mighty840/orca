@@ -12,6 +12,7 @@ pub enum View {
     Logs { service: String },
     Detail { service: String },
     Help,
+    Metrics,
 }
 
 /// Input mode for the TUI.
@@ -31,50 +32,32 @@ pub enum ConnectionStatus {
 
 /// Full application state for the TUI.
 pub struct AppState {
-    /// Current view (top of the view stack).
     pub view: View,
-    /// View stack for Esc navigation (does NOT include current view).
     pub view_stack: Vec<View>,
-    /// Cluster name.
     pub cluster_name: String,
-    /// Services and their status.
     pub services: Vec<ServiceStatus>,
-    /// Registered nodes.
     pub nodes: Vec<NodeInfo>,
-    /// Node count.
     pub node_count: u64,
-    /// Currently selected service index.
     pub selected_service: usize,
-    /// Log output for the selected service.
     pub logs: String,
-    /// Last error message.
     pub error: Option<String>,
-    /// Whether the app should quit.
     pub should_quit: bool,
-    /// Filter string for services.
     pub filter: String,
-    /// Current input mode.
     pub input_mode: InputMode,
-    /// Command input buffer for `:` mode.
     pub command_input: String,
-    /// Status message (e.g. "Deployed nginx").
     pub status_msg: Option<String>,
-    /// When the status message was set (for auto-clear).
     pub status_msg_time: Option<Instant>,
-    /// App start time for uptime display.
     pub start_time: Instant,
-    /// Word wrap toggle for logs view.
     pub word_wrap: bool,
-    /// Connection status based on API responses.
     pub connection: ConnectionStatus,
-    /// Scroll offset for services list.
     pub service_scroll: usize,
-    /// API base URL for display.
     pub api_url: String,
-    /// Tick counter for blinking indicator.
     pub tick: u64,
-    /// Whether logs should auto-refresh.
     pub auto_refresh_logs: bool,
+    /// Project filter (separate from text filter).
+    pub project_filter: Option<String>,
+    /// Raw Prometheus metrics text.
+    pub metrics_text: String,
 }
 
 impl Default for AppState {
@@ -108,16 +91,16 @@ impl AppState {
             api_url: String::new(),
             tick: 0,
             auto_refresh_logs: true,
+            project_filter: None,
+            metrics_text: String::new(),
         }
     }
 
-    /// Push current view onto the stack and switch to a new view.
     pub fn push_view(&mut self, new_view: View) {
         let old = std::mem::replace(&mut self.view, new_view);
         self.view_stack.push(old);
     }
 
-    /// Pop back to the previous view. Returns false if stack is empty.
     pub fn pop_view(&mut self) -> bool {
         if let Some(prev) = self.view_stack.pop() {
             self.view = prev;
@@ -127,7 +110,6 @@ impl AppState {
         }
     }
 
-    /// Update from API status response.
     pub fn update_status(&mut self, resp: StatusResponse) {
         self.cluster_name = resp.cluster_name;
         self.services = resp.services;
@@ -138,24 +120,20 @@ impl AppState {
         }
     }
 
-    /// Mark connection as failed.
     pub fn mark_disconnected(&mut self) {
         self.connection = ConnectionStatus::Disconnected;
     }
 
-    /// Update from cluster info response.
     pub fn update_cluster(&mut self, info: ClusterInfo) {
         self.nodes = info.nodes;
         self.node_count = info.node_count;
     }
 
-    /// Set a flash status message with auto-clear timer.
     pub fn flash(&mut self, msg: String) {
         self.status_msg = Some(msg);
         self.status_msg_time = Some(Instant::now());
     }
 
-    /// Clear status message if it has been visible long enough (3s).
     pub fn maybe_clear_flash(&mut self) {
         if let Some(t) = self.status_msg_time
             && t.elapsed().as_secs() >= 3
@@ -165,39 +143,39 @@ impl AppState {
         }
     }
 
-    /// Get services filtered by the current filter string.
+    /// Get services filtered by both text filter and project filter.
     pub fn filtered_services(&self) -> Vec<&ServiceStatus> {
-        if self.filter.is_empty() {
-            self.services.iter().collect()
-        } else {
-            let f = self.filter.to_lowercase();
-            self.services
-                .iter()
-                .filter(|s| s.name.to_lowercase().contains(&f))
-                .collect()
-        }
+        let f = self.filter.to_lowercase();
+        self.services
+            .iter()
+            .filter(|s| {
+                if !self.filter.is_empty() && !s.name.to_lowercase().contains(&f) {
+                    return false;
+                }
+                if let Some(ref proj) = self.project_filter {
+                    return s.project.as_deref() == Some(proj.as_str());
+                }
+                true
+            })
+            .collect()
     }
 
-    /// Get the name of the currently selected service.
     pub fn selected_service_name(&self) -> Option<&str> {
         let filtered = self.filtered_services();
         filtered.get(self.selected_service).map(|s| s.name.as_str())
     }
 
-    /// Get the currently selected service.
     pub fn selected_service_data(&self) -> Option<&ServiceStatus> {
         let filtered = self.filtered_services();
         filtered.get(self.selected_service).copied()
     }
 
-    /// Move selection up.
     pub fn prev_service(&mut self) {
         if self.selected_service > 0 {
             self.selected_service -= 1;
         }
     }
 
-    /// Move selection down.
     pub fn next_service(&mut self) {
         let len = self.filtered_services().len();
         if len > 0 && self.selected_service < len - 1 {
@@ -205,7 +183,6 @@ impl AppState {
         }
     }
 
-    /// Format uptime as HH:MM:SS.
     pub fn uptime_str(&self) -> String {
         let secs = self.start_time.elapsed().as_secs();
         let h = secs / 3600;
@@ -214,7 +191,6 @@ impl AppState {
         format!("{h:02}:{m:02}:{s:02}")
     }
 
-    /// Count services by aggregate status.
     pub fn status_counts(&self) -> (usize, usize, usize) {
         let running = self
             .services
@@ -228,5 +204,17 @@ impl AppState {
             .count();
         let other = self.services.len() - running - stopped;
         (running, stopped, other)
+    }
+
+    /// View name for display in status bar.
+    pub fn view_name(&self) -> &str {
+        match &self.view {
+            View::Services => "Services",
+            View::Nodes => "Nodes",
+            View::Logs { .. } => "Logs",
+            View::Detail { .. } => "Detail",
+            View::Help => "Help",
+            View::Metrics => "Metrics",
+        }
     }
 }

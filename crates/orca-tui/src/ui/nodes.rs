@@ -25,32 +25,69 @@ pub fn draw_nodes(f: &mut Frame, area: Rect, state: &AppState) {
         .iter()
         .map(|n| {
             let (relative, stale) = format_relative_heartbeat(&n.last_heartbeat);
-            let status_color = if stale { Color::DarkGray } else { Color::Green };
-            let status_text = if stale { "stale" } else { "connected" };
+            let drain_str = if n.drain { "draining" } else { "" };
+            let labels_str = format_labels(&n.labels);
+
+            let status_color = if n.drain {
+                Color::Yellow
+            } else if stale {
+                Color::DarkGray
+            } else {
+                Color::Green
+            };
+            let status_text = if n.drain {
+                "draining"
+            } else if stale {
+                "stale"
+            } else {
+                "ready"
+            };
 
             Row::new(vec![
                 n.node_id.to_string(),
                 n.address.clone(),
                 status_text.to_string(),
+                drain_str.to_string(),
                 relative,
+                labels_str,
             ])
             .style(Style::default().fg(status_color))
         })
         .collect();
 
-    let header = Row::new(vec!["ID", "ADDRESS", "STATUS", "LAST HEARTBEAT"]).style(
+    let header = Row::new(vec![
+        "ID",
+        "ADDRESS",
+        "STATUS",
+        "DRAIN",
+        "HEARTBEAT",
+        "LABELS",
+    ])
+    .style(
         Style::default()
             .fg(Color::DarkGray)
             .add_modifier(Modifier::BOLD),
     );
     let widths = [
         Constraint::Length(8),
-        Constraint::Min(25),
+        Constraint::Min(20),
+        Constraint::Length(10),
+        Constraint::Length(10),
         Constraint::Length(12),
-        Constraint::Min(16),
+        Constraint::Min(20),
     ];
     let table = Table::new(rows, widths).header(header).block(block);
     f.render_widget(table, area);
+}
+
+/// Format node labels as key=value pairs.
+fn format_labels(labels: &std::collections::HashMap<String, String>) -> String {
+    if labels.is_empty() {
+        return "-".to_string();
+    }
+    let mut pairs: Vec<String> = labels.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    pairs.sort();
+    pairs.join(", ")
 }
 
 /// Parse an ISO 8601 heartbeat timestamp and return relative time + staleness.
@@ -76,7 +113,7 @@ fn format_relative_heartbeat(ts: &str) -> (String, bool) {
     }
 }
 
-/// Minimal ISO 8601 parser -> unix seconds. Handles "YYYY-MM-DDTHH:MM:SS".
+/// Minimal ISO 8601 parser -> unix seconds.
 fn parse_iso_timestamp(ts: &str) -> Option<u64> {
     let ts = ts.trim_end_matches('Z').trim();
     if ts.len() < 19 {

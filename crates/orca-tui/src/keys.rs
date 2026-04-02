@@ -37,7 +37,7 @@ pub async fn handle_command_key(state: &mut AppState, client: &ApiClient, code: 
             let cmd = state.command_input.trim().to_string();
             state.command_input.clear();
             state.input_mode = InputMode::Normal;
-            execute_command(state, client, &cmd).await;
+            crate::commands::execute_command(state, client, &cmd).await;
         }
         KeyCode::Backspace => {
             state.command_input.pop();
@@ -49,39 +49,6 @@ pub async fn handle_command_key(state: &mut AppState, client: &ApiClient, code: 
             state.command_input.push(c);
         }
         _ => {}
-    }
-}
-
-async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str) {
-    let parts: Vec<&str> = cmd.split_whitespace().collect();
-    match parts.first().copied() {
-        Some("q" | "quit") => state.should_quit = true,
-        Some("services" | "svc") => {
-            state.view_stack.clear();
-            state.view = View::Services;
-        }
-        Some("nodes") => {
-            state.push_view(View::Nodes);
-        }
-        Some("logs") => {
-            let svc_name = if let Some(name) = parts.get(1) {
-                (*name).to_string()
-            } else if let Some(name) = state.selected_service_name() {
-                name.to_string()
-            } else {
-                state.flash("Usage: :logs <service>".into());
-                return;
-            };
-            super::refresh_logs_named(client, state, &svc_name).await;
-            state.push_view(View::Logs { service: svc_name });
-        }
-        Some("help") => {
-            state.push_view(View::Help);
-        }
-        Some(other) => {
-            state.flash(format!("Unknown command: {other}"));
-        }
-        None => {}
     }
 }
 
@@ -102,17 +69,8 @@ pub async fn handle_normal_key(
                 state.input_mode = InputMode::Filter;
             }
         }
-        KeyCode::Char('?') => {
-            state.push_view(View::Help);
-        }
-        KeyCode::Esc => {
-            if !state.filter.is_empty() {
-                state.filter.clear();
-                state.selected_service = 0;
-            } else {
-                state.pop_view();
-            }
-        }
+        KeyCode::Char('?') => state.push_view(View::Help),
+        KeyCode::Esc => handle_esc(state),
 
         // Navigation
         KeyCode::Char('j') | KeyCode::Down => state.next_service(),
@@ -126,24 +84,10 @@ pub async fn handle_normal_key(
         }
 
         // Enter detail view
-        KeyCode::Enter => {
-            if matches!(state.view, View::Services)
-                && let Some(name) = state.selected_service_name()
-            {
-                let name = name.to_string();
-                super::refresh_logs_named(client, state, &name).await;
-                state.push_view(View::Detail { service: name });
-            }
-        }
+        KeyCode::Enter => handle_enter(state, client).await,
 
         // Full-screen logs
-        KeyCode::Char('l') => {
-            let svc_name = super::current_service_name(state);
-            if let Some(name) = svc_name {
-                super::refresh_logs_named(client, state, &name).await;
-                state.push_view(View::Logs { service: name });
-            }
-        }
+        KeyCode::Char('l') => handle_logs(state, client).await,
 
         // Refresh
         KeyCode::Char('r') => {
@@ -152,17 +96,32 @@ pub async fn handle_normal_key(
             state.flash("Refreshed".into());
         }
 
-        // Actions
-        KeyCode::Char('d') => super::handle_deploy(client, state).await,
-        KeyCode::Char('x') => super::handle_stop(client, state).await,
-        KeyCode::Char('s') => {
-            if let Some(svc) = super::current_service_data(state) {
-                state.flash(format!(
-                    "{}: {}/{} replicas",
-                    svc.name, svc.running_replicas, svc.desired_replicas
-                ));
+        // View shortcuts
+        KeyCode::Char('1') => {
+            state.view_stack.clear();
+            state.view = View::Services;
+        }
+        KeyCode::Char('2') | KeyCode::Char('n') => {
+            if !matches!(state.view, View::Nodes) {
+                state.push_view(View::Nodes);
             }
         }
+        KeyCode::Char('3') | KeyCode::Char('m') => {
+            if !matches!(state.view, View::Metrics) {
+                if let Ok(text) = client.metrics().await {
+                    state.metrics_text = text;
+                }
+                state.push_view(View::Metrics);
+            }
+        }
+
+        // Actions
+        KeyCode::Char('d') => {
+            state.flash("Use `orca deploy` from CLI to redeploy".into());
+        }
+        KeyCode::Char('x') => super::handle_stop(client, state).await,
+        KeyCode::Char('s') => handle_scale_prompt(state),
+        KeyCode::Char('p') => handle_project_filter(state),
         KeyCode::Char('w') => {
             if matches!(state.view, View::Logs { .. } | View::Detail { .. }) {
                 state.word_wrap = !state.word_wrap;
@@ -171,5 +130,61 @@ pub async fn handle_normal_key(
             }
         }
         _ => {}
+    }
+}
+
+fn handle_esc(state: &mut AppState) {
+    if !state.filter.is_empty() {
+        state.filter.clear();
+        state.selected_service = 0;
+    } else if state.project_filter.is_some() {
+        state.project_filter = None;
+        state.selected_service = 0;
+        state.flash("Project filter cleared".into());
+    } else {
+        state.pop_view();
+    }
+}
+
+async fn handle_enter(state: &mut AppState, client: &ApiClient) {
+    if matches!(state.view, View::Services)
+        && let Some(name) = state.selected_service_name()
+    {
+        let name = name.to_string();
+        super::refresh_logs_named(client, state, &name).await;
+        state.push_view(View::Detail { service: name });
+    }
+}
+
+async fn handle_logs(state: &mut AppState, client: &ApiClient) {
+    let svc_name = super::current_service_name(state);
+    if let Some(name) = svc_name {
+        super::refresh_logs_named(client, state, &name).await;
+        state.push_view(View::Logs { service: name });
+    }
+}
+
+/// Prompt user for scale command via command mode.
+fn handle_scale_prompt(state: &mut AppState) {
+    if let Some(name) = super::current_service_name(state) {
+        state.input_mode = InputMode::Command;
+        state.command_input = format!("scale {name} ");
+    }
+}
+
+/// Filter services by the project of the selected service.
+fn handle_project_filter(state: &mut AppState) {
+    if !matches!(state.view, View::Services) {
+        return;
+    }
+    if let Some(svc) = state.selected_service_data() {
+        if let Some(proj) = &svc.project {
+            let proj = proj.clone();
+            state.flash(format!("Filtered to project: {proj}"));
+            state.project_filter = Some(proj);
+            state.selected_service = 0;
+        } else {
+            state.flash("Service has no project".into());
+        }
     }
 }
