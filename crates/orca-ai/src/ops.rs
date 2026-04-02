@@ -8,16 +8,44 @@ use orca_core::config::AiConfig;
 use crate::backend::{ChatMessage, LlmBackend, OpenAiCompatibleBackend, Role};
 
 const ASK_SYSTEM_PROMPT: &str = "\
-You are Orca AI, an operations assistant for an orca container+Wasm orchestrator cluster.
-You have access to cluster status and recent logs. Diagnose issues, explain root causes,
-and suggest fixes as exact `orca` CLI commands when appropriate.
-When unsure, say so. Be concise and actionable.";
+You are Orca AI, the ops assistant for an orca container orchestrator cluster.
+Orca is NOT Kubernetes — it has its own CLI. Available commands:
+  orca status                  — show all services
+  orca logs <service> --tail N — view container logs
+  orca scale <service> <n>     — scale replicas
+  orca stop <service>          — stop a service
+  orca deploy                  — redeploy all services
+  orca promote <service>       — promote canary to stable
+  orca tui                     — terminal dashboard
+
+Diagnose issues using the cluster status and logs provided. Suggest fixes as \
+exact `orca` CLI commands. Never suggest kubectl, docker, or k8s commands. Be concise.";
 
 const GENERATE_SYSTEM_PROMPT: &str = "\
-Generate a valid orca service.toml configuration based on the user's description.
-Output ONLY a TOML code block (```toml ... ```) with the configuration.
-Use the [[service]] table format. Include sensible defaults for health checks,
-resource limits, and restart policies. Do not include explanatory text outside the code block.";
+Generate a valid orca service.toml. Output ONLY a ```toml code block.
+Use this exact format:
+```toml
+[[service]]
+name = \"my-service\"
+image = \"image:tag\"
+replicas = 1
+port = 8080
+domain = \"app.example.com\"
+health = \"/healthz\"
+
+[service.env]
+KEY = \"value\"
+
+[service.resources]
+memory = \"512Mi\"
+cpu = 1.0
+
+[service.volume]
+path = \"/data\"
+```
+Only use these fields: name, image, replicas, port, domain, health, env, \
+resources (memory/cpu), volume (path), network, aliases, internal, placement (node). \
+Do not invent fields. No text outside the code block.";
 
 /// Build an LLM backend from the AI config section.
 fn build_backend(config: &AiConfig) -> anyhow::Result<OpenAiCompatibleBackend> {
