@@ -101,6 +101,9 @@ async fn main() -> anyhow::Result<()> {
         Command::Rollback { service } => {
             handlers::ops::handle_rollback(service, cli.api).await?;
         }
+        Command::Promote { service } => {
+            handlers::ops::handle_promote(service, cli.api).await?;
+        }
         Command::Token { action } => handlers::token::handle_token(action),
         Command::Join {
             address,

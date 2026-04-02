@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use tracing::info;
 
 use orca_core::config::ServiceConfig;
-use orca_core::types::{HealthState, WorkloadSpec, WorkloadStatus};
+use orca_core::types::{DeployKind, HealthState, WorkloadSpec, WorkloadStatus};
 
 /// Resolve `${secrets.KEY}` patterns in env vars using the local secrets store.
 fn resolve_secrets(env: &HashMap<String, String>) -> HashMap<String, String> {
@@ -45,6 +45,18 @@ pub async fn update_container_routes(state: &AppState, config: &ServiceConfig) {
     // Build route path pattern from config
     let path_pattern = config.routes.first().cloned();
 
+    // Determine canary weight split
+    let is_canary_deploy = config
+        .deploy
+        .as_ref()
+        .is_some_and(|d| d.strategy == DeployKind::Canary);
+    let canary_weight = config
+        .deploy
+        .as_ref()
+        .map(|d| d.canary_weight)
+        .unwrap_or(20);
+    let stable_weight = 100u32.saturating_sub(canary_weight);
+
     let targets: Vec<RouteTarget> = svc
         .instances
         .iter()
@@ -55,10 +67,20 @@ pub async fn update_container_routes(state: &AppState, config: &ServiceConfig) {
                 .host_port
                 .map(|port| format!("127.0.0.1:{port}"))
                 .or_else(|| i.container_address.clone());
+            let weight = if is_canary_deploy {
+                if i.is_canary {
+                    canary_weight
+                } else {
+                    stable_weight
+                }
+            } else {
+                100
+            };
             address.map(|addr| RouteTarget {
                 address: addr,
                 service_name: config.name.clone(),
                 path_pattern: path_pattern.clone(),
+                weight,
             })
         })
         .collect();
@@ -259,6 +281,7 @@ mod tests {
             host_port: port,
             container_address: None,
             health,
+            is_canary: false,
         }
     }
 

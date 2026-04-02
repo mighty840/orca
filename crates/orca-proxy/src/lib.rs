@@ -39,6 +39,9 @@ pub struct RouteTarget {
     /// catch-all for the domain. When `Some`, only requests whose path matches
     /// the pattern are routed here. Longest-prefix match wins.
     pub path_pattern: Option<String>,
+    /// Traffic weight (1-100, default 100). Used for weighted routing
+    /// during canary deployments. Higher weight = more traffic.
+    pub weight: u32,
 }
 
 /// A Wasm HTTP trigger: maps a path pattern to a Wasm runtime instance.

@@ -1,3 +1,5 @@
+use aes_gcm::aead::{Aead, OsRng};
+use aes_gcm::{AeadCore, Aes256Gcm, Key, KeyInit, Nonce};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -16,7 +18,24 @@ fn dirs_or_home() -> PathBuf {
         .unwrap_or_else(|_| PathBuf::from(".orca"))
 }
 
-/// XOR `data` with a repeating `key`.
+/// Hex-encode bytes to a string.
+fn hex_encode(data: &[u8]) -> String {
+    let mut s = String::with_capacity(data.len() * 2);
+    for b in data {
+        let _ = write!(s, "{b:02x}");
+    }
+    s
+}
+
+/// Hex-decode a string to bytes.
+fn hex_decode(hex: &str) -> Vec<u8> {
+    (0..hex.len())
+        .step_by(2)
+        .filter_map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
+        .collect()
+}
+
+/// XOR `data` with a repeating `key` (legacy, used only for migration).
 fn xor_bytes(data: &[u8], key: &[u8]) -> Vec<u8> {
     if key.is_empty() {
         return data.to_vec();
@@ -27,21 +46,34 @@ fn xor_bytes(data: &[u8], key: &[u8]) -> Vec<u8> {
         .collect()
 }
 
-/// Hex-encode bytes to a string.
-fn base64_encode(data: &[u8]) -> String {
-    let mut s = String::with_capacity(data.len() * 2);
-    for b in data {
-        let _ = write!(s, "{b:02x}");
-    }
-    s
+/// Encrypt plaintext with AES-256-GCM. Returns `"nonce_hex:ciphertext_hex"`.
+fn aes_encrypt(plaintext: &[u8], key: &[u8]) -> Result<String> {
+    let key = Key::<Aes256Gcm>::from_slice(key);
+    let cipher = Aes256Gcm::new(key);
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let ciphertext = cipher
+        .encrypt(&nonce, plaintext)
+        .map_err(|e| anyhow::anyhow!("AES encrypt failed: {e}"))?;
+    Ok(format!(
+        "{}:{}",
+        hex_encode(&nonce),
+        hex_encode(&ciphertext)
+    ))
 }
 
-/// Hex-decode a string to bytes.
-fn base64_decode(hex: &str) -> Vec<u8> {
-    (0..hex.len())
-        .step_by(2)
-        .filter_map(|i| u8::from_str_radix(&hex[i..i + 2], 16).ok())
-        .collect()
+/// Decrypt `"nonce_hex:ciphertext_hex"` with AES-256-GCM.
+fn aes_decrypt(encoded: &str, key: &[u8]) -> Result<Vec<u8>> {
+    let (nonce_hex, ct_hex) = encoded
+        .split_once(':')
+        .ok_or_else(|| anyhow::anyhow!("missing nonce:ciphertext separator"))?;
+    let nonce_bytes = hex_decode(nonce_hex);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = hex_decode(ct_hex);
+    let key = Key::<Aes256Gcm>::from_slice(key);
+    let cipher = Aes256Gcm::new(key);
+    cipher
+        .decrypt(nonce, ciphertext.as_ref())
+        .map_err(|e| anyhow::anyhow!("AES decrypt failed: {e}"))
 }
 
 /// Load or generate the master key at the given path.
@@ -69,10 +101,23 @@ fn load_or_create_key(path: &Path) -> Result<Vec<u8>> {
     }
 }
 
-/// Simple file-backed secret store.
+/// Decrypt a stored value. Tries AES-256-GCM first, falls back to legacy XOR.
+/// Returns `(plaintext, was_legacy)`.
+fn decrypt_value(stored: &str, key: &[u8]) -> (String, bool) {
+    if let Ok(plain) = aes_decrypt(stored, key) {
+        (String::from_utf8_lossy(&plain).to_string(), false)
+    } else {
+        let encrypted = hex_decode(stored);
+        let decrypted = xor_bytes(&encrypted, key);
+        (String::from_utf8_lossy(&decrypted).to_string(), true)
+    }
+}
+
+/// File-backed secret store using AES-256-GCM encryption.
 ///
-/// Secrets are stored as a JSON file with restrictive file permissions (0600).
-/// Values are XOR-encrypted with a master key to prevent plaintext exposure.
+/// Secrets are stored as JSON with restrictive file permissions (0600).
+/// Values are encrypted with a 32-byte master key. Legacy XOR-encrypted
+/// values are auto-migrated to AES-256-GCM on first open.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SecretStore {
     #[serde(skip)]
@@ -99,16 +144,21 @@ impl SecretStore {
                 serde_json::from_str(&data).context("failed to parse secrets file")?;
             store.path = path;
             store.master_key = master_key.clone();
-            // Decrypt values in memory
+            let mut needs_migration = false;
             store.secrets = store
                 .secrets
                 .into_iter()
                 .map(|(k, v)| {
-                    let encrypted = base64_decode(&v);
-                    let decrypted = xor_bytes(&encrypted, &master_key);
-                    (k, String::from_utf8_lossy(&decrypted).to_string())
+                    let (plain, was_legacy) = decrypt_value(&v, &master_key);
+                    if was_legacy {
+                        needs_migration = true;
+                    }
+                    (k, plain)
                 })
                 .collect();
+            if needs_migration {
+                store.save()?;
+            }
             Ok(store)
         } else {
             let store = SecretStore {
@@ -149,8 +199,6 @@ impl SecretStore {
     }
 
     /// Replace `${secrets.KEY}` patterns in env-var values with actual secret values.
-    ///
-    /// Unknown keys are left as-is so the caller can detect unresolved references.
     pub fn resolve_env(&self, env: &HashMap<String, String>) -> HashMap<String, String> {
         env.iter()
             .map(|(k, v)| (k.clone(), self.resolve_value(v)))
@@ -158,27 +206,22 @@ impl SecretStore {
     }
 
     /// Persist secrets to disk with restrictive permissions.
-    /// Values are XOR-encrypted with the master key before serialization.
     fn save(&self) -> Result<()> {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent).context("failed to create secrets directory")?;
         }
-
-        // Encrypt values for serialization
         let encrypted_secrets: HashMap<String, String> = self
             .secrets
             .iter()
             .map(|(k, v)| {
-                let encrypted = xor_bytes(v.as_bytes(), &self.master_key);
-                (k.clone(), base64_encode(&encrypted))
+                let enc = aes_encrypt(v.as_bytes(), &self.master_key)
+                    .expect("AES encryption must not fail with valid key");
+                (k.clone(), enc)
             })
             .collect();
-
         let on_disk = serde_json::json!({ "secrets": encrypted_secrets });
         let data = serde_json::to_string_pretty(&on_disk).context("failed to serialize secrets")?;
         std::fs::write(&self.path, &data).context("failed to write secrets file")?;
-
-        // Set file permissions to 0600 on Unix
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -186,7 +229,6 @@ impl SecretStore {
             std::fs::set_permissions(&self.path, perms)
                 .context("failed to set secrets file permissions")?;
         }
-
         Ok(())
     }
 
@@ -211,9 +253,7 @@ impl SecretStore {
                     secret_value,
                     &result[after_prefix + end + 1..]
                 );
-                // Don't advance search_from — replacement might be shorter
             } else {
-                // Key not found, skip past this pattern to avoid infinite loop
                 search_from = after_prefix + end + 1;
             }
         }

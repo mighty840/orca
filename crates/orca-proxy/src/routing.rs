@@ -133,6 +133,7 @@ mod tests {
             address: addr.to_string(),
             service_name: addr.to_string(),
             path_pattern: pattern.map(String::from),
+            weight: 100,
         }
     }
 

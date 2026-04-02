@@ -6,7 +6,7 @@ use tracing::{error, info};
 
 use orca_core::config::ServiceConfig;
 use orca_core::runtime::Runtime;
-use orca_core::types::{Replicas, RuntimeKind, WorkloadSpec};
+use orca_core::types::{DeployKind, Replicas, RuntimeKind, WorkloadSpec};
 
 use crate::instance::create_and_start_instance;
 use crate::routes::{service_config_to_spec, update_container_routes, update_wasm_triggers};
@@ -137,15 +137,21 @@ pub(crate) async fn reconcile_service(
         return Ok(());
     }
 
-    // Rolling update: config changed but replica count is the same.
-    // Start new instances first, then stop old ones to minimize downtime.
+    // Config changed but replica count is the same — update in place.
     if current == desired && !same_image {
-        info!(
-            "Rolling update for {} ({} replicas, config changed)",
-            config.name, desired
-        );
+        let is_canary = config
+            .deploy
+            .as_ref()
+            .is_some_and(|d| d.strategy == DeployKind::Canary);
+        let name = &config.name;
         drop(services);
-        crate::operations::rolling_update(state, runtime, config, &spec, desired).await?;
+        if is_canary {
+            info!("Canary deploy for {name} ({desired} stable + canary)");
+            crate::operations::canary_deploy(state, runtime, config, &spec, desired).await?;
+        } else {
+            info!("Rolling update for {name} ({desired} replicas)");
+            crate::operations::rolling_update(state, runtime, config, &spec, desired).await?;
+        }
         return Ok(());
     }
 
@@ -266,5 +272,5 @@ async fn queue_remote_deploy(state: &AppState, node_id: u64, spec: &WorkloadSpec
     pending.entry(node_id).or_default().push(cmd);
 }
 
-// stop, stop_all, redeploy, rollback, scale moved to operations.rs
-pub use crate::operations::{redeploy, rollback, scale, stop, stop_all};
+// stop, stop_all, redeploy, rollback, scale, promote moved to operations.rs
+pub use crate::operations::{promote, redeploy, rollback, scale, stop, stop_all};

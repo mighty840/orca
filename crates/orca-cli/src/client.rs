@@ -108,6 +108,17 @@ impl OrcaClient {
         Ok(())
     }
 
+    pub async fn promote(&self, service: &str) -> anyhow::Result<()> {
+        self.auth(
+            self.client
+                .post(self.url(&format!("/api/v1/services/{service}/promote"))),
+        )
+        .send()
+        .await?
+        .error_for_status()?;
+        Ok(())
+    }
+
     pub async fn stop_all(&self) -> anyhow::Result<()> {
         self.auth(self.client.post(self.url("/api/v1/stop")))
             .send()

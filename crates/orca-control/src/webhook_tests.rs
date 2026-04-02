@@ -95,3 +95,38 @@ fn webhook_config_serialization() {
     assert_eq!(parsed.branch, "main");
     assert!(parsed.secret.is_none());
 }
+
+#[test]
+fn webhook_config_defaults_branch_to_main() {
+    let json = r#"{"repo":"org/app","service_name":"myapp"}"#;
+    let config: WebhookConfig = serde_json::from_str(json).unwrap();
+    assert_eq!(config.branch, "main");
+}
+
+#[test]
+fn push_payload_parses_github_format() {
+    let json = serde_json::json!({
+        "ref": "refs/heads/main",
+        "repository": { "full_name": "org/repo" },
+        "head_commit": { "id": "abc123def456", "message": "fix: something" }
+    });
+    let payload: PushPayload = serde_json::from_value(json).unwrap();
+    assert_eq!(payload.repository.full_name, "org/repo");
+    assert_eq!(payload.git_ref, "refs/heads/main");
+    assert_eq!(payload.head_commit.unwrap().id, "abc123def456");
+}
+
+#[test]
+fn push_payload_works_without_head_commit() {
+    let json = serde_json::json!({
+        "ref": "refs/heads/develop",
+        "repository": { "full_name": "org/repo" }
+    });
+    let payload: PushPayload = serde_json::from_value(json).unwrap();
+    assert!(payload.head_commit.is_none());
+}
+
+#[test]
+fn validate_signature_rejects_bad_hex() {
+    assert!(!validate_signature("secret", b"body", "sha256=zzzz"));
+}

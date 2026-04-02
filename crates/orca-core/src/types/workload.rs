@@ -133,6 +133,14 @@ pub struct DeployStrategy {
     #[serde(default = "default_strategy")]
     pub strategy: DeployKind,
     pub max_unavailable: Option<u32>,
+    /// Traffic weight for canary deploys (1-100, default 20).
+    /// The canary receives this percentage; the stable version gets the rest.
+    #[serde(default = "default_canary_weight")]
+    pub canary_weight: u32,
+}
+
+fn default_canary_weight() -> u32 {
+    20
 }
 
 fn default_strategy() -> DeployKind {

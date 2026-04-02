@@ -218,6 +218,13 @@ pub async fn handle_rollback(service: String, api: String) -> anyhow::Result<()>
     Ok(())
 }
 
+pub async fn handle_promote(service: String, api: String) -> anyhow::Result<()> {
+    let client = OrcaClient::new(api);
+    client.promote(&service).await?;
+    println!("Promoted canary to stable for: {service}");
+    Ok(())
+}
+
 pub async fn handle_tui(api: &str) -> anyhow::Result<()> {
     // On agent nodes, fall back to saved leader URL if default API isn't reachable
     let api = if api == "http://127.0.0.1:6880" {

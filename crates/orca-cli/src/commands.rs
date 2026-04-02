@@ -76,6 +76,12 @@ pub enum Command {
         service: String,
     },
 
+    /// Promote canary instances to stable (completes a canary deploy)
+    Promote {
+        /// Service name
+        service: String,
+    },
+
     /// Ask the AI assistant about the cluster
     Ask {
         /// Your question (e.g., "why is the API returning 503s?")

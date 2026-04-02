@@ -92,6 +92,8 @@ pub struct InstanceState {
     pub container_address: Option<String>,
     /// Health check state.
     pub health: HealthState,
+    /// Whether this instance is a canary (new version during canary deploy).
+    pub is_canary: bool,
 }
 
 impl AppState {
@@ -216,6 +218,7 @@ mod tests {
             host_port: None,
             container_address: None,
             health: HealthState::Unknown,
+            is_canary: false,
         }
     }
 

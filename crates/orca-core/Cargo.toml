@@ -20,6 +20,7 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 reqwest = { workspace = true }
 serde_yaml = "0.9"
+aes-gcm = "0.10"
 
 [dev-dependencies]
 tempfile = "3"

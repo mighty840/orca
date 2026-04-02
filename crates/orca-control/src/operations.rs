@@ -187,6 +187,10 @@ pub(crate) async fn rolling_update(
     Ok(())
 }
 
+// Canary deploy and promote are in the canary module.
+pub(crate) use crate::canary::canary_deploy;
+pub use crate::canary::promote;
+
 #[cfg(test)]
 mod tests {
     use super::*;

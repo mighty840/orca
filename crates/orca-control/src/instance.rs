@@ -66,6 +66,7 @@ pub(crate) async fn create_and_start_instance(
         host_port,
         container_address,
         health: initial_health,
+        is_canary: false,
     })
 }
 

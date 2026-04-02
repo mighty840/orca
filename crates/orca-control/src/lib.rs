@@ -1,5 +1,6 @@
 pub mod api;
 pub mod auth;
+pub(crate) mod canary;
 pub mod cluster_api;
 pub(crate) mod cluster_handlers;
 pub mod cluster_state;

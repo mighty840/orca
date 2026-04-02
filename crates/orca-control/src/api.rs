@@ -34,6 +34,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/v1/services/{name}/logs", get(logs))
         .route("/api/v1/services/{name}/scale", post(scale))
         .route("/api/v1/services/{name}/rollback", post(rollback))
+        .route("/api/v1/services/{name}/promote", post(promote))
         .route("/api/v1/services/{name}", delete(stop_service))
         .route("/api/v1/projects/{project}", delete(stop_project))
         .route("/api/v1/stop", post(stop_all))
@@ -260,6 +261,16 @@ async fn rollback(
     ok_or_500(
         reconciler::rollback(&state, &name).await,
         &format!("rollback {name}"),
+    )
+}
+
+async fn promote(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    ok_or_500(
+        reconciler::promote(&state, &name).await,
+        &format!("promote {name}"),
     )
 }
 

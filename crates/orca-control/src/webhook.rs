@@ -147,9 +147,10 @@ pub async fn handle_push(
     drop(webhooks);
 
     if matching.is_empty() {
+        info!("Webhook: no config for {repo}#{branch}, ignoring");
         return (
-            StatusCode::NOT_FOUND,
-            format!("no webhook config for {repo}#{branch}"),
+            StatusCode::OK,
+            "ignored: no matching webhook config".to_string(),
         )
             .into_response();
     }
@@ -161,13 +162,14 @@ pub async fn handle_push(
 
     let mut deployed = Vec::new();
     let mut errors = Vec::new();
+    let mut sig_failures = 0u32;
 
     for wh in &matching {
         // Validate secret if configured
         if let Some(secret) = &wh.secret
             && (sig_header.is_empty() || !validate_signature(secret, &body, sig_header))
         {
-            errors.push(format!("{}: signature validation failed", wh.service_name));
+            sig_failures += 1;
             warn!("Webhook: HMAC validation failed for {}", wh.service_name);
             continue;
         }
@@ -180,6 +182,11 @@ pub async fn handle_push(
                 errors.push(format!("{}: {e}", wh.service_name));
             }
         }
+    }
+
+    // If every matching webhook failed signature validation, return 401
+    if sig_failures > 0 && deployed.is_empty() && errors.is_empty() {
+        return (StatusCode::UNAUTHORIZED, "signature validation failed").into_response();
     }
 
     let status = if errors.is_empty() {
