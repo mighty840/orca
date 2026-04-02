@@ -156,7 +156,7 @@ impl ClusterStore {
         }
     }
 
-    fn set_service(&self, name: &str, config: &ServiceConfig) -> anyhow::Result<()> {
+    pub fn set_service(&self, name: &str, config: &ServiceConfig) -> anyhow::Result<()> {
         let data = serde_json::to_vec(config)?;
         let tx = self.db.begin_write()?;
         {
@@ -167,7 +167,7 @@ impl ClusterStore {
         Ok(())
     }
 
-    fn remove_service(&self, name: &str) -> anyhow::Result<()> {
+    pub fn remove_service(&self, name: &str) -> anyhow::Result<()> {
         let tx = self.db.begin_write()?;
         {
             let mut table = tx.open_table(SERVICES)?;

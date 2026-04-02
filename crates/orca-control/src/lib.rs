@@ -72,7 +72,38 @@ pub async fn run_server_with_acme(
     if let (Some(acme), Some(resolver)) = (acme_manager, cert_resolver) {
         app_state = app_state.with_acme(acme, resolver);
     }
+
+    // Open persistent store
+    let store_path = dirs_next::home_dir()
+        .unwrap_or_else(|| ".".into())
+        .join(".orca/cluster.db");
+    match store::ClusterStore::open(&store_path) {
+        Ok(s) => {
+            info!("Persistent store opened at {}", store_path.display());
+            app_state = app_state.with_store(Arc::new(s));
+        }
+        Err(e) => {
+            tracing::warn!("Failed to open store at {}: {e}", store_path.display());
+        }
+    }
+
     let state = Arc::new(app_state);
+
+    // Restore persisted services
+    if let Some(store) = &state.store {
+        match store.get_all_services() {
+            Ok(services) if !services.is_empty() => {
+                info!("Restoring {} persisted services", services.len());
+                for config in services.values() {
+                    if let Err(e) = reconciler::reconcile_service(&state, config).await {
+                        tracing::warn!(service = %config.name, "Failed to restore: {e}");
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("Failed to load persisted services: {e}"),
+        }
+    }
 
     // Register the master node so it appears in TUI/status.
     register_master_node(&state, cluster_config.cluster.api_port).await;

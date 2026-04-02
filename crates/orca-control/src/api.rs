@@ -60,6 +60,17 @@ async fn deploy(
 ) -> impl IntoResponse {
     let (deployed, errors) = reconciler::reconcile(&state, &req.services).await;
 
+    // Persist deployed services to store
+    if let Some(store) = &state.store {
+        for config in &req.services {
+            if deployed.contains(&config.name)
+                && let Err(e) = store.set_service(&config.name, config)
+            {
+                tracing::warn!("Failed to persist {}: {e}", config.name);
+            }
+        }
+    }
+
     let status_code = if errors.is_empty() {
         StatusCode::OK
     } else if deployed.is_empty() {

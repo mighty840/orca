@@ -48,6 +48,8 @@ pub struct AppState {
     pub cert_resolver: Option<orca_proxy::SharedCertResolver>,
     /// Cached container stats, keyed by service name.
     pub container_stats: RwLock<HashMap<String, ContainerStats>>,
+    /// Persistent cluster store (redb). None in tests without persistence.
+    pub store: Option<Arc<crate::store::ClusterStore>>,
 }
 
 /// A node registered in the cluster.
@@ -117,7 +119,14 @@ impl AppState {
             acme_manager: None,
             cert_resolver: None,
             container_stats: RwLock::new(HashMap::new()),
+            store: None,
         }
+    }
+
+    /// Set persistent store for service state.
+    pub fn with_store(mut self, store: Arc<crate::store::ClusterStore>) -> Self {
+        self.store = Some(store);
+        self
     }
 
     /// Set ACME manager and cert resolver for hot cert provisioning.
