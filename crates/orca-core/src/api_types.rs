@@ -49,6 +49,9 @@ pub struct ServiceStatus {
     pub status: String,
     /// Domain for external access, if configured.
     pub domain: Option<String>,
+    /// Project name (from service directory).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
     /// Current memory usage (e.g. "128Mi"), if stats are available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_usage: Option<String>,
@@ -104,6 +107,7 @@ mod tests {
         let req = DeployRequest {
             services: vec![ServiceConfig {
                 name: "web".into(),
+                project: None,
                 runtime: RuntimeKind::Container,
                 image: Some("nginx:latest".into()),
                 module: None,

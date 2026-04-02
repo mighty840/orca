@@ -66,6 +66,7 @@ async fn handle_create(
 
     let service = ServiceConfig {
         name: name.to_string(),
+        project: None,
         runtime: Default::default(),
         image: Some(image.to_string()),
         module: None,

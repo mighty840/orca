@@ -180,6 +180,7 @@ mod tests {
     fn minimal_config(image: Option<String>, module: Option<String>) -> ServiceConfig {
         ServiceConfig {
             name: "test-svc".to_string(),
+            project: None,
             runtime: Default::default(),
             image,
             module,

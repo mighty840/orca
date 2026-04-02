@@ -84,6 +84,7 @@ fn convert_service(name: &str, svc: &ComposeService, network: &str) -> ServiceCo
 
     ServiceConfig {
         name: name.to_string(),
+        project: None,
         runtime: Default::default(),
         image: svc.image.clone(),
         module: None,
@@ -226,6 +227,7 @@ services:
         let config = ServicesConfig {
             service: vec![ServiceConfig {
                 name: "test".to_string(),
+                project: None,
                 runtime: Default::default(),
                 image: Some("nginx:latest".to_string()),
                 module: None,

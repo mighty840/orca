@@ -5,6 +5,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
+use serde::Deserialize;
 use tracing::error;
 
 use orca_core::api_types::{
@@ -34,6 +35,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/v1/services/{name}/scale", post(scale))
         .route("/api/v1/services/{name}/rollback", post(rollback))
         .route("/api/v1/services/{name}", delete(stop_service))
+        .route("/api/v1/projects/{project}", delete(stop_project))
         .route("/api/v1/stop", post(stop_all))
         .merge(webhook::webhook_router())
         .merge(cluster_handlers::cluster_router())
@@ -69,13 +71,29 @@ async fn deploy(
     (status_code, Json(DeployResponse { deployed, errors }))
 }
 
-/// Get cluster and service status.
-async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+/// Query params for status filtering.
+#[derive(Debug, Deserialize, Default)]
+struct StatusQuery {
+    #[serde(default)]
+    project: Option<String>,
+}
+
+/// Get cluster and service status, optionally filtered by project.
+async fn status(
+    State(state): State<Arc<AppState>>,
+    axum::extract::Query(query): axum::extract::Query<StatusQuery>,
+) -> impl IntoResponse {
     let services = state.services.read().await;
     let stats_cache = state.container_stats.read().await;
 
     let service_statuses: Vec<ServiceStatus> = services
         .values()
+        .filter(|svc| {
+            query
+                .project
+                .as_ref()
+                .is_none_or(|p| svc.config.project.as_deref() == Some(p.as_str()))
+        })
         .map(|svc| {
             let running = svc.running_count();
             let overall_status = if running == 0 && svc.desired_replicas > 0 {
@@ -102,6 +120,7 @@ async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
                 running_replicas: running,
                 status: overall_status.to_string(),
                 domain: svc.config.domain.clone(),
+                project: svc.config.project.clone(),
                 memory_usage: cached.map(|s| s.memory_usage.clone()),
                 cpu_percent: cached.map(|s| s.cpu_percent),
             }
@@ -241,6 +260,27 @@ async fn stop_service(
         reconciler::stop(&state, &name).await,
         &format!("stop {name}"),
     )
+}
+
+/// Stop all services in a project.
+async fn stop_project(
+    State(state): State<Arc<AppState>>,
+    Path(project): Path<String>,
+) -> impl IntoResponse {
+    let names: Vec<String> = {
+        let services = state.services.read().await;
+        services
+            .values()
+            .filter(|svc| svc.config.project.as_deref() == Some(project.as_str()))
+            .map(|svc| svc.config.name.clone())
+            .collect()
+    };
+    for name in &names {
+        if let Err(e) = reconciler::stop(&state, name).await {
+            error!("stop {name} (project {project}) failed: {e}");
+        }
+    }
+    Json(serde_json::json!({"ok": format!("stopped project {project}"), "stopped": names}))
 }
 
 async fn stop_all(State(state): State<Arc<AppState>>) -> impl IntoResponse {

@@ -92,6 +92,7 @@ mod tests {
     fn test_config(name: &str, image: &str) -> ServiceConfig {
         ServiceConfig {
             name: name.to_string(),
+            project: None,
             runtime: Default::default(),
             image: Some(image.to_string()),
             module: None,

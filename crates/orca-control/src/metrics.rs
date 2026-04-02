@@ -38,13 +38,14 @@ pub async fn metrics_handler(State(state): State<Arc<AppState>>) -> impl IntoRes
             .count();
         let stopped = svc.instances.len() - running;
         let name = &svc.config.name;
+        let project = svc.config.project.as_deref().unwrap_or("");
         let _ = writeln!(
             out,
-            "orca_instances_total{{service=\"{name}\",status=\"running\"}} {running}"
+            "orca_instances_total{{service=\"{name}\",project=\"{project}\",status=\"running\"}} {running}"
         );
         let _ = writeln!(
             out,
-            "orca_instances_total{{service=\"{name}\",status=\"stopped\"}} {stopped}"
+            "orca_instances_total{{service=\"{name}\",project=\"{project}\",status=\"stopped\"}} {stopped}"
         );
     }
     drop(services);

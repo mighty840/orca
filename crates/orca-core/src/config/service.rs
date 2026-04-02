@@ -79,6 +79,9 @@ pub struct ServicesConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceConfig {
     pub name: String,
+    /// Project name (set automatically from directory name by load_dir).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
     #[serde(default)]
     pub runtime: RuntimeKind,
     /// Container image (for container runtime).

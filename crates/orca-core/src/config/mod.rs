@@ -55,6 +55,8 @@ impl ServicesConfig {
             let svc_file = entry.path().join("service.toml");
             if svc_file.exists() {
                 let mut config = Self::load(&svc_file)?;
+                let project_name = entry.file_name().to_string_lossy().to_string();
+
                 // Resolve secrets from per-service secrets.json
                 let secrets_file = entry.path().join("secrets.json");
                 if secrets_file.exists()
@@ -64,6 +66,15 @@ impl ServicesConfig {
                         svc.env = store.resolve_env(&svc.env);
                     }
                 }
+
+                // Set project name and default network from directory
+                for svc in &mut config.service {
+                    svc.project = Some(project_name.clone());
+                    if svc.network.is_none() {
+                        svc.network = Some(project_name.clone());
+                    }
+                }
+
                 all_services.extend(config.service);
             }
         }

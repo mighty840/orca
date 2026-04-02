@@ -167,6 +167,7 @@ mod tests {
     fn minimal_config(replicas: Replicas) -> ServiceConfig {
         ServiceConfig {
             name: "test-svc".to_string(),
+            project: None,
             runtime: Default::default(),
             image: Some("nginx:latest".to_string()),
             module: None,

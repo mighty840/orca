@@ -30,6 +30,7 @@ fn set_and_get_service() {
     let store = temp_store();
     let config = ServiceConfig {
         name: "web".into(),
+        project: None,
         runtime: Default::default(),
         image: Some("nginx:latest".into()),
         module: None,
@@ -111,6 +112,7 @@ fn snapshot_captures_all_state() {
     store
         .apply(&RaftEntry::SetService(Box::new(ServiceConfig {
             name: "api".into(),
+            project: None,
             runtime: Default::default(),
             image: Some("myapp:latest".into()),
             module: None,
