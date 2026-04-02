@@ -12,9 +12,12 @@ orca status                    # Cluster and service status
 orca scale <service> <count>   # Scale replicas
 orca logs <service> --tail 100 # View logs
 orca stop <service>            # Stop one service
+orca promote <service>         # Promote canary to stable
 orca tui                       # Terminal dashboard
 orca update                    # Self-update binary
 orca backup all                # Backup all volumes
+orca token create --name ci --role deployer  # Create service account
+orca token list                # List API tokens
 ```
 
 ## Architecture
@@ -51,6 +54,8 @@ orca backup all                # Backup all volumes
 
 Base: `http://<master>:6880` | Auth: `Authorization: Bearer <token>`
 
+Auth supports RBAC roles: `admin` (full), `deployer` (CI/CD), `viewer` (read-only).
+
 | Method | Path | Auth | Purpose |
 |--------|------|------|---------|
 | POST | /api/v1/deploy | Yes | Deploy services |
@@ -61,8 +66,12 @@ Base: `http://<master>:6880` | Auth: `Authorization: Bearer <token>`
 | POST | /api/v1/stop | Yes | Stop ALL |
 | GET | /api/v1/services/{name}/logs | Yes | Container logs |
 | GET | /api/v1/cluster/info | Yes | Node list |
+| POST | /api/v1/services/{name}/promote | Yes | Promote canary |
+| POST | /api/v1/services/{name}/rollback | Yes | Rollback service |
 | POST | /api/v1/cluster/nodes/{id}/drain | Yes | Drain node |
 | POST | /api/v1/cluster/nodes/{id}/undrain | Yes | Undrain node |
+| POST | /api/v1/webhooks/github | Sig | Git push webhook |
+| GET | /api/v1/webhooks | Yes | List webhooks |
 | GET | /api/v1/health | No | Health check |
 | GET | /metrics | No | Prometheus metrics |
 
@@ -135,6 +144,73 @@ orca secrets set DB_PASS "s3cret"    # Set
 orca secrets list                     # List keys
 # Use in toml: "${secrets.DB_PASS}"
 ```
+
+## RBAC (Role-Based Access Control)
+
+```toml
+# cluster.toml
+[[token]]
+name = "sharang"
+value = "abc123..."
+role = "admin"
+
+[[token]]
+name = "gitea-ci"
+value = "def456..."
+role = "deployer"
+
+[[token]]
+name = "grafana"
+value = "ghi789..."
+role = "viewer"
+```
+
+Create tokens: `orca token create --name gitea-ci --role deployer`
+
+| Role | Deploy | Stop/Scale | Logs/Status | Drain/Tokens |
+|------|--------|------------|-------------|--------------|
+| admin | Yes | Yes | Yes | Yes |
+| deployer | Yes | Yes | Yes | No |
+| viewer | No | No | Yes | No |
+
+## Canary Deployments
+
+```toml
+[[service]]
+name = "api"
+image = "myapp:v2"
+
+[service.deploy]
+strategy = "canary"
+canary_weight = 20    # 20% traffic to new version
+```
+
+Flow:
+1. `orca deploy` → starts canary instances alongside stable
+2. Proxy splits traffic: 80% stable, 20% canary
+3. Monitor metrics/logs to verify canary is healthy
+4. `orca promote api` → shifts 100% to canary, removes old
+
+## Git Push Deploy (Webhooks)
+
+```bash
+# Register webhook
+orca webhooks add --repo org/myapp --service myapp --branch main
+
+# Configure in GitHub/Gitea:
+# URL: https://master:6880/api/v1/webhooks/github
+# Secret: <webhook secret>
+# Events: Push
+```
+
+On push to matching branch → auto-redeploy the service.
+
+## Persistent State
+
+Services survive server restarts. State persisted to `~/.orca/cluster.db` (redb).
+- Deploy → config saved to store
+- Stop → containers stopped, config kept
+- Restart → configs loaded, containers recreated
 
 ## Operational Patterns
 
