@@ -9,6 +9,7 @@ use orca_core::config::{ClusterConfig, ServiceConfig};
 use orca_core::runtime::{Runtime, WorkloadHandle};
 use orca_core::types::{HealthState, Replicas, WorkloadStatus};
 
+use crate::stats::ContainerStats;
 use crate::webhook::WebhookStore;
 
 pub use orca_proxy::{RouteTarget, SharedWasmTriggers, WasmTrigger};
@@ -45,6 +46,8 @@ pub struct AppState {
     pub acme_manager: Option<orca_proxy::acme::AcmeManager>,
     /// Dynamic cert resolver shared with the HTTPS listener.
     pub cert_resolver: Option<orca_proxy::SharedCertResolver>,
+    /// Cached container stats, keyed by service name.
+    pub container_stats: RwLock<HashMap<String, ContainerStats>>,
 }
 
 /// A node registered in the cluster.
@@ -110,6 +113,7 @@ impl AppState {
             deploy_history: RwLock::new(crate::deploy_history::DeployHistory::new()),
             acme_manager: None,
             cert_resolver: None,
+            container_stats: RwLock::new(HashMap::new()),
         }
     }
 

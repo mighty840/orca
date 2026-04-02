@@ -49,6 +49,12 @@ pub struct ServiceStatus {
     pub status: String,
     /// Domain for external access, if configured.
     pub domain: Option<String>,
+    /// Current memory usage (e.g. "128Mi"), if stats are available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_usage: Option<String>,
+    /// Current CPU usage percentage, if stats are available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_percent: Option<f64>,
 }
 
 /// Request body for `POST /api/v1/services/{name}/scale`.

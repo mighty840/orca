@@ -6,6 +6,7 @@ pub mod cluster_state;
 pub mod deploy_history;
 pub mod health;
 pub(crate) mod instance;
+pub mod metrics;
 pub(crate) mod operations;
 pub mod proto;
 pub mod raft;
@@ -13,6 +14,7 @@ pub mod reconciler;
 pub mod routes;
 pub mod scheduler;
 pub mod state;
+pub mod stats;
 pub mod store;
 pub mod watchdog;
 pub mod webhook;
@@ -79,6 +81,7 @@ pub async fn run_server_with_acme(
     // Spawn background resilience tasks.
     watchdog::spawn_watchdog(state.clone());
     health::spawn_health_checker(state.clone());
+    stats::spawn_stats_collector(state.clone());
 
     let app = api::router(state.clone());
 

@@ -17,6 +17,8 @@ pub(crate) fn build_container_config(spec: &WorkloadSpec) -> Config<String> {
     let device_requests = build_gpu_requests(spec);
     let labels = build_labels(spec);
 
+    let (memory_limit, nano_cpus) = parse_resource_limits(spec);
+
     let host_config = HostConfig {
         port_bindings: Some(port_bindings),
         binds: if binds.is_empty() { None } else { Some(binds) },
@@ -25,6 +27,8 @@ pub(crate) fn build_container_config(spec: &WorkloadSpec) -> Config<String> {
         } else {
             Some(device_requests)
         },
+        memory: memory_limit,
+        nano_cpus,
         ..Default::default()
     };
 
@@ -103,6 +107,33 @@ fn build_gpu_requests(spec: &WorkloadSpec) -> Vec<bollard::models::DeviceRequest
         });
     }
     device_requests
+}
+
+/// Parse resource limits from the workload spec into Docker host config values.
+fn parse_resource_limits(spec: &WorkloadSpec) -> (Option<i64>, Option<i64>) {
+    let res = match &spec.resources {
+        Some(r) => r,
+        None => return (None, None),
+    };
+    let memory = res.memory.as_deref().and_then(parse_memory_string);
+    let nano_cpus = res.cpu.map(|c| (c * 1e9) as i64);
+    (memory, nano_cpus)
+}
+
+/// Parse a human-readable memory string (e.g. "512Mi", "2Gi") into bytes.
+fn parse_memory_string(s: &str) -> Option<i64> {
+    let s = s.trim();
+    if let Some(val) = s.strip_suffix("Gi") {
+        val.parse::<u64>()
+            .ok()
+            .map(|v| (v * 1024 * 1024 * 1024) as i64)
+    } else if let Some(val) = s.strip_suffix("Mi") {
+        val.parse::<u64>().ok().map(|v| (v * 1024 * 1024) as i64)
+    } else if let Some(val) = s.strip_suffix("Ki") {
+        val.parse::<u64>().ok().map(|v| (v * 1024) as i64)
+    } else {
+        s.parse::<i64>().ok()
+    }
 }
 
 fn build_labels(spec: &WorkloadSpec) -> HashMap<String, String> {

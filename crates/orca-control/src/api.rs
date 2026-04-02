@@ -21,7 +21,12 @@ use crate::webhook;
 
 /// Build the axum router for the API.
 pub fn router(state: Arc<AppState>) -> Router {
-    Router::new()
+    // Unauthenticated routes (metrics for Prometheus scraping).
+    let public = Router::new()
+        .route("/metrics", get(crate::metrics::metrics_handler))
+        .with_state(state.clone());
+
+    let authed = Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/deploy", post(deploy))
         .route("/api/v1/status", get(status))
@@ -36,7 +41,9 @@ pub fn router(state: Arc<AppState>) -> Router {
             state.clone(),
             auth_middleware,
         ))
-        .with_state(state)
+        .with_state(state);
+
+    public.merge(authed)
 }
 
 /// Health check endpoint.
@@ -65,6 +72,7 @@ async fn deploy(
 /// Get cluster and service status.
 async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let services = state.services.read().await;
+    let stats_cache = state.container_stats.read().await;
 
     let service_statuses: Vec<ServiceStatus> = services
         .values()
@@ -77,6 +85,9 @@ async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
             } else {
                 "running"
             };
+
+            // Look up cached stats for this service.
+            let cached = stats_cache.get(&svc.config.name);
 
             ServiceStatus {
                 name: svc.config.name.clone(),
@@ -91,6 +102,8 @@ async fn status(State(state): State<Arc<AppState>>) -> impl IntoResponse {
                 running_replicas: running,
                 status: overall_status.to_string(),
                 domain: svc.config.domain.clone(),
+                memory_usage: cached.map(|s| s.memory_usage.clone()),
+                cpu_percent: cached.map(|s| s.cpu_percent),
             }
         })
         .collect();
