@@ -15,7 +15,7 @@ use crate::state::AppState;
 const STATS_INTERVAL: Duration = Duration::from_secs(30);
 
 /// Cached stats for a service (aggregated across instances).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct ContainerStats {
     /// Human-readable memory usage (e.g. "128Mi").
     pub memory_usage: String,
@@ -140,5 +140,36 @@ mod tests {
     #[test]
     fn format_bytes_small() {
         assert_eq!(format_bytes(42), "42B");
+    }
+
+    #[test]
+    fn container_stats_serializes() {
+        let stats = ContainerStats {
+            memory_usage: "128Mi".to_string(),
+            cpu_percent: 42.5,
+        };
+        let json = serde_json::to_value(&stats).unwrap();
+        assert_eq!(json["memory_usage"], "128Mi");
+        assert_eq!(json["cpu_percent"], 42.5);
+    }
+
+    #[tokio::test]
+    async fn app_state_starts_with_empty_stats() {
+        use std::collections::HashMap;
+        use std::sync::Arc;
+        use tokio::sync::RwLock;
+
+        use orca_core::config::ClusterConfig;
+        use orca_core::testing::MockRuntime;
+
+        let state = crate::state::AppState::new(
+            ClusterConfig::default(),
+            Arc::new(MockRuntime::new()),
+            None,
+            Arc::new(RwLock::new(HashMap::new())),
+            Arc::new(RwLock::new(Vec::new())),
+        );
+        let stats = state.container_stats.read().await;
+        assert!(stats.is_empty());
     }
 }

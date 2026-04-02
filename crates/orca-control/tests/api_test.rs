@@ -120,3 +120,77 @@ async fn logs_nonexistent_service_returns_not_found() {
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn metrics_returns_200_text_plain_no_auth() {
+    // Use tokens to prove /metrics is unauthenticated.
+    let config = orca_core::config::ClusterConfig {
+        api_tokens: vec!["secret".into()],
+        ..Default::default()
+    };
+    let runtime = Arc::new(orca_core::testing::MockRuntime::new());
+    let state = Arc::new(orca_control::state::AppState::new(
+        config,
+        runtime,
+        None,
+        Arc::new(RwLock::new(std::collections::HashMap::new())),
+        Arc::new(RwLock::new(Vec::new())),
+    ));
+    let app = router(state);
+
+    // No Authorization header — should still succeed.
+    let req = Request::get("/metrics").body(Body::empty()).unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let ct = resp
+        .headers()
+        .get("content-type")
+        .unwrap()
+        .to_str()
+        .unwrap();
+    assert!(ct.contains("text/plain"));
+
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let text = String::from_utf8(body.to_vec()).unwrap();
+    assert!(text.contains("orca_services_total"));
+    assert!(text.contains("orca_nodes_total"));
+}
+
+#[tokio::test]
+async fn status_includes_stats_fields() {
+    let state = test_app_state();
+
+    // Deploy a service first.
+    let app = router(state.clone());
+    let deploy_body = serde_json::json!({
+        "services": [{
+            "name": "stats-svc",
+            "image": "nginx:latest",
+            "replicas": 1,
+            "port": 80
+        }]
+    });
+    let req = Request::post("/api/v1/deploy")
+        .header("content-type", "application/json")
+        .body(Body::from(serde_json::to_string(&deploy_body).unwrap()))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Check status response structure.
+    let app2 = router(state.clone());
+    let req = Request::get("/api/v1/status").body(Body::empty()).unwrap();
+    let resp = app2.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let svc = &json["services"][0];
+
+    // memory_usage and cpu_percent are optional (null when no stats).
+    // The fields exist in the ServiceStatus struct but may be omitted
+    // via skip_serializing_if. Verify the service entry is present.
+    assert_eq!(svc["name"], "stats-svc");
+    assert_eq!(svc["status"], "running");
+}

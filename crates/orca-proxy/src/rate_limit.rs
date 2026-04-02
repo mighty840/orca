@@ -87,4 +87,59 @@ mod tests {
         assert!(!limiter.check(ip1));
         assert!(limiter.check(ip2));
     }
+
+    #[test]
+    fn test_rate_limiter_allows_under_limit() {
+        let limiter = RateLimiter::new();
+        let ip = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+        for i in 0..50 {
+            assert!(limiter.check(ip), "request {i} should be allowed");
+        }
+    }
+
+    #[test]
+    fn test_rate_limiter_blocks_over_limit() {
+        let limiter = RateLimiter::new();
+        let ip = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 2));
+        // Exhaust all 100 tokens
+        for _ in 0..MAX_TOKENS {
+            limiter.check(ip);
+        }
+        // The 101st request should be blocked
+        assert!(
+            !limiter.check(ip),
+            "request 101 should be blocked after exhausting tokens"
+        );
+    }
+
+    #[test]
+    fn test_rate_limiter_allows_different_ips() {
+        let limiter = RateLimiter::new();
+        let ip1 = IpAddr::V4(Ipv4Addr::new(10, 1, 0, 1));
+        let ip2 = IpAddr::V4(Ipv4Addr::new(10, 1, 0, 2));
+        // 100 requests from each IP should all be allowed
+        for i in 0..MAX_TOKENS {
+            assert!(limiter.check(ip1), "ip1 request {i} should be allowed");
+            assert!(limiter.check(ip2), "ip2 request {i} should be allowed");
+        }
+    }
+
+    #[test]
+    fn test_rate_limiter_refills_after_time() {
+        let limiter = RateLimiter::new();
+        let ip = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 3));
+        // Exhaust all tokens
+        for _ in 0..MAX_TOKENS {
+            limiter.check(ip);
+        }
+        assert!(!limiter.check(ip), "should be blocked after exhaustion");
+
+        // Wait for refill (1 second should refill ~100 tokens)
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
+        assert!(
+            limiter.check(ip),
+            "should be allowed again after token refill"
+        );
+    }
 }

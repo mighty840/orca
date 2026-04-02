@@ -57,3 +57,42 @@ pub async fn metrics_handler(State(state): State<Arc<AppState>>) -> impl IntoRes
 
     ([(header::CONTENT_TYPE, "text/plain; version=0.0.4")], out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::extract::State;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use tokio::sync::RwLock;
+
+    use orca_core::config::ClusterConfig;
+    use orca_core::testing::MockRuntime;
+
+    fn test_state() -> Arc<AppState> {
+        let runtime = Arc::new(MockRuntime::new());
+        Arc::new(AppState::new(
+            ClusterConfig::default(),
+            runtime,
+            None,
+            Arc::new(RwLock::new(HashMap::new())),
+            Arc::new(RwLock::new(Vec::new())),
+        ))
+    }
+
+    #[tokio::test]
+    async fn test_metrics_format() {
+        let state = test_state();
+        let resp = metrics_handler(State(state)).await;
+        let response = resp.into_response();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let text = String::from_utf8(body.to_vec()).unwrap();
+
+        assert!(text.contains("orca_services_total"));
+        assert!(text.contains("orca_nodes_total"));
+        assert!(text.contains("# TYPE orca_services_total gauge"));
+        assert!(text.contains("# TYPE orca_nodes_total gauge"));
+    }
+}

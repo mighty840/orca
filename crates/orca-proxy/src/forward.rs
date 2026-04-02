@@ -79,3 +79,51 @@ pub(crate) fn redirect_to_https(
     );
     resp
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_redirect_to_https_returns_301() {
+        let resp = redirect_to_https("example.com", "/some/path");
+        assert_eq!(resp.status(), StatusCode::MOVED_PERMANENTLY);
+    }
+
+    #[test]
+    fn test_redirect_to_https_location_header() {
+        let resp = redirect_to_https("example.com", "/foo?bar=1");
+        let location = resp
+            .headers()
+            .get(hyper::header::LOCATION)
+            .expect("should have Location header")
+            .to_str()
+            .unwrap();
+        assert_eq!(location, "https://example.com/foo?bar=1");
+    }
+
+    #[test]
+    fn test_redirect_to_https_root_path() {
+        let resp = redirect_to_https("myapp.dev", "/");
+        let location = resp
+            .headers()
+            .get(hyper::header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(location, "https://myapp.dev/");
+        assert_eq!(resp.status(), StatusCode::MOVED_PERMANENTLY);
+    }
+
+    #[test]
+    fn test_redirect_preserves_complex_path() {
+        let resp = redirect_to_https("sub.example.com", "/a/b/c?x=1&y=2");
+        let location = resp
+            .headers()
+            .get(hyper::header::LOCATION)
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert_eq!(location, "https://sub.example.com/a/b/c?x=1&y=2");
+    }
+}

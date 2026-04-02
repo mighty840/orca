@@ -125,4 +125,28 @@ mod tests {
         assert!(is_newer("0.1.0-rc.4", "0.1.0-rc.3"));
         assert!(!is_newer("0.1.0-rc.2", "0.1.0-rc.3"));
     }
+
+    #[test]
+    fn test_version_newer_detected() {
+        // Full release is newer than release candidate
+        assert!(is_newer("0.2.0", "0.1.0-rc.4"));
+    }
+
+    #[test]
+    fn test_version_same_not_newer() {
+        assert!(!is_newer("0.1.0-rc.4", "0.1.0-rc.4"));
+    }
+
+    #[test]
+    fn test_version_older_not_newer() {
+        assert!(!is_newer("0.1.0-rc.3", "0.1.0-rc.4"));
+    }
+
+    #[test]
+    fn test_parse_github_release_tag() {
+        // Simulates what handle_update does: trim leading 'v'
+        let tag = "v0.1.0-rc.4";
+        let version = tag.trim_start_matches('v');
+        assert_eq!(version, "0.1.0-rc.4");
+    }
 }

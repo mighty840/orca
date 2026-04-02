@@ -158,3 +158,95 @@ fn build_labels(spec: &WorkloadSpec) -> HashMap<String, String> {
     }
     labels
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orca_core::types::{Replicas, ResourceLimits, RuntimeKind};
+
+    fn minimal_spec() -> WorkloadSpec {
+        WorkloadSpec {
+            name: "test".to_string(),
+            runtime: RuntimeKind::Container,
+            image: "nginx:latest".to_string(),
+            replicas: Replicas::Fixed(1),
+            port: None,
+            host_port: None,
+            domain: None,
+            routes: vec![],
+            health: None,
+            readiness: None,
+            liveness: None,
+            env: Default::default(),
+            resources: None,
+            volume: None,
+            deploy: None,
+            placement: None,
+            network: None,
+            aliases: vec![],
+            mounts: vec![],
+            triggers: vec![],
+            build: None,
+            tls_cert: None,
+            tls_key: None,
+            internal: false,
+        }
+    }
+
+    #[test]
+    fn test_parse_memory_ki() {
+        assert_eq!(parse_memory_string("64Ki"), Some(65536));
+    }
+
+    #[test]
+    fn test_parse_memory_mi() {
+        assert_eq!(parse_memory_string("512Mi"), Some(536870912));
+    }
+
+    #[test]
+    fn test_parse_memory_gi() {
+        assert_eq!(parse_memory_string("2Gi"), Some(2147483648));
+    }
+
+    #[test]
+    fn test_parse_memory_plain_bytes() {
+        assert_eq!(parse_memory_string("1048576"), Some(1048576));
+    }
+
+    #[test]
+    fn test_parse_memory_invalid() {
+        assert_eq!(parse_memory_string("abc"), None);
+    }
+
+    #[test]
+    fn test_resource_limits_sets_nano_cpus() {
+        let mut spec = minimal_spec();
+        spec.resources = Some(ResourceLimits {
+            memory: None,
+            cpu: Some(2.0),
+            gpu: None,
+        });
+        let (_mem, nano_cpus) = parse_resource_limits(&spec);
+        assert_eq!(nano_cpus, Some(2_000_000_000));
+    }
+
+    #[test]
+    fn test_log_config_json_file() {
+        let cfg = build_log_config();
+        assert_eq!(cfg.typ.as_deref(), Some("json-file"));
+    }
+
+    #[test]
+    fn test_log_config_max_size() {
+        let cfg = build_log_config();
+        let opts = cfg.config.as_ref().unwrap();
+        assert_eq!(opts.get("max-size").map(|s| s.as_str()), Some("10m"));
+    }
+
+    #[test]
+    fn test_log_config_max_file() {
+        let cfg = build_log_config();
+        let opts = cfg.config.as_ref().unwrap();
+        assert_eq!(opts.get("max-file").map(|s| s.as_str()), Some("3"));
+    }
+}
