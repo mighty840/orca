@@ -18,63 +18,32 @@
 </p>
 
 <p align="center">
-  <a href="#install">Install</a> &bull;
+  <a href="https://mighty840.github.io/orca">Documentation</a> &bull;
   <a href="#quick-start">Quick Start</a> &bull;
   <a href="#features">Features</a> &bull;
-  <a href="#cli-reference">CLI</a> &bull;
-  <a href="#configuration">Config</a> &bull;
-  <a href="#architecture">Architecture</a> &bull;
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 ---
 
-Orca is a **single-binary orchestrator** for teams that have outgrown one server but don't need Kubernetes. It runs containers and WebAssembly modules as first-class workloads, with built-in reverse proxy, auto-TLS, secrets management, health checks, and an AI operations assistant.
+Orca is a **single-binary orchestrator** for teams that have outgrown one server but don't need Kubernetes. It runs containers and WebAssembly modules as first-class workloads, with built-in reverse proxy, auto-TLS, secrets management, health checks, and an AI operations assistant. Deploy with TOML configs that fit on one screen — no YAML empires.
 
 ```
 Docker Compose ──> Coolify ──> Orca ──> Kubernetes
    (1 node)        (1 node)   (2-20)     (20-10k)
 ```
 
-## Install
-
-```bash
-cargo install mallorca
-```
-
-This installs the `orca` binary. Requires `protoc` (for gRPC codegen):
-```bash
-# Ubuntu/Debian
-sudo apt install protobuf-compiler build-essential pkg-config libssl-dev
-
-# Fedora
-sudo dnf install protobuf-compiler gcc pkg-config openssl-devel
-```
-
-### Port 80/443 binding (one-time)
-
-Orca's built-in proxy needs ports 80 and 443 for HTTP and auto-TLS. On Linux,
-non-root processes can't bind to ports below 1024. Grant the capability once
-after each binary install/update:
-
-```bash
-sudo setcap 'cap_net_bind_service=+ep' $(which orca)
-```
-
 ## Quick Start
 
 ```bash
-# 1. Create configs
-mkdir -p services/web
+cargo install mallorca
+sudo setcap 'cap_net_bind_service=+ep' $(which orca)
+orca server
+```
 
-cat > cluster.toml << 'EOF'
-[cluster]
-name = "my-cluster"
-domain = "example.com"
-acme_email = "ops@example.com"
-EOF
+Create a service in `services/web/service.toml` and deploy:
 
-cat > services/web/service.toml << 'EOF'
+```toml
 [[service]]
 name = "web"
 image = "nginx:alpine"
@@ -82,170 +51,37 @@ replicas = 2
 port = 80
 domain = "example.com"
 health = "/"
-EOF
-
-# 2. Start the server
-orca server &
-
-# 3. Deploy and manage
-orca deploy           # auto-discovers services/*/service.toml
-orca status
-orca logs web
-orca tui              # terminal dashboard
 ```
 
-### One-Click Database
-
 ```bash
-orca db create postgres mydb
-# --> Deploys postgres:16 with auto-generated password, volume, health check
-# --> Stores password as secret, prints connection string
+orca deploy && orca status
 ```
 
 ## Features
 
+### Single Binary, Batteries Included
+
+One static executable is the agent, control plane, CLI, and reverse proxy. `scp` it to a server and you have a production-ready orchestrator with auto-TLS, secrets, health checks, and Prometheus metrics.
+
 ### Dual Runtime
-| | Containers | WebAssembly |
-|---|---|---|
-| **Backend** | Docker (bollard) | wasmtime (WASI P2) |
-| **Cold start** | ~3s | ~5ms |
-| **Memory** | 30MB+ | 1-5MB |
-| **GPU** | nvidia passthrough | N/A |
-| **Use case** | Existing images, databases | Edge functions, API handlers |
+
+Run Docker containers and WebAssembly modules side by side. Containers for existing images and databases (~3s cold start). Wasm for edge functions and API handlers (~5ms cold start, ~1-5MB memory).
 
 ### Multi-Node Clustering
-- **Raft consensus** for HA control plane (no etcd dependency)
-- **Bin-packing scheduler** with GPU awareness and Wasm preference
-- **Node join/leave** with heartbeat protocol
-- **Cross-provider networking** via NetBird WireGuard mesh
 
-### Production Operations
-- **Health checks** — HTTP probing, auto-restart after 3 failures
-- **Auto-TLS** — ACME/Let's Encrypt via certbot, self-signed, or custom certs
-- **Secrets** — encrypted storage, `${secrets.KEY}` resolution, `.env` import
-- **Webhooks** — GitHub/Gitea push triggers auto-redeploy with HMAC-SHA256
-- **Backups** — volume tar.gz with pre-hooks, local disk + S3 targets
-- **Rollback** — deploy history, one-command rollback to previous config
-- **API auth** — bearer token middleware on all endpoints
-- **Docker cleanup** — prune unused images, containers, volumes
+Raft consensus via `openraft` with embedded `redb` storage — no etcd. Bin-packing scheduler with GPU awareness. Nodes can span multiple cloud providers via NetBird WireGuard mesh.
 
-### AI Ops
-- `orca ask "why is the API slow?"` — diagnoses issues using cluster context
-- **Conversational alerts** — AI investigates, suggests fixes, tracks resolution
-- **GPU monitoring** — thermal and VRAM utilization tracking
+### Self-Healing
+
+Watchdog restarts crashed containers in ~30s. Health checks with configurable thresholds. Stale route cleanup. Agent reconnection with exponential backoff. Services survive server restarts.
+
+### AI Operations
+
+`orca ask "why is the API slow?"` — diagnoses issues using cluster context. Works with any OpenAI-compatible API (Ollama, LiteLLM, vLLM, OpenAI). Conversational alerts, config generation, and optional auto-remediation.
 
 ### Developer Experience
-- **Single binary** — `scp` to a server and run
-- **TOML config** — not YAML, fits on one screen
-- **Config as code** — version control your infrastructure
-- **TUI dashboard** — k9s-style terminal UI with search, detail view, keybindings
-- **63 tests** — unit, integration, E2E framework
 
-## CLI Reference
-
-```
-CLUSTER
-  orca server               Start control plane + agent + proxy
-  orca join <leader>         Join this node to a cluster
-  orca nodes                 List cluster nodes
-  orca tui                   Launch terminal dashboard
-
-SERVICES
-  orca deploy                Deploy services from services.toml
-  orca status                Show service status
-  orca logs <service>        Stream service logs
-  orca scale <service> N     Scale to N replicas
-  orca stop <service>        Stop a service
-  orca rollback <service>    Rollback to previous deploy
-
-DATABASES
-  orca db create TYPE NAME   Create postgres/mysql/redis/mongodb
-  orca db list               List database services
-
-SECRETS
-  orca secrets set K V       Store a secret
-  orca secrets list          List secret keys
-  orca secrets import -f .env  Import from .env file
-
-OPS
-  orca backup create         Backup configs and volumes
-  orca backup list           List existing backups
-  orca cleanup               Prune unused Docker resources
-  orca ask "question"        Ask the AI assistant
-```
-
-## Configuration
-
-<details>
-<summary><strong>cluster.toml</strong> (click to expand)</summary>
-
-```toml
-[cluster]
-name = "production"
-domain = "myapp.com"
-acme_email = "ops@myapp.com"
-api_tokens = ["${secrets.api_token}"]
-
-[[node]]
-address = "10.0.0.1"
-labels = { role = "general" }
-
-[[node]]
-address = "10.0.0.2"
-labels = { role = "gpu" }
-
-[ai]
-provider = "ollama"
-model = "qwen3:30b"
-
-[backup]
-retention_days = 30
-[[backup.targets]]
-type = "local"
-path = "/var/backups/orca"
-[[backup.targets]]
-type = "s3"
-bucket = "my-backups"
-region = "eu-central-1"
-```
-</details>
-
-<details>
-<summary><strong>services.toml</strong> (click to expand)</summary>
-
-```toml
-# Container service
-[[service]]
-name = "api"
-image = "myapp:latest"
-replicas = 3
-port = 8080
-domain = "api.myapp.com"
-health = "/healthz"
-[service.env]
-DATABASE_URL = "${secrets.db_url}"
-
-# Wasm edge function (5ms cold start)
-[[service]]
-name = "edge-fn"
-runtime = "wasm"
-module = "./modules/edge.wasm"
-triggers = ["http:/api/edge/*"]
-
-# GPU workload
-[[service]]
-name = "llm"
-image = "vllm/vllm-openai:latest"
-port = 8000
-[service.resources]
-memory = "32Gi"
-cpu = 8.0
-[service.resources.gpu]
-count = 1
-vendor = "nvidia"
-vram_min = 24000
-```
-</details>
+TOML config that fits on one screen. TUI dashboard with k9s-style navigation. Git push deploy via webhooks. One-click database creation. RBAC with admin/deployer/viewer roles.
 
 ## Architecture
 
@@ -261,7 +97,7 @@ vram_min = 24000
 │  API server (axum)                  │
 │  Health checker + AI monitor        │
 └──────────────┬──────────────────────┘
-               │
+               │ gRPC
     ┌──────────┼──────────┐
     ▼          ▼          ▼
 ┌────────┐ ┌────────┐ ┌────────┐
@@ -272,25 +108,28 @@ vram_min = 24000
 └────────┘ └────────┘ └────────┘
 ```
 
-**8 Rust crates** | **~12k lines** | **100+ source files** | **63 tests** | **All files under 250 lines**
+**8 Rust crates** | **~12k lines** | **63 tests** | **all files under 250 lines**
 
-## Building from Source
+## Documentation
 
-```bash
-git clone https://github.com/mighty840/orca.git
-cd orca
-cargo build --release
-```
+Full documentation at **[mighty840.github.io/orca](https://mighty840.github.io/orca)**:
+
+- [Getting Started](https://mighty840.github.io/orca/guide/getting-started) — install, first cluster, first deploy
+- [Configuration](https://mighty840.github.io/orca/guide/configuration) — cluster.toml and service.toml reference
+- [CLI Reference](https://mighty840.github.io/orca/reference/cli) — every command with examples
+- [REST API](https://mighty840.github.io/orca/reference/api) — full endpoint reference
+- [Architecture](https://mighty840.github.io/orca/architecture) — crate map, runtime trait, design principles
 
 ## Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions and guidelines.
 
-Key areas:
+Key areas where help is wanted:
+
+- ACME/Let's Encrypt automation
 - Nixpacks integration for auto-detect builds
 - Service templates (WordPress, Supabase, etc.)
 - Preview environments (PR-based deploys)
-- ACME cert renewal automation
 
 ## License
 

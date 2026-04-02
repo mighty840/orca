@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="body" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#06B6D4"/>
+      <stop offset="100%" stop-color="#0891B2"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="80" fill="#0F172A"/>
+  <!-- Orca body — clean geometric silhouette -->
+  <path d="
+    M 130 310
+    C 135 230, 185 170, 260 155
+    C 310 145, 355 155, 385 180
+    C 415 210, 425 260, 415 305
+    C 405 340, 375 360, 340 368
+    L 280 372
+    C 230 374, 180 365, 155 345
+    C 138 332, 130 320, 130 310Z
+  " fill="url(#body)"/>
+  <!-- Dorsal fin -->
+  <path d="
+    M 275 155
+    C 268 110, 290 65, 310 52
+    C 305 90, 308 125, 318 155Z
+  " fill="url(#body)"/>
+  <!-- Tail flukes -->
+  <path d="
+    M 130 310
+    C 115 298, 88 270, 78 252
+    C 92 268, 108 280, 120 286
+    C 106 298, 94 312, 80 328
+    C 100 326, 118 318, 130 310Z
+  " fill="url(#body)"/>
+  <!-- Eye patch (dark) -->
+  <ellipse cx="365" cy="215" rx="18" ry="13" fill="#0F172A"/>
+  <!-- Eye (bright) -->
+  <ellipse cx="367" cy="213" rx="7" ry="5" fill="#E2E8F0"/>
+  <!-- Belly marking -->
+  <path d="
+    M 240 368
+    C 265 348, 310 345, 335 365
+    C 305 362, 265 362, 240 368Z
+  " fill="#E2E8F0" opacity="0.35"/>
+</svg>
