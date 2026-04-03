@@ -25,9 +25,10 @@ use std::sync::Arc;
 
 use orca_core::config::ClusterConfig;
 use orca_core::runtime::Runtime;
+use orca_core::types::WorkloadStatus;
 use tracing::info;
 
-use crate::state::{AppState, SharedRouteTable, SharedWasmTriggers};
+use crate::state::{AppState, InstanceState, SharedRouteTable, SharedWasmTriggers};
 
 /// Start the orca control plane (API server).
 ///
@@ -90,13 +91,13 @@ pub async fn run_server_with_acme(
 
     let state = Arc::new(app_state);
 
-    // Restore persisted services
+    // Restore persisted services, re-attaching to existing containers
     if let Some(store) = &state.store {
         match store.get_all_services() {
             Ok(services) if !services.is_empty() => {
                 info!("Restoring {} persisted services", services.len());
                 for config in services.values() {
-                    if let Err(e) = reconciler::reconcile_service(&state, config).await {
+                    if let Err(e) = restore_or_reconcile(&state, config).await {
                         tracing::warn!(service = %config.name, "Failed to restore: {e}");
                     }
                 }
@@ -126,6 +127,83 @@ pub async fn run_server_with_acme(
         .await?;
 
     Ok(())
+}
+
+/// Check if Docker containers already exist for a persisted service.
+/// If they do, populate in-memory state from existing containers.
+/// Otherwise, fall back to full reconciliation.
+async fn restore_or_reconcile(
+    state: &AppState,
+    config: &orca_core::config::ServiceConfig,
+) -> anyhow::Result<()> {
+    // Try to downcast to ContainerRuntime for find_existing
+    let cr = state
+        .container_runtime
+        .as_any()
+        .downcast_ref::<orca_agent::docker::ContainerRuntime>();
+
+    if let Some(container_rt) = cr {
+        let existing = container_rt.find_existing(&config.name).await?;
+        if !existing.is_empty() {
+            info!(
+                service = %config.name,
+                count = existing.len(),
+                "Re-attached to existing containers, skipping reconciliation"
+            );
+            populate_state_from_existing(state, config, existing).await;
+            return Ok(());
+        }
+    }
+
+    reconciler::reconcile_service(state, config).await
+}
+
+/// Populate in-memory `ServiceState` from already-running Docker containers.
+async fn populate_state_from_existing(
+    state: &AppState,
+    config: &orca_core::config::ServiceConfig,
+    handles: Vec<orca_core::runtime::WorkloadHandle>,
+) {
+    let instances: Vec<InstanceState> = handles
+        .into_iter()
+        .map(|handle| {
+            let host_port = handle
+                .metadata
+                .get("host_port")
+                .and_then(|p| p.parse::<u16>().ok());
+            InstanceState {
+                handle,
+                status: WorkloadStatus::Running,
+                host_port,
+                container_address: None,
+                health: orca_core::types::HealthState::Unknown,
+                is_canary: false,
+            }
+        })
+        .collect();
+
+    let desired = match &config.replicas {
+        orca_core::types::Replicas::Fixed(n) => *n,
+        orca_core::types::Replicas::Auto => 1,
+    };
+
+    let mut services = state.services.write().await;
+    let svc_state = services
+        .entry(config.name.clone())
+        .or_insert_with(|| state::ServiceState::from_config(config.clone()));
+    svc_state.instances = instances;
+    svc_state.desired_replicas = desired;
+    drop(services);
+
+    // Update routing table for the restored service
+    match config.runtime {
+        orca_core::types::RuntimeKind::Container => {
+            routes::update_container_routes(state, config).await;
+        }
+        orca_core::types::RuntimeKind::Wasm => {
+            routes::update_wasm_triggers(state, config).await;
+        }
+    }
 }
 
 /// Compute a deterministic node ID from the system hostname.

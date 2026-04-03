@@ -1219,6 +1219,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "filetime"
+version = "0.2.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f98844151eee8917efc50bd9e8318cb963ae8b297431495d3f758616ea5c57db"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "libredox",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2125,7 +2136,10 @@ version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ddbf48fd451246b1f8c2610bd3b4ac0cc6e149d89832867093ab69a17194f08"
 dependencies = [
+ "bitflags",
  "libc",
+ "plain",
+ "redox_syscall 0.7.3",
 ]
 
 [[package]]
@@ -2181,7 +2195,7 @@ dependencies = [
 
 [[package]]
 name = "mallorca"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 dependencies = [
  "anyhow",
  "bollard",
@@ -2484,7 +2498,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orca-agent"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2507,7 +2521,7 @@ dependencies = [
 
 [[package]]
 name = "orca-ai"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2524,7 +2538,7 @@ dependencies = [
 
 [[package]]
 name = "orca-control"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2563,7 +2577,7 @@ dependencies = [
 
 [[package]]
 name = "orca-core"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2583,10 +2597,11 @@ dependencies = [
 
 [[package]]
 name = "orca-proxy"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 dependencies = [
  "anyhow",
  "dirs 6.0.0",
+ "filetime",
  "http-body-util",
  "hyper",
  "hyper-util",
@@ -2598,6 +2613,7 @@ dependencies = [
  "rustls-pemfile",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tokio-rustls",
@@ -2606,7 +2622,7 @@ dependencies = [
 
 [[package]]
 name = "orca-tui"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 dependencies = [
  "anyhow",
  "crossterm",
@@ -2620,7 +2636,7 @@ dependencies = [
 
 [[package]]
 name = "orca-web"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.5"
 dependencies = [
  "anyhow",
  "clap",
@@ -2649,7 +2665,7 @@ checksum = "2621685985a2ebf1c516881c026032ac7deafcda1a2c9b7850dc81e3dfcb64c1"
 dependencies = [
  "cfg-if",
  "libc",
- "redox_syscall",
+ "redox_syscall 0.5.18",
  "smallvec",
  "windows-link",
 ]
@@ -2723,6 +2739,12 @@ name = "pkg-config"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
+
+[[package]]
+name = "plain"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
 name = "polyval"
@@ -3062,6 +3084,15 @@ name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
+dependencies = [
+ "bitflags",
+]
+
+[[package]]
+name = "redox_syscall"
+version = "0.7.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ce70a74e890531977d37e532c34d45e9055d2409ed08ddba14529471ed0be16"
 dependencies = [
  "bitflags",
 ]

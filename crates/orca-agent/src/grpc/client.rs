@@ -15,6 +15,9 @@ use tracing::{debug, info, warn};
 use orca_core::runtime::Runtime;
 use orca_core::types::{WorkloadSpec, WorkloadStatus};
 
+/// Maximum number of retry attempts for failed commands.
+const MAX_COMMAND_RETRIES: u32 = 3;
+
 /// Agent client that communicates with the cluster leader.
 pub struct AgentClient {
     /// Leader's API URL.
@@ -25,42 +28,37 @@ pub struct AgentClient {
     client: reqwest::Client,
     /// Local workload handles and their status.
     workloads: Arc<RwLock<HashMap<String, WorkloadInfo>>>,
+    /// Commands that failed and should be retried (command, attempt_count).
+    failed_commands: Arc<RwLock<Vec<(WorkloadCommand, u32)>>>,
 }
 
-/// Local tracking info for a workload on this agent.
 #[derive(Debug, Clone, Serialize)]
 struct WorkloadInfo {
     service_name: String,
     status: WorkloadStatus,
 }
 
-/// Heartbeat request sent to the leader.
 #[derive(Debug, Serialize)]
 struct HeartbeatRequest {
     node_id: u64,
     workloads: Vec<WorkloadStatusReport>,
 }
 
-/// Status report for a single workload.
 #[derive(Debug, Serialize)]
 struct WorkloadStatusReport {
     service_name: String,
     status: String,
 }
 
-/// Heartbeat response from the leader.
 #[derive(Debug, Deserialize)]
 pub struct HeartbeatResponse {
-    /// Commands to execute (deploy/remove workloads).
     pub commands: Vec<WorkloadCommand>,
 }
 
 /// A command from the leader to the agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkloadCommand {
-    /// Action to perform: "deploy" or "stop".
     pub action: String,
-    /// Full workload specification for deployment.
     pub spec: WorkloadSpec,
 }
 
@@ -72,6 +70,7 @@ impl AgentClient {
             node_id,
             client: reqwest::Client::new(),
             workloads: Arc::new(RwLock::new(HashMap::new())),
+            failed_commands: Arc::new(RwLock::new(Vec::new())),
         }
     }
 
@@ -146,78 +145,120 @@ impl AgentClient {
         }
     }
 
-    /// Run the heartbeat loop with a container runtime for executing commands.
-    ///
-    /// Uses exponential backoff on failure (5s to 60s), resets on success.
+    /// Run the heartbeat loop. Backoff: 5s to 60s on failure, resets on success.
     pub async fn run_heartbeat_loop(&self, interval: Duration, runtime: Arc<dyn Runtime>) {
-        const MIN_BACKOFF: Duration = Duration::from_secs(5);
-        const MAX_BACKOFF: Duration = Duration::from_secs(60);
-
+        const MIN_BO: Duration = Duration::from_secs(5);
+        const MAX_BO: Duration = Duration::from_secs(60);
         info!(
             "Starting heartbeat loop (interval: {}s)",
             interval.as_secs()
         );
-
-        let mut current_interval = interval;
-        let mut was_failing = false;
-
+        let (mut cur, mut failing) = (interval, false);
         loop {
-            tokio::time::sleep(current_interval).await;
+            tokio::time::sleep(cur).await;
             match self.heartbeat().await {
                 Ok(resp) => {
-                    if was_failing {
+                    if failing {
                         info!("Heartbeat reconnected to leader");
-                        was_failing = false;
                     }
-                    current_interval = interval;
+                    cur = interval;
+                    failing = false;
+                    self.retry_failed_commands(runtime.as_ref()).await;
                     for cmd in resp.commands {
                         info!("Executing command: {} for {}", cmd.action, cmd.spec.name);
-                        self.execute_command(&cmd, runtime.as_ref()).await;
+                        self.run_command(&cmd, runtime.as_ref(), true).await;
                     }
                 }
                 Err(e) => {
-                    was_failing = true;
+                    failing = true;
                     warn!("Heartbeat failed: {e}");
-                    current_interval = (current_interval * 2).max(MIN_BACKOFF).min(MAX_BACKOFF);
+                    cur = (cur * 2).max(MIN_BO).min(MAX_BO);
                 }
             }
         }
     }
 
-    /// Execute a workload command received from the leader.
-    async fn execute_command(&self, cmd: &WorkloadCommand, runtime: &dyn Runtime) {
+    /// Execute a workload command. Returns `true` on success.
+    /// When `enqueue_on_fail` is true, failures are added to the retry queue.
+    async fn run_command(
+        &self,
+        cmd: &WorkloadCommand,
+        runtime: &dyn Runtime,
+        enqueue_on_fail: bool,
+    ) -> bool {
         match cmd.action.as_str() {
-            "deploy" => {
-                info!("Deploying workload: {}", cmd.spec.name);
-                match runtime.create(&cmd.spec).await {
-                    Ok(handle) => {
-                        if let Err(e) = runtime.start(&handle).await {
-                            warn!("Failed to start {}: {e}", cmd.spec.name);
-                            return;
+            "deploy" => match runtime.create(&cmd.spec).await {
+                Ok(handle) => {
+                    if let Err(e) = runtime.start(&handle).await {
+                        warn!("Failed to start {}: {e}", cmd.spec.name);
+                        if enqueue_on_fail {
+                            self.enqueue_failed_command(cmd.clone()).await;
                         }
-                        self.update_workload_status(
-                            &handle.runtime_id,
-                            &cmd.spec.name,
-                            WorkloadStatus::Running,
-                        )
-                        .await;
-                        info!("Workload {} deployed successfully", cmd.spec.name);
+                        return false;
                     }
-                    Err(e) => {
-                        warn!("Failed to create {}: {e}", cmd.spec.name);
-                    }
+                    self.update_workload_status(
+                        &handle.runtime_id,
+                        &cmd.spec.name,
+                        WorkloadStatus::Running,
+                    )
+                    .await;
+                    info!("Workload {} deployed successfully", cmd.spec.name);
+                    true
                 }
-            }
+                Err(e) => {
+                    warn!("Failed to create {}: {e}", cmd.spec.name);
+                    if enqueue_on_fail {
+                        self.enqueue_failed_command(cmd.clone()).await;
+                    }
+                    false
+                }
+            },
             "stop" => {
                 info!("Stop command for {} (not yet implemented)", cmd.spec.name);
+                true
             }
             other => {
                 warn!("Unknown command action: {other}");
+                true
             }
         }
     }
 
-    /// Update local workload status tracking.
+    /// Add a failed command to the retry queue with attempt count 1.
+    async fn enqueue_failed_command(&self, cmd: WorkloadCommand) {
+        let mut failed = self.failed_commands.write().await;
+        failed.push((cmd, 1));
+    }
+
+    /// Retry previously failed commands, dropping any that exceed max retries.
+    async fn retry_failed_commands(&self, runtime: &dyn Runtime) {
+        let commands: Vec<(WorkloadCommand, u32)> =
+            std::mem::take(&mut *self.failed_commands.write().await);
+        for (cmd, attempts) in commands {
+            info!(
+                "Retrying {} for {} (attempt {}/{})",
+                cmd.action, cmd.spec.name, attempts, MAX_COMMAND_RETRIES
+            );
+            if !self.run_command(&cmd, runtime, false).await {
+                let next = attempts + 1;
+                if next > MAX_COMMAND_RETRIES {
+                    warn!(
+                        "{} for {} exceeded max retries, dropping",
+                        cmd.action, cmd.spec.name
+                    );
+                    self.update_workload_status(
+                        &cmd.spec.name,
+                        &cmd.spec.name,
+                        WorkloadStatus::Failed,
+                    )
+                    .await;
+                } else {
+                    self.failed_commands.write().await.push((cmd, next));
+                }
+            }
+        }
+    }
+
     pub async fn update_workload_status(&self, id: &str, service: &str, status: WorkloadStatus) {
         let mut workloads = self.workloads.write().await;
         workloads.insert(
@@ -229,35 +270,6 @@ impl AgentClient {
         );
     }
 }
-
 #[cfg(test)]
-mod tests {
-    use std::time::Duration;
-
-    /// Verify the exponential backoff logic: starts at 5s, doubles, capped at 60s.
-    #[test]
-    fn test_backoff_doubles() {
-        let min_backoff = Duration::from_secs(5);
-        let max_backoff = Duration::from_secs(60);
-
-        // Simulate the backoff calculation from run_heartbeat_loop
-        let mut interval = min_backoff;
-        assert_eq!(interval, Duration::from_secs(5));
-
-        interval = (interval * 2).max(min_backoff).min(max_backoff);
-        assert_eq!(interval, Duration::from_secs(10));
-
-        interval = (interval * 2).max(min_backoff).min(max_backoff);
-        assert_eq!(interval, Duration::from_secs(20));
-
-        interval = (interval * 2).max(min_backoff).min(max_backoff);
-        assert_eq!(interval, Duration::from_secs(40));
-
-        interval = (interval * 2).max(min_backoff).min(max_backoff);
-        assert_eq!(interval, Duration::from_secs(60), "should be capped at 60s");
-
-        // Further doublings should stay at 60s
-        interval = (interval * 2).max(min_backoff).min(max_backoff);
-        assert_eq!(interval, Duration::from_secs(60), "should remain at cap");
-    }
-}
+#[path = "client_tests.rs"]
+mod tests;

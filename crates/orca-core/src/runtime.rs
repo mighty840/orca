@@ -10,6 +10,11 @@ use tokio::io::AsyncRead;
 use crate::error::Result;
 use crate::types::{ResourceStats, WorkloadSpec, WorkloadStatus};
 
+/// Helper trait for downcasting trait objects to concrete types.
+pub trait AsAny: Send + Sync {
+    fn as_any(&self) -> &dyn std::any::Any;
+}
+
 /// Opaque handle returned by a runtime after creating a workload.
 #[derive(Debug, Clone)]
 pub struct WorkloadHandle {
@@ -50,7 +55,7 @@ pub type LogStream = Pin<Box<dyn AsyncRead + Send>>;
 
 /// The core runtime abstraction. Both container and Wasm runtimes implement this.
 #[async_trait]
-pub trait Runtime: Send + Sync + 'static {
+pub trait Runtime: AsAny + Send + Sync + 'static {
     /// Human-readable name of this runtime (e.g., "container", "wasm").
     fn name(&self) -> &str;
 

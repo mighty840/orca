@@ -173,6 +173,12 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
         (None, None)
     };
 
+    // Spawn ACME cert renewal background task (checks every 24h)
+    if let (Some(acme), Some(resolver)) = (&acme_for_control, &resolver_for_control) {
+        orca_proxy::acme::renewal::spawn_renewal_task(acme.clone(), resolver.clone());
+        info!("ACME certificate renewal task spawned");
+    }
+
     // Run API server (blocks until shutdown)
     let cleanup_runtime = container_runtime.clone();
     orca_control::run_server_with_acme(

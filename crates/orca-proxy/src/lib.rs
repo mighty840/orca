@@ -10,6 +10,7 @@ mod handler;
 pub mod rate_limit;
 mod routing;
 pub mod tls;
+mod websocket;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -68,9 +69,6 @@ pub type WasmInvokeFuture =
 pub type SharedWasmTriggers = Arc<RwLock<Vec<WasmTrigger>>>;
 
 /// Run the reverse proxy on the given port.
-///
-/// Routes by Host header to container backends, and by path pattern to Wasm
-/// components.
 pub async fn run_proxy(
     route_table: Arc<RwLock<HashMap<String, Vec<RouteTarget>>>>,
     wasm_triggers: SharedWasmTriggers,

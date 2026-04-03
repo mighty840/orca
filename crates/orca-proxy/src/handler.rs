@@ -173,6 +173,14 @@ pub(crate) async fn handle_request(
     let base_idx = counter.fetch_add(1, Ordering::Relaxed);
     drop(routes);
 
+    // WebSocket upgrade: tunnel via raw TCP instead of HTTP proxying
+    if crate::websocket::is_websocket_upgrade(&req) {
+        let idx = crate::forward::weighted_index(&matched, base_idx);
+        let target = &matched[idx];
+        debug!("WebSocket upgrade: {host}{path} -> {}", target.address);
+        return Ok(crate::websocket::handle_websocket_proxy(req, &target.address).await);
+    }
+
     // Read body once for forwarding (and potential retry)
     let method_reqwest: reqwest::Method = req.method().clone();
     let headers = req.headers().clone();

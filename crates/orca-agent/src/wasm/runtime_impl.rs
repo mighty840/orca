@@ -10,11 +10,17 @@ use tokio::io::AsyncRead;
 use tracing::info;
 
 use orca_core::error::{OrcaError, Result};
-use orca_core::runtime::{ExecResult, LogOpts, LogStream, Runtime, WorkloadHandle};
+use orca_core::runtime::{AsAny, ExecResult, LogOpts, LogStream, Runtime, WorkloadHandle};
 use orca_core::types::{ResourceStats, WorkloadSpec, WorkloadStatus};
 
 use super::runtime::WasmRuntime;
 use super::state::WasmInstance;
+
+impl AsAny for WasmRuntime {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
 
 #[async_trait]
 impl Runtime for WasmRuntime {

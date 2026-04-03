@@ -10,7 +10,7 @@ use chrono::Utc;
 use tokio::sync::Mutex;
 
 use crate::error::{OrcaError, Result};
-use crate::runtime::{ExecResult, LogOpts, LogStream, Runtime, WorkloadHandle};
+use crate::runtime::{AsAny, ExecResult, LogOpts, LogStream, Runtime, WorkloadHandle};
 use crate::types::{ResourceStats, WorkloadSpec, WorkloadStatus};
 
 /// Records of operations performed on the mock runtime.
@@ -69,6 +69,12 @@ impl MockRuntime {
 impl Default for MockRuntime {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl AsAny for MockRuntime {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
     }
 }
 

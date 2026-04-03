@@ -180,6 +180,59 @@ impl ContainerRuntime {
         Ok(())
     }
 
+    /// Find existing orca-managed containers matching a name prefix.
+    ///
+    /// Returns `WorkloadHandle`s for running containers whose name starts with
+    /// `orca-{name_prefix}`. Used during restart recovery to avoid duplicates.
+    pub async fn find_existing(
+        &self,
+        name_prefix: &str,
+    ) -> Result<Vec<orca_core::runtime::WorkloadHandle>> {
+        let filter_name = format!("orca-{name_prefix}");
+        let mut filters = HashMap::new();
+        filters.insert("name", vec![filter_name.as_str()]);
+        filters.insert("status", vec!["running"]);
+        let opts = ListContainersOptions {
+            all: false,
+            filters,
+            ..Default::default()
+        };
+        let containers = self
+            .docker
+            .list_containers(Some(opts))
+            .await
+            .map_err(|e| OrcaError::Runtime(format!("list containers failed: {e}")))?;
+
+        let mut handles = Vec::new();
+        for c in containers {
+            let id = match &c.id {
+                Some(id) => id.clone(),
+                None => continue,
+            };
+            let name = c
+                .names
+                .as_ref()
+                .and_then(|n| n.first())
+                .map(|n| n.trim_start_matches('/').to_string())
+                .unwrap_or_default();
+
+            // Extract host port mappings into metadata
+            let mut metadata = HashMap::new();
+            if let Some(ports) = &c.ports
+                && let Some(p) = ports.iter().find(|p| p.public_port.is_some())
+            {
+                metadata.insert("host_port".to_string(), p.public_port.unwrap().to_string());
+            }
+
+            handles.push(orca_core::runtime::WorkloadHandle {
+                runtime_id: id,
+                name,
+                metadata,
+            });
+        }
+        Ok(handles)
+    }
+
     /// Stop and remove all orca-managed containers. Used for graceful shutdown.
     pub async fn cleanup_all(&self) {
         match self.list_managed_containers().await {

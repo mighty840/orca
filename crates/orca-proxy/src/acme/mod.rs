@@ -5,6 +5,7 @@
 
 pub(crate) mod certs;
 mod provider;
+pub mod renewal;
 mod resolver;
 
 pub use provider::AcmeProvider;

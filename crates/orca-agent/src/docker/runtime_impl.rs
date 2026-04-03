@@ -13,10 +13,16 @@ use tokio_util::io::StreamReader;
 use tracing::info;
 
 use orca_core::error::{OrcaError, Result};
-use orca_core::runtime::{ExecResult, LogOpts, LogStream, Runtime, WorkloadHandle};
+use orca_core::runtime::{AsAny, ExecResult, LogOpts, LogStream, Runtime, WorkloadHandle};
 use orca_core::types::{ResourceStats, WorkloadSpec, WorkloadStatus};
 
 use super::ContainerRuntime;
+
+impl AsAny for ContainerRuntime {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+}
 
 #[async_trait]
 impl Runtime for ContainerRuntime {
