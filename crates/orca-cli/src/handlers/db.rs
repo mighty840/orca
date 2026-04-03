@@ -95,6 +95,7 @@ async fn handle_create(
         tls_cert: None,
         tls_key: None,
         internal: false,
+        depends_on: vec![],
     };
 
     // Store password as a secret

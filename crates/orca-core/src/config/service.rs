@@ -136,4 +136,7 @@ pub struct ServiceConfig {
     /// Join the shared `orca-internal` network for cross-service communication.
     #[serde(default)]
     pub internal: bool,
+    /// Services that must be running before this service starts.
+    #[serde(default)]
+    pub depends_on: Vec<String>,
 }

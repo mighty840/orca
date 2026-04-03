@@ -133,6 +133,7 @@ mod tests {
                 tls_cert: None,
                 tls_key: None,
                 internal: false,
+                depends_on: vec![],
             }],
         };
         let json = serde_json::to_string(&req).unwrap();

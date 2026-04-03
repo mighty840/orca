@@ -118,6 +118,7 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             internal: false,
+            depends_on: vec![],
         }
     }
 

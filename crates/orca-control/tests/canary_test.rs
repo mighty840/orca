@@ -68,6 +68,7 @@ fn canary_config(name: &str, image: &str) -> ServiceConfig {
         tls_cert: None,
         tls_key: None,
         internal: false,
+        depends_on: vec![],
     }
 }
 

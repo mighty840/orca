@@ -35,7 +35,8 @@ pub async fn reconcile(state: &AppState, services: &[ServiceConfig]) -> (Vec<Str
     let mut deployed = Vec::new();
     let mut errors = Vec::new();
 
-    for svc_config in services {
+    let ordered = crate::topo_sort::topo_sort(services);
+    for svc_config in &ordered {
         match reconcile_service(state, svc_config).await {
             Ok(()) => {
                 // Record successful deploy in history

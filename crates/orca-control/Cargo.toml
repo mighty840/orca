@@ -10,7 +10,7 @@ include = ["src/**/*", "build.rs", "proto/**/*", "Cargo.toml"]
 
 [dependencies]
 orca-core = { workspace = true }
-orca-agent = { path = "../orca-agent", version = "0.1.0-rc.5" }
+orca-agent = { path = "../orca-agent", version = "0.2.0-rc.1" }
 orca-proxy = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
@@ -33,6 +33,7 @@ reqwest = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
+cron = "0.15"
 hostname = "0.4"
 dirs-next = "2"
 rustls = "0.23"
@@ -45,6 +46,7 @@ tonic-build = "0.13"
 http-body-util = "0.1"
 tower = { workspace = true, features = ["util"] }
 bollard = { workspace = true }
+futures-util = "0.3"
 
 [dev-dependencies.tempfile]
 version = "3"

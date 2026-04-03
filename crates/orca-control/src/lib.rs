@@ -1,5 +1,6 @@
 pub mod api;
 pub mod auth;
+pub mod backup_scheduler;
 pub(crate) mod canary;
 pub mod cluster_api;
 pub(crate) mod cluster_handlers;
@@ -17,6 +18,7 @@ pub mod scheduler;
 pub mod state;
 pub mod stats;
 pub mod store;
+pub mod topo_sort;
 pub mod watchdog;
 pub mod webhook;
 

@@ -110,6 +110,7 @@ fn convert_service(name: &str, svc: &ComposeService, network: &str) -> ServiceCo
         tls_cert: None,
         tls_key: None,
         internal: false,
+        depends_on: vec![],
     }
 }
 
@@ -253,6 +254,7 @@ services:
                 tls_cert: None,
                 tls_key: None,
                 internal: false,
+                depends_on: vec![],
             }],
         };
         let toml_str = services_to_toml(&config).unwrap();

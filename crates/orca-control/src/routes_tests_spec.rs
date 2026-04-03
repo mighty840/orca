@@ -33,6 +33,7 @@ fn minimal_config(image: Option<String>, module: Option<String>) -> ServiceConfi
         tls_cert: None,
         tls_key: None,
         internal: false,
+        depends_on: vec![],
     }
 }
 
