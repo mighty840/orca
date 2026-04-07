@@ -136,15 +136,27 @@ pub(crate) async fn reconcile_service(
         );
         // Refresh status AND host_port of existing instances — containers
         // may have been restarted externally, changing their host port.
+        // If status check errors (container missing), mark Stopped.
         for instance in &mut svc_state.instances {
-            if let Ok(status) = runtime.status(&instance.handle).await {
-                instance.status = status;
+            match runtime.status(&instance.handle).await {
+                Ok(status) => instance.status = status,
+                Err(_) => instance.status = WorkloadStatus::Stopped,
             }
             if let Some(p) = config.port
                 && let Ok(Some(port)) = runtime.resolve_host_port(&instance.handle, p).await
             {
                 instance.host_port = Some(port);
             }
+        }
+        // Prune any that are now dead
+        svc_state
+            .instances
+            .retain(|i| i.status == WorkloadStatus::Running);
+        // If all instances got pruned, fall through to re-create
+        if svc_state.instances.is_empty() {
+            drop(services);
+            // Re-acquire and proceed to scale up
+            return Box::pin(reconcile_service(state, config)).await;
         }
         drop(services);
         match config.runtime {
