@@ -173,23 +173,44 @@ async fn populate_state_from_existing(
     } else {
         orca_core::types::HealthState::NoCheck
     };
-    let instances: Vec<InstanceState> = handles
-        .into_iter()
-        .map(|handle| {
-            let host_port = handle
-                .metadata
-                .get("host_port")
-                .and_then(|p| p.parse::<u16>().ok());
-            InstanceState {
-                handle,
-                status: WorkloadStatus::Running,
-                host_port,
-                container_address: None,
-                health: initial_health,
-                is_canary: false,
-            }
-        })
-        .collect();
+
+    // Resolve host_port via the runtime (more reliable than metadata extraction)
+    let runtime = state.container_runtime.as_ref();
+    let mut instances: Vec<InstanceState> = Vec::new();
+    for handle in handles {
+        // Try metadata first, fall back to runtime resolution
+        let mut host_port = handle
+            .metadata
+            .get("host_port")
+            .and_then(|p| p.parse::<u16>().ok());
+        if host_port.is_none()
+            && let Some(p) = config.port
+            && let Ok(Some(port)) = runtime.resolve_host_port(&handle, p).await
+        {
+            host_port = Some(port);
+        }
+        // If still none and we have a config port, try once more with the
+        // resolved address (some containers map differently).
+        if host_port.is_none()
+            && let Some(p) = config.port
+        {
+            host_port = runtime.resolve_host_port(&handle, p).await.ok().flatten();
+        }
+        info!(
+            service = %config.name,
+            runtime_id = %&handle.runtime_id[..12],
+            ?host_port,
+            "Restored container instance"
+        );
+        instances.push(InstanceState {
+            handle,
+            status: WorkloadStatus::Running,
+            host_port,
+            container_address: None,
+            health: initial_health,
+            is_canary: false,
+        });
+    }
 
     let desired = match &config.replicas {
         orca_core::types::Replicas::Fixed(n) => *n,
