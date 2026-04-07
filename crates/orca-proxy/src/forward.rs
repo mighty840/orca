@@ -81,7 +81,8 @@ pub(crate) async fn forward_with_retry(
                 let resp_body = resp.bytes().await.unwrap_or_default();
                 let mut response = Response::new(http_body_util::Full::new(resp_body));
                 *response.status_mut() = status;
-                // Forward backend headers (skip hop-by-hop)
+                // Forward backend headers (skip hop-by-hop only).
+                // content-length is preserved — clients need it.
                 for (k, v) in backend_headers.iter() {
                     let name = k.as_str().to_lowercase();
                     if !matches!(
@@ -94,7 +95,6 @@ pub(crate) async fn forward_with_retry(
                             | "trailers"
                             | "transfer-encoding"
                             | "upgrade"
-                            | "content-length"
                     ) {
                         response.headers_mut().insert(k.clone(), v.clone());
                     }
