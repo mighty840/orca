@@ -48,6 +48,7 @@ pub(crate) async fn forward_with_retry(
     path_and_query: &str,
     host: &str,
     is_tls: bool,
+    client_ip: String,
 ) -> Response<http_body_util::Full<hyper::body::Bytes>> {
     let max_attempts = if matched.len() > 1 { 2 } else { 1 };
 
@@ -90,8 +91,7 @@ pub(crate) async fn forward_with_retry(
             forward_req = forward_req.header("X-Forwarded-Host", host);
         }
         if !saw_xff {
-            // No prior XFF — set to a placeholder so upstream sees *something*
-            forward_req = forward_req.header("X-Forwarded-For", "orca-proxy");
+            forward_req = forward_req.header("X-Forwarded-For", &client_ip);
         }
         forward_req = forward_req.body(body.clone());
 

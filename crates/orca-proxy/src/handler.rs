@@ -213,6 +213,7 @@ pub(crate) async fn handle_request(
         &pq,
         &host,
         is_tls,
+        peer.ip().to_string(),
     )
     .await;
 
