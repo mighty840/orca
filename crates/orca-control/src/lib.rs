@@ -209,6 +209,7 @@ async fn populate_state_from_existing(
             container_address: None,
             health: initial_health,
             is_canary: false,
+            started_at: std::time::Instant::now(),
         });
     }
 

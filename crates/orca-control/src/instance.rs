@@ -67,6 +67,7 @@ pub(crate) async fn create_and_start_instance(
         container_address,
         health: initial_health,
         is_canary: false,
+        started_at: std::time::Instant::now(),
     })
 }
 

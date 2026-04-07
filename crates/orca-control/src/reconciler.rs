@@ -134,10 +134,16 @@ pub(crate) async fn reconcile_service(
             "Service {} already at desired state ({} replicas, same image) — skipping",
             config.name, desired
         );
-        // Still refresh status of existing instances
+        // Refresh status AND host_port of existing instances — containers
+        // may have been restarted externally, changing their host port.
         for instance in &mut svc_state.instances {
             if let Ok(status) = runtime.status(&instance.handle).await {
                 instance.status = status;
+            }
+            if let Some(p) = config.port
+                && let Ok(Some(port)) = runtime.resolve_host_port(&instance.handle, p).await
+            {
+                instance.host_port = Some(port);
             }
         }
         drop(services);

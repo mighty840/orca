@@ -85,6 +85,7 @@ async fn e2e_restart_no_duplicate_containers() {
         container_address: None,
         health: orca_core::types::HealthState::Unknown,
         is_canary: false,
+        started_at: std::time::Instant::now(),
     };
     {
         let mut services = state2.services.write().await;

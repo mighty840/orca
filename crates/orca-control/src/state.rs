@@ -94,6 +94,8 @@ pub struct InstanceState {
     pub health: HealthState,
     /// Whether this instance is a canary (new version during canary deploy).
     pub is_canary: bool,
+    /// When this instance was created (for initial_delay_secs).
+    pub started_at: std::time::Instant,
 }
 
 impl AppState {
@@ -221,6 +223,7 @@ mod tests {
             container_address: None,
             health: HealthState::Unknown,
             is_canary: false,
+            started_at: std::time::Instant::now(),
         }
     }
 

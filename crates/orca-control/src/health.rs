@@ -72,11 +72,18 @@ impl HealthChecker {
                         let path = svc.config.health.as_deref()?;
                         (path.to_string(), None)
                     };
+                    // Respect initial_delay_secs — skip checks until the
+                    // container has been running long enough to become ready.
+                    let initial_delay = probe
+                        .as_ref()
+                        .map(|p| Duration::from_secs(p.initial_delay_secs))
+                        .unwrap_or(Duration::from_secs(5));
                     let targets: Vec<InstanceTarget> = svc
                         .instances
                         .iter()
                         .enumerate()
                         .filter(|(_, inst)| inst.status == WorkloadStatus::Running)
+                        .filter(|(_, inst)| inst.started_at.elapsed() >= initial_delay)
                         .filter_map(|(idx, inst)| {
                             let port = inst.host_port?;
                             Some(InstanceTarget {
@@ -252,6 +259,7 @@ impl HealthChecker {
                         inst.handle = new_handle;
                         inst.status = WorkloadStatus::Running;
                         inst.host_port = host_port;
+                        inst.started_at = std::time::Instant::now();
                         // Mark Healthy optimistically — next probe will correct.
                         inst.health = HealthState::Healthy;
                     }

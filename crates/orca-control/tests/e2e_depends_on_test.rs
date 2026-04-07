@@ -89,7 +89,6 @@ async fn e2e_depends_on_db_before_app() {
             internal: false,
             cmd: vec![],
             depends_on: vec!["e2e-dep-db".into()],
-        cmd: vec![],
         },
         orca_core::config::ServiceConfig {
             name: "e2e-dep-db".into(),
@@ -121,7 +120,6 @@ async fn e2e_depends_on_db_before_app() {
             internal: false,
             cmd: vec![],
             depends_on: vec![],
-            cmd: vec![],
         },
     ];
 

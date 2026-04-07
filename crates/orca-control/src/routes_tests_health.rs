@@ -16,6 +16,7 @@ fn make_instance(health: HealthState, port: Option<u16>) -> InstanceState {
         container_address: None,
         health,
         is_canary: false,
+        started_at: std::time::Instant::now(),
     }
 }
 
