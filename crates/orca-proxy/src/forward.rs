@@ -77,9 +77,28 @@ pub(crate) async fn forward_with_retry(
             }
             Ok(resp) => {
                 let status = resp.status();
+                let backend_headers = resp.headers().clone();
                 let resp_body = resp.bytes().await.unwrap_or_default();
                 let mut response = Response::new(http_body_util::Full::new(resp_body));
                 *response.status_mut() = status;
+                // Forward backend headers (skip hop-by-hop)
+                for (k, v) in backend_headers.iter() {
+                    let name = k.as_str().to_lowercase();
+                    if !matches!(
+                        name.as_str(),
+                        "connection"
+                            | "keep-alive"
+                            | "proxy-authenticate"
+                            | "proxy-authorization"
+                            | "te"
+                            | "trailers"
+                            | "transfer-encoding"
+                            | "upgrade"
+                            | "content-length"
+                    ) {
+                        response.headers_mut().insert(k.clone(), v.clone());
+                    }
+                }
                 return response;
             }
             Err(e) if attempt + 1 < max_attempts => {
