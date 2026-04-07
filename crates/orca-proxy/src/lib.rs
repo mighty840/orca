@@ -9,8 +9,11 @@ mod forward;
 mod handler;
 pub mod rate_limit;
 mod routing;
+pub mod sni;
 pub mod tls;
 mod websocket;
+
+pub use orca_core::config::FallbackConfig;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -97,6 +100,38 @@ pub async fn run_proxy(
     .await
 }
 
+/// Run the proxy with optional fallback support.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_proxy_with_fallback(
+    route_table: Arc<RwLock<HashMap<String, Vec<RouteTarget>>>>,
+    wasm_triggers: SharedWasmTriggers,
+    wasm_invoker: Option<WasmInvoker>,
+    port: u16,
+    tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+    acme_manager: Option<AcmeManager>,
+    fallback: Option<FallbackConfig>,
+) -> anyhow::Result<()> {
+    let addr = format!("0.0.0.0:{port}");
+    let listener = TcpListener::bind(&addr).await?;
+    let proto = if tls_acceptor.is_some() {
+        "HTTPS"
+    } else {
+        "HTTP"
+    };
+    info!("Reverse proxy listening on {addr} ({proto})");
+
+    serve_loop_with_fallback(
+        listener,
+        route_table,
+        wasm_triggers,
+        wasm_invoker,
+        tls_acceptor,
+        acme_manager,
+        fallback,
+    )
+    .await
+}
+
 /// Shared dynamic cert resolver for hot-provisioning.
 pub type SharedCertResolver = Arc<acme::DynCertResolver>;
 
@@ -112,12 +147,35 @@ pub async fn run_proxy_with_acme(
     acme_manager: AcmeManager,
     domains: Vec<String>,
 ) -> anyhow::Result<SharedCertResolver> {
+    run_proxy_with_acme_and_fallback(
+        route_table,
+        wasm_triggers,
+        wasm_invoker,
+        acme_manager,
+        domains,
+        None,
+    )
+    .await
+}
+
+/// Run HTTP+HTTPS with ACME and optional fallback to another reverse proxy.
+#[allow(clippy::too_many_arguments)]
+pub async fn run_proxy_with_acme_and_fallback(
+    route_table: Arc<RwLock<HashMap<String, Vec<RouteTarget>>>>,
+    wasm_triggers: SharedWasmTriggers,
+    wasm_invoker: Option<WasmInvoker>,
+    acme_manager: AcmeManager,
+    domains: Vec<String>,
+    fallback: Option<FallbackConfig>,
+) -> anyhow::Result<SharedCertResolver> {
     let resolver = Arc::new(acme::DynCertResolver::new());
 
     let acme_mgr = acme_manager.clone();
     let routes_clone = route_table.clone();
     let triggers_clone = wasm_triggers.clone();
     let invoker_clone = wasm_invoker.clone();
+    let fallback_http = fallback.clone();
+    let fallback_tls = fallback.clone();
 
     // Start HTTP on port 80 first (needed for ACME challenge validation)
     let http_handle = tokio::spawn({
@@ -126,7 +184,17 @@ pub async fn run_proxy_with_acme(
         let triggers = triggers_clone.clone();
         let invoker = invoker_clone.clone();
         async move {
-            if let Err(e) = run_proxy(routes, triggers, invoker, 80, None, Some(acme)).await {
+            if let Err(e) = run_proxy_with_fallback(
+                routes,
+                triggers,
+                invoker,
+                80,
+                None,
+                Some(acme),
+                fallback_http,
+            )
+            .await
+            {
                 error!("HTTP listener failed: {e}");
             }
         }
@@ -161,13 +229,14 @@ pub async fn run_proxy_with_acme(
         let routes = routes_clone;
         let triggers = triggers_clone;
         let invoker = invoker_clone;
-        if let Err(e) = run_proxy(
+        if let Err(e) = run_proxy_with_fallback(
             routes,
             triggers,
             invoker,
             443,
             Some(acceptor),
             Some(acme_mgr),
+            fallback_tls,
         )
         .await
         {
@@ -196,6 +265,29 @@ async fn serve_loop(
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
     acme_manager: Option<AcmeManager>,
 ) -> anyhow::Result<()> {
+    serve_loop_with_fallback(
+        listener,
+        route_table,
+        wasm_triggers,
+        wasm_invoker,
+        tls_acceptor,
+        acme_manager,
+        None,
+    )
+    .await
+}
+
+/// Serve loop variant with fallback support for SNI passthrough and HTTP forwarding.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn serve_loop_with_fallback(
+    listener: TcpListener,
+    route_table: Arc<RwLock<HashMap<String, Vec<RouteTarget>>>>,
+    wasm_triggers: SharedWasmTriggers,
+    wasm_invoker: Option<WasmInvoker>,
+    tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
+    acme_manager: Option<AcmeManager>,
+    fallback: Option<FallbackConfig>,
+) -> anyhow::Result<()> {
     let counter = Arc::new(AtomicUsize::new(0));
     let client = Arc::new(
         reqwest::Client::builder()
@@ -207,6 +299,7 @@ async fn serve_loop(
     let is_tls = tls_acceptor.is_some();
     let rate_limiter = RateLimiter::new();
 
+    let fallback = Arc::new(fallback);
     loop {
         let (stream, peer) = match listener.accept().await {
             Ok(conn) => conn,
@@ -224,6 +317,8 @@ async fn serve_loop(
         let acme = acme.clone();
         let tls = tls_acceptor.clone();
         let rl = rate_limiter.clone();
+        let fb = fallback.clone();
+        let routes_for_sni = routes.clone();
 
         tokio::spawn(async move {
             let service = service_fn(move |req: Request<Incoming>| {
@@ -253,6 +348,38 @@ async fn serve_loop(
                 }
             });
             if let Some(acceptor) = tls {
+                let mut stream = stream;
+                // Peek SNI to decide between local TLS termination and pass-through
+                let sni = sni::peek_sni(&mut stream).await;
+                let should_passthrough = if let Some(ref host) = sni {
+                    let routes_lock = routes_for_sni.read().await;
+                    let known = routes_lock.contains_key(host);
+                    drop(routes_lock);
+                    !known && fb.as_ref().as_ref().and_then(|f| f.tls.as_ref()).is_some()
+                } else {
+                    false
+                };
+
+                if should_passthrough {
+                    let target = fb
+                        .as_ref()
+                        .as_ref()
+                        .and_then(|f| f.tls.clone())
+                        .expect("checked above");
+                    debug!(?sni, %target, "SNI passthrough");
+                    match tokio::net::TcpStream::connect(&target).await {
+                        Ok(mut backend) => {
+                            if let Err(e) =
+                                tokio::io::copy_bidirectional(&mut stream, &mut backend).await
+                            {
+                                debug!("Passthrough copy error from {peer}: {e}");
+                            }
+                        }
+                        Err(e) => warn!("Failed to connect to TLS fallback {target}: {e}"),
+                    }
+                    return;
+                }
+
                 match acceptor.accept(stream).await {
                     Ok(tls_stream) => {
                         let io = TokioIo::new(tls_stream);

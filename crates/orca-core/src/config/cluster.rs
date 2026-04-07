@@ -27,6 +27,19 @@ pub struct ClusterConfig {
     /// Mesh networking configuration (NetBird).
     #[serde(default)]
     pub network: Option<NetworkConfig>,
+    /// Fallback proxy for unmatched requests (e.g., point to coolify-proxy).
+    #[serde(default)]
+    pub fallback: Option<FallbackConfig>,
+}
+
+/// Fallback proxy configuration. When orca's route table has no match,
+/// requests are forwarded here. Lets orca coexist with another reverse proxy.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct FallbackConfig {
+    /// HTTP fallback target (e.g., "127.0.0.1:8081").
+    pub http: Option<String>,
+    /// HTTPS/TLS fallback target for SNI passthrough (e.g., "127.0.0.1:8443").
+    pub tls: Option<String>,
 }
 
 /// Mesh networking configuration.

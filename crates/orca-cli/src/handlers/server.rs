@@ -106,12 +106,14 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
             .join(".orca/certs");
         let acme = orca_proxy::acme::AcmeManager::new(email, cache);
         let acme_clone = acme.clone();
-        match orca_proxy::run_proxy_with_acme(
+        let fallback = cluster_config.fallback.clone();
+        match orca_proxy::run_proxy_with_acme_and_fallback(
             proxy_routes,
             proxy_triggers,
             wasm_invoker,
             acme.clone(),
             domains,
+            fallback,
         )
         .await
         {
