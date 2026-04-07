@@ -6,7 +6,7 @@ use tracing::{error, info};
 
 use orca_core::config::ServiceConfig;
 use orca_core::runtime::Runtime;
-use orca_core::types::{DeployKind, Replicas, RuntimeKind, WorkloadSpec};
+use orca_core::types::{DeployKind, Replicas, RuntimeKind, WorkloadSpec, WorkloadStatus};
 
 use crate::instance::create_and_start_instance;
 use crate::routes::{service_config_to_spec, update_container_routes, update_wasm_triggers};
@@ -112,12 +112,22 @@ pub(crate) async fn reconcile_service(
     // with the same image — prevents duplicate containers on re-deploy.
     let same_image = svc_state.config.image == config.image
         && svc_state.config.module == config.module
-        && svc_state.config.env == config.env;
+        && svc_state.config.env == config.env
+        && svc_state.config.cmd == config.cmd;
 
     svc_state.config = config.clone();
     svc_state.desired_replicas = desired;
 
-    let current = svc_state.instances.len() as u32;
+    // Count only Running instances — Failed/Stopped should trigger replacement.
+    let current = svc_state
+        .instances
+        .iter()
+        .filter(|i| i.status == WorkloadStatus::Running)
+        .count() as u32;
+    // Prune dead instances so they don't block replacement.
+    svc_state
+        .instances
+        .retain(|i| i.status == WorkloadStatus::Running);
 
     if current == desired && same_image {
         info!(
