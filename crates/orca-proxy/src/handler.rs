@@ -212,6 +212,7 @@ pub(crate) async fn handle_request(
         &body_bytes,
         &pq,
         &host,
+        is_tls,
     )
     .await;
 

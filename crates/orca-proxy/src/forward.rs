@@ -47,6 +47,7 @@ pub(crate) async fn forward_with_retry(
     body: &hyper::body::Bytes,
     path_and_query: &str,
     host: &str,
+    is_tls: bool,
 ) -> Response<http_body_util::Full<hyper::body::Bytes>> {
     let max_attempts = if matched.len() > 1 { 2 } else { 1 };
 
@@ -63,10 +64,34 @@ pub(crate) async fn forward_with_retry(
         debug!("Proxying {host}{path_and_query} -> {uri} (attempt {attempt})");
 
         let mut forward_req = client.request(method.clone(), &uri);
+        let mut saw_xff = false;
+        let mut saw_proto = false;
+        let mut saw_fhost = false;
         for (key, value) in headers {
-            if key != "host" {
-                forward_req = forward_req.header(key, value);
+            let name = key.as_str().to_lowercase();
+            if name == "host" {
+                continue;
             }
+            if name == "x-forwarded-for" {
+                saw_xff = true;
+            } else if name == "x-forwarded-proto" {
+                saw_proto = true;
+            } else if name == "x-forwarded-host" {
+                saw_fhost = true;
+            }
+            forward_req = forward_req.header(key, value);
+        }
+        // Inject X-Forwarded-* for upstream apps behind TLS termination
+        let scheme = if is_tls { "https" } else { "http" };
+        if !saw_proto {
+            forward_req = forward_req.header("X-Forwarded-Proto", scheme);
+        }
+        if !saw_fhost {
+            forward_req = forward_req.header("X-Forwarded-Host", host);
+        }
+        if !saw_xff {
+            // No prior XFF — set to a placeholder so upstream sees *something*
+            forward_req = forward_req.header("X-Forwarded-For", "orca-proxy");
         }
         forward_req = forward_req.body(body.clone());
 
