@@ -216,6 +216,12 @@ impl ContainerRuntime {
                 .map(|n| n.trim_start_matches('/').to_string())
                 .unwrap_or_default();
 
+            // Docker's name filter is substring-match — enforce exact match
+            // here so "keycloak" doesn't pick up "keycloak-db".
+            if name != filter_name {
+                continue;
+            }
+
             // Extract host port mappings into metadata
             let mut metadata = HashMap::new();
             if let Some(ports) = &c.ports
