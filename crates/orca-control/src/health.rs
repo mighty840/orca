@@ -13,7 +13,7 @@ use orca_core::config::ProbeConfig;
 use orca_core::runtime::Runtime;
 use orca_core::types::{HealthState, RuntimeKind, WorkloadStatus};
 
-use crate::routes::service_config_to_spec;
+use crate::routes::{service_config_to_spec, update_container_routes};
 use crate::state::AppState;
 
 const DEFAULT_FAILURES: u32 = 3;
@@ -117,7 +117,8 @@ impl HealthChecker {
                 let count = failure_counts.entry(inst.runtime_id.clone()).or_insert(0);
 
                 if healthy {
-                    if *count > 0 {
+                    let was_unhealthy = *count > 0;
+                    if was_unhealthy {
                         info!(
                             runtime_id = %inst.runtime_id,
                             service = %target.service_name,
@@ -127,6 +128,8 @@ impl HealthChecker {
                     *count = 0;
                     self.set_health(&target.service_name, inst.index, HealthState::Healthy)
                         .await;
+                    // Refresh routes when an instance becomes healthy.
+                    self.refresh_routes(&target.service_name).await;
                 } else {
                     *count += 1;
                     warn!(
@@ -137,6 +140,8 @@ impl HealthChecker {
                     );
                     self.set_health(&target.service_name, inst.index, HealthState::Unhealthy)
                         .await;
+                    // Refresh routes so unhealthy backend is removed from rotation.
+                    self.refresh_routes(&target.service_name).await;
 
                     if *count >= threshold {
                         info!(
@@ -239,20 +244,38 @@ impl HealthChecker {
                     None
                 };
 
-                let mut services = self.state.services.write().await;
-                if let Some(svc) = services.get_mut(service_name)
-                    && let Some(inst) = svc.instances.get_mut(index)
                 {
-                    inst.handle = new_handle;
-                    inst.status = WorkloadStatus::Running;
-                    inst.host_port = host_port;
-                    inst.health = HealthState::Unknown;
+                    let mut services = self.state.services.write().await;
+                    if let Some(svc) = services.get_mut(service_name)
+                        && let Some(inst) = svc.instances.get_mut(index)
+                    {
+                        inst.handle = new_handle;
+                        inst.status = WorkloadStatus::Running;
+                        inst.host_port = host_port;
+                        // Mark Healthy optimistically — next probe will correct.
+                        inst.health = HealthState::Healthy;
+                    }
                 }
+                // Refresh routes with the new host_port.
+                self.refresh_routes(service_name).await;
                 info!(service = %service_name, "Instance restarted successfully");
             }
             Err(e) => {
                 error!(service = %service_name, "Failed to create replacement instance: {e}");
             }
+        }
+    }
+
+    /// Recompute and update routes for a service after health/instance change.
+    async fn refresh_routes(&self, service_name: &str) {
+        let config = {
+            let services = self.state.services.read().await;
+            services.get(service_name).map(|s| s.config.clone())
+        };
+        if let Some(cfg) = config
+            && cfg.runtime == RuntimeKind::Container
+        {
+            update_container_routes(&self.state, &cfg).await;
         }
     }
 }

@@ -166,6 +166,13 @@ async fn populate_state_from_existing(
     config: &orca_core::config::ServiceConfig,
     handles: Vec<orca_core::runtime::WorkloadHandle>,
 ) {
+    // Re-attached containers are already running — mark Healthy so the
+    // route filter accepts them. Health checker will correct on next probe.
+    let initial_health = if config.health.is_some() || config.liveness.is_some() {
+        orca_core::types::HealthState::Healthy
+    } else {
+        orca_core::types::HealthState::NoCheck
+    };
     let instances: Vec<InstanceState> = handles
         .into_iter()
         .map(|handle| {
@@ -178,7 +185,7 @@ async fn populate_state_from_existing(
                 status: WorkloadStatus::Running,
                 host_port,
                 container_address: None,
-                health: orca_core::types::HealthState::Unknown,
+                health: initial_health,
                 is_canary: false,
             }
         })
