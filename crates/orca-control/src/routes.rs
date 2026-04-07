@@ -184,6 +184,7 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
         tls_cert: config.tls_cert.clone(),
         tls_key: config.tls_key.clone(),
         internal: config.internal,
+        cmd: config.cmd.clone(),
     })
 }
 

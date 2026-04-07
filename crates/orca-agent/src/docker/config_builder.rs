@@ -43,6 +43,11 @@ pub(crate) fn build_container_config(spec: &WorkloadSpec) -> Config<String> {
         } else {
             Some(exposed_ports)
         },
+        cmd: if spec.cmd.is_empty() {
+            None
+        } else {
+            Some(spec.cmd.clone())
+        },
         host_config: Some(host_config),
         labels: Some(labels),
         ..Default::default()

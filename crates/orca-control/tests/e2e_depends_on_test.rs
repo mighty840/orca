@@ -118,6 +118,7 @@ async fn e2e_depends_on_db_before_app() {
             tls_key: None,
             internal: false,
             depends_on: vec![],
+            cmd: vec![],
         },
     ];
 

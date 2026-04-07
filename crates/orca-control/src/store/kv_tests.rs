@@ -57,6 +57,7 @@ fn set_and_get_service() {
         tls_key: None,
         internal: false,
         depends_on: vec![],
+        cmd: vec![],
     };
     store
         .apply(&RaftEntry::SetService(Box::new(config)))
@@ -140,6 +141,7 @@ fn snapshot_captures_all_state() {
             tls_key: None,
             internal: false,
             depends_on: vec![],
+            cmd: vec![],
         })))
         .unwrap();
 

@@ -40,6 +40,7 @@ fn nginx_config() -> orca_core::config::ServiceConfig {
         tls_key: None,
         internal: false,
         depends_on: vec![],
+        cmd: vec![],
     }
 }
 

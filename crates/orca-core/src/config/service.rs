@@ -139,4 +139,7 @@ pub struct ServiceConfig {
     /// Services that must be running before this service starts.
     #[serde(default)]
     pub depends_on: Vec<String>,
+    /// Command to run in the container (overrides image CMD).
+    #[serde(default)]
+    pub cmd: Vec<String>,
 }

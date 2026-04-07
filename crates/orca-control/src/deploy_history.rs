@@ -119,6 +119,7 @@ mod tests {
             tls_key: None,
             internal: false,
             depends_on: vec![],
+            cmd: vec![],
         }
     }
 

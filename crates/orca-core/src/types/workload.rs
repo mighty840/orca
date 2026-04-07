@@ -44,6 +44,9 @@ pub struct WorkloadSpec {
     pub tls_key: Option<String>,
     /// Join shared orca-internal network.
     pub internal: bool,
+    /// Command to run in container (overrides image CMD).
+    #[serde(default)]
+    pub cmd: Vec<String>,
 }
 
 /// Replica count: either a fixed number or "auto" for auto-scaling.
