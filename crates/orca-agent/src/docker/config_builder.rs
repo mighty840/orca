@@ -13,11 +13,17 @@ pub(crate) fn build_container_config(spec: &WorkloadSpec) -> Config<String> {
     let env: Vec<String> = spec.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
 
     let (mut port_bindings, mut exposed_ports) = build_port_config(spec.port, spec.host_port);
+    // `extra_ports` accepts both `host:container` (defaults to tcp) and
+    // `host:container/proto`, e.g. `10000:10000/udp` for Jitsi JVB media.
     for entry in &spec.extra_ports {
-        let Some((host, container)) = entry.split_once(':') else {
+        let Some((host, rest)) = entry.split_once(':') else {
             continue;
         };
-        let key = format!("{container}/tcp");
+        let (container, proto) = match rest.rsplit_once('/') {
+            Some((c, p)) => (c, p),
+            None => (rest, "tcp"),
+        };
+        let key = format!("{container}/{proto}");
         exposed_ports.insert(key.clone(), HashMap::new());
         port_bindings.insert(
             key,
