@@ -15,6 +15,8 @@ use tracing::{debug, info, warn};
 use orca_core::runtime::Runtime;
 use orca_core::types::{WorkloadSpec, WorkloadStatus};
 
+use crate::host_stats::{HostStats, HostStatsCollector};
+
 /// Maximum number of retry attempts for failed commands.
 const MAX_COMMAND_RETRIES: u32 = 3;
 
@@ -35,6 +37,9 @@ pub struct AgentClient {
     local_address: RwLock<String>,
     /// Labels sent to the leader on register, kept for the same reason.
     labels: RwLock<HashMap<String, String>>,
+    /// Long-lived host stats sampler. Lives on the struct (not per-call) so
+    /// CPU % readings are deltas rather than always-zero first samples.
+    host_stats: Arc<HostStatsCollector>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -47,6 +52,10 @@ struct WorkloadInfo {
 struct HeartbeatRequest {
     node_id: u64,
     workloads: Vec<WorkloadStatusReport>,
+    /// Host-level CPU/memory/disk/network sample. Serialized flat with
+    /// `#[serde(flatten)]` on the master side so the fields appear directly
+    /// on `RegisteredNode`.
+    stats: HostStats,
 }
 
 #[derive(Debug, Serialize)]
@@ -78,6 +87,7 @@ impl AgentClient {
             failed_commands: Arc::new(RwLock::new(Vec::new())),
             local_address: RwLock::new(String::new()),
             labels: RwLock::new(HashMap::new()),
+            host_stats: Arc::new(HostStatsCollector::new()),
         }
     }
 
@@ -169,6 +179,7 @@ impl AgentClient {
         let req = HeartbeatRequest {
             node_id: self.node_id,
             workloads: reports,
+            stats: self.host_stats.sample(),
         };
 
         let mut hb_req = self

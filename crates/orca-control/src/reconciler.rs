@@ -94,6 +94,40 @@ pub(crate) async fn reconcile_service(
     // Check if placement targets a specific remote node
     if let Some(target_node_id) = find_target_node(state, config).await {
         queue_remote_deploy(state, target_node_id, &spec).await;
+        // Record the service + a placeholder instance on the master so
+        // `orca status` shows remote-scheduled workloads alongside local
+        // ones. Heartbeats from the target node will update the status
+        // field; until the first update arrives we optimistically mark
+        // the instance Running so the TUI doesn't paint it red during
+        // the first few seconds after a deploy.
+        let mut services = state.services.write().await;
+        let svc_state = services
+            .entry(config.name.clone())
+            .or_insert_with(|| ServiceState::from_config(config.clone()));
+        svc_state.config = config.clone();
+        let desired = match &config.replicas {
+            Replicas::Fixed(n) => *n,
+            Replicas::Auto => 1,
+        };
+        svc_state.desired_replicas = desired;
+        // If the instance list doesn't already have a placeholder for this
+        // remote node, add one. Placeholder handles have no runtime_id
+        // because the master doesn't own the container.
+        if svc_state.instances.is_empty() {
+            svc_state.instances.push(crate::state::InstanceState {
+                handle: orca_core::runtime::WorkloadHandle {
+                    runtime_id: format!("remote-{target_node_id}"),
+                    name: format!("orca-{}", config.name),
+                    metadata: Default::default(),
+                },
+                status: WorkloadStatus::Running,
+                host_port: None,
+                container_address: None,
+                health: orca_core::types::HealthState::NoCheck,
+                started_at: std::time::Instant::now(),
+                is_canary: false,
+            });
+        }
         info!(
             "Queued deploy of {} to remote node {}",
             config.name, target_node_id

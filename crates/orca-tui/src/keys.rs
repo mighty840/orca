@@ -73,13 +73,48 @@ pub async fn handle_normal_key(
         KeyCode::Esc => handle_esc(state),
 
         // Navigation
-        KeyCode::Char('j') | KeyCode::Down => state.next_service(),
-        KeyCode::Char('k') | KeyCode::Up => state.prev_service(),
-        KeyCode::Char('g') => state.selected_service = 0,
-        KeyCode::Char('G') => {
-            let len = state.filtered_services().len();
-            if len > 0 {
-                state.selected_service = len - 1;
+        KeyCode::Char('j') | KeyCode::Down => match state.view {
+            View::Secrets => {
+                if state.selected_secret + 1 < state.secret_keys.len() {
+                    state.selected_secret += 1;
+                }
+            }
+            _ => state.next_service(),
+        },
+        KeyCode::Char('k') | KeyCode::Up => match state.view {
+            View::Secrets => {
+                if state.selected_secret > 0 {
+                    state.selected_secret -= 1;
+                }
+            }
+            _ => state.prev_service(),
+        },
+        KeyCode::Char('g') => match state.view {
+            View::Secrets => state.selected_secret = 0,
+            _ => state.selected_service = 0,
+        },
+        KeyCode::Char('G') => match state.view {
+            View::Secrets => {
+                if !state.secret_keys.is_empty() {
+                    state.selected_secret = state.secret_keys.len() - 1;
+                }
+            }
+            _ => {
+                let len = state.filtered_services().len();
+                if len > 0 {
+                    state.selected_service = len - 1;
+                }
+            }
+        },
+        // Collapse / expand the project group containing the selected
+        // service. Bound to `c` because space otherwise conflicts with
+        // list scrolling semantics some users expect.
+        KeyCode::Char('c') => {
+            if matches!(state.view, View::Services)
+                && let Some(svc) = state.selected_service_data()
+                && let Some(proj) = svc.project.clone()
+            {
+                state.toggle_collapse_project(&proj);
             }
         }
 
@@ -106,12 +141,13 @@ pub async fn handle_normal_key(
                 state.push_view(View::Nodes);
             }
         }
-        KeyCode::Char('3') | KeyCode::Char('m') => {
-            if !matches!(state.view, View::Metrics) {
-                if let Ok(text) = client.metrics().await {
-                    state.metrics_text = text;
+        KeyCode::Char('3') => {
+            if !matches!(state.view, View::Secrets) {
+                if let Ok(keys) = client.list_secrets().await {
+                    state.secret_keys = keys;
+                    state.selected_secret = 0;
                 }
-                state.push_view(View::Metrics);
+                state.push_view(View::Secrets);
             }
         }
 

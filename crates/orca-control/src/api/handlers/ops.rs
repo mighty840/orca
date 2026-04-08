@@ -23,6 +23,34 @@ pub(crate) async fn logs(
         return (StatusCode::NOT_FOUND, format!("service '{name}' not found")).into_response();
     };
 
+    // Remote-scheduled services have a placeholder instance with no
+    // docker handle on the master. Until a secure-websocket log stream
+    // lands (see BACKLOG.md), return a stable 200 with a clear message
+    // instead of a 500 so the TUI doesn't paint the detail pane red.
+    if svc
+        .instances
+        .iter()
+        .any(|i| i.handle.runtime_id.starts_with("remote-"))
+    {
+        let node = svc
+            .config
+            .placement
+            .as_ref()
+            .and_then(|p| p.node.as_deref())
+            .unwrap_or("remote node");
+        return (
+            StatusCode::OK,
+            format!(
+                "Logs for '{name}' live on {node}.\n\
+                 Remote log streaming over the cluster API is not yet\n\
+                 implemented — ssh {node} and run:\n\n\
+                 \x20\x20docker logs orca-{name} --tail {} -f\n",
+                query.tail
+            ),
+        )
+            .into_response();
+    }
+
     // Get logs from the first running instance
     let instance = svc
         .instances

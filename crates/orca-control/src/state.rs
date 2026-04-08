@@ -66,6 +66,23 @@ pub struct RegisteredNode {
     /// Whether the node is in drain mode (no new workloads scheduled).
     #[serde(default)]
     pub drain: bool,
+    /// Latest CPU / memory / disk / network sample reported in a heartbeat.
+    /// Populated for both the master (via its local collector) and joined
+    /// nodes (via their heartbeat body).
+    #[serde(default)]
+    pub cpu_percent: f64,
+    #[serde(default)]
+    pub memory_bytes: u64,
+    #[serde(default)]
+    pub memory_total: u64,
+    #[serde(default)]
+    pub disk_used: u64,
+    #[serde(default)]
+    pub disk_total: u64,
+    #[serde(default)]
+    pub net_rx: u64,
+    #[serde(default)]
+    pub net_tx: u64,
 }
 
 /// State of a deployed service.

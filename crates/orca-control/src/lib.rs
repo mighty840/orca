@@ -255,22 +255,53 @@ async fn register_master_node(state: &state::AppState, api_port: u16) {
         labels,
         last_heartbeat: chrono::Utc::now(),
         drain: false,
+        cpu_percent: 0.0,
+        memory_bytes: 0,
+        memory_total: 0,
+        disk_used: 0,
+        disk_total: 0,
+        net_rx: 0,
+        net_tx: 0,
     };
     let mut nodes = state.registered_nodes.write().await;
     nodes.insert(node_id, node);
     info!(node_id, "Master node self-registered");
 }
 
-/// Spawn a periodic task that updates the master node's heartbeat timestamp.
+/// Spawn a periodic task that samples host stats and writes them onto the
+/// master node's entry in the cluster node map. Joined nodes push their own
+/// stats via the heartbeat; the master has no heartbeat to piggyback on so
+/// it does this in-process instead. The same loop also prunes zombie
+/// nodes — entries whose last heartbeat is older than 60s — which keeps
+/// the cluster/info endpoint clean after a joined node is restarted with
+/// a fresh id (until node.id persistence lands on every joined box).
 fn spawn_master_heartbeat(state: Arc<state::AppState>) {
+    const STALE_AFTER: chrono::Duration = chrono::Duration::seconds(60);
     let node_id = master_node_id();
+    let collector = Arc::new(orca_agent::host_stats::HostStatsCollector::new());
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            let sample = collector.sample();
+            let now = chrono::Utc::now();
             let mut nodes = state.registered_nodes.write().await;
             if let Some(node) = nodes.get_mut(&node_id) {
-                node.last_heartbeat = chrono::Utc::now();
+                node.last_heartbeat = now;
+                node.cpu_percent = sample.cpu_percent;
+                node.memory_bytes = sample.memory_bytes;
+                node.memory_total = sample.memory_total;
+                node.disk_used = sample.disk_used;
+                node.disk_total = sample.disk_total;
+                node.net_rx = sample.net_rx;
+                node.net_tx = sample.net_tx;
             }
+            nodes.retain(|id, node| {
+                if *id == node_id {
+                    return true;
+                }
+                let age = now - node.last_heartbeat;
+                age < STALE_AFTER
+            });
         }
     });
 }

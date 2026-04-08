@@ -32,6 +32,8 @@ pub async fn cluster_info(State(state): State<Arc<AppState>>) -> impl IntoRespon
         "cluster_name": state.cluster_config.cluster.name,
         "domain": state.cluster_config.cluster.domain,
         "acme_email": state.cluster_config.cluster.acme_email,
+        "version": env!("CARGO_PKG_VERSION"),
+        "commit": option_env!("ORCA_COMMIT").unwrap_or("unknown"),
         "nodes": node_list,
         "node_count": nodes.len(),
     }))
@@ -55,6 +57,13 @@ pub async fn register_node(
         labels: req.labels,
         last_heartbeat: chrono::Utc::now(),
         drain: false,
+        cpu_percent: 0.0,
+        memory_bytes: 0,
+        memory_total: 0,
+        disk_used: 0,
+        disk_total: 0,
+        net_rx: 0,
+        net_tx: 0,
     };
     let mut nodes = state.registered_nodes.write().await;
     nodes.insert(req.node_id, node);
@@ -69,11 +78,31 @@ pub struct WorkloadStatusReport {
     pub status: String,
 }
 
+#[derive(Deserialize, Default)]
+pub struct NodeStatsReport {
+    #[serde(default)]
+    pub cpu_percent: f64,
+    #[serde(default)]
+    pub memory_bytes: u64,
+    #[serde(default)]
+    pub memory_total: u64,
+    #[serde(default)]
+    pub disk_used: u64,
+    #[serde(default)]
+    pub disk_total: u64,
+    #[serde(default)]
+    pub net_rx: u64,
+    #[serde(default)]
+    pub net_tx: u64,
+}
+
 #[derive(Deserialize)]
 pub struct HeartbeatReq {
     pub node_id: u64,
     #[serde(default)]
     pub workloads: Vec<WorkloadStatusReport>,
+    #[serde(default)]
+    pub stats: NodeStatsReport,
 }
 
 pub async fn heartbeat(
@@ -84,6 +113,13 @@ pub async fn heartbeat(
         let mut nodes = state.registered_nodes.write().await;
         if let Some(node) = nodes.get_mut(&req.node_id) {
             node.last_heartbeat = chrono::Utc::now();
+            node.cpu_percent = req.stats.cpu_percent;
+            node.memory_bytes = req.stats.memory_bytes;
+            node.memory_total = req.stats.memory_total;
+            node.disk_used = req.stats.disk_used;
+            node.disk_total = req.stats.disk_total;
+            node.net_rx = req.stats.net_rx;
+            node.net_tx = req.stats.net_tx;
             true
         } else {
             false

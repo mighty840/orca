@@ -3,8 +3,8 @@
 pub mod detail;
 pub mod help;
 pub mod logs;
-pub mod metrics;
 pub mod nodes;
+pub mod secrets;
 pub mod table;
 
 use ratatui::Frame;
@@ -59,7 +59,7 @@ fn draw_content(f: &mut Frame, area: Rect, state: &AppState) {
         View::Logs { service } => logs::draw_logs(f, area, state, service),
         View::Detail { service } => detail::draw_detail(f, area, state, service),
         View::Help => help::draw_help(f, area, state),
-        View::Metrics => metrics::draw_metrics(f, area, state),
+        View::Secrets => secrets::draw_secrets(f, area, state),
     }
 }
 
@@ -106,6 +106,18 @@ fn draw_header(f: &mut Frame, area: Rect, state: &AppState) {
         Span::styled(parts, Style::default().fg(color))
     };
 
+    let local_version = env!("CARGO_PKG_VERSION");
+    let local_commit = env!("ORCA_COMMIT");
+    let server_version = state.cluster_version.as_deref().unwrap_or("?");
+    let server_commit = state.cluster_commit.as_deref().unwrap_or("?");
+    let version_str = if server_version == local_version && server_commit == local_commit {
+        format!("v{local_version}-{local_commit}")
+    } else {
+        // Master and TUI built from different commits — show both so it's
+        // immediately obvious which side might be lagging.
+        format!("tui v{local_version}-{local_commit} ↔ server v{server_version}-{server_commit}")
+    };
+
     let text = Line::from(vec![
         Span::styled(
             " orca ",
@@ -128,6 +140,8 @@ fn draw_header(f: &mut Frame, area: Rect, state: &AppState) {
         ),
         Span::styled(" | ", Style::default().fg(Color::DarkGray)),
         Span::styled(state.uptime_str(), Style::default().fg(Color::Green)),
+        Span::styled(" | ", Style::default().fg(Color::DarkGray)),
+        Span::styled(version_str, Style::default().fg(Color::DarkGray)),
     ]);
     f.render_widget(Paragraph::new(text), area);
 }
@@ -139,7 +153,7 @@ fn draw_breadcrumb(f: &mut Frame, area: Rect, state: &AppState) {
         View::Logs { service } => format!("Services > {service} > Logs"),
         View::Detail { service } => format!("Services > {service}"),
         View::Help => "Help".to_string(),
-        View::Metrics => "Metrics".to_string(),
+        View::Secrets => "Secrets".to_string(),
     };
     let line = Line::from(vec![
         Span::styled(" ", Style::default()),
@@ -225,12 +239,15 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
     // Separator + key hints
     spans.push(Span::styled(" | ", dim));
     let keys = match &state.view {
-        View::Services => "1-3:views /filter s:scale x:stop p:project ?:help",
+        // Services: 1 services, 2 nodes, 3 secrets. `c` collapses the
+        // project of the currently selected row (was SPC, but space
+        // collides with paging in list scrolling).
+        View::Services => "1-3:views ↵:detail /filter s:scale x:stop p:project c:collapse ?:help",
         View::Nodes => "Esc:back :drain/:undrain ?:help",
         View::Logs { .. } => "Esc:back w:wrap ?:help",
         View::Detail { .. } => "Esc:back s:scale x:stop l:logs ?:help",
         View::Help => "Esc:back",
-        View::Metrics => "Esc:back r:refresh ?:help",
+        View::Secrets => "Esc:back :set/:rm ?:help",
     };
     spans.push(Span::styled(keys, dim));
 

@@ -58,6 +58,17 @@ pub struct ServiceStatus {
     /// Current CPU usage percentage, if stats are available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpu_percent: Option<f64>,
+    /// Node address where this service is currently running. `None` means
+    /// the service is scheduled on the master. Populated from
+    /// `service.placement.node` at report time.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub node: Option<String>,
+    /// Configured memory limit in bytes, from
+    /// `service.resources.memory`. Lets the TUI scale the memory
+    /// sparkline against the real ceiling instead of auto-scaling to
+    /// the sample peak.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_limit_bytes: Option<u64>,
 }
 
 /// Request body for `POST /api/v1/services/{name}/scale`.

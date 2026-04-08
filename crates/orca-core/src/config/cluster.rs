@@ -81,6 +81,9 @@ pub enum Role {
 
 impl Role {
     /// Check if this role can perform the given action.
+    ///
+    /// `secrets` is admin-only. Everything else escalates from viewer →
+    /// deployer → admin in the obvious way.
     pub fn can(self, action: &str) -> bool {
         match self {
             Role::Admin => true,

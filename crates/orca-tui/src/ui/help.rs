@@ -9,11 +9,12 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use crate::state::AppState;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const COMMIT: &str = env!("ORCA_COMMIT");
 
 /// Draw full-screen help view with grouped keybindings.
 pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
     let block = Block::default()
-        .title(format!(" Orca v{VERSION} -- Help "))
+        .title(format!(" Orca v{VERSION}-{COMMIT} -- Help "))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
@@ -45,9 +46,9 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled("  Views", hs)));
     for (k, d) in [
-        ("1", "Services view"),
-        ("2 / n", "Nodes view"),
-        ("3 / m", "Metrics view"),
+        ("1", "Services view (grouped by project)"),
+        ("2 / n", "Nodes view (CPU/Mem/Disk/Net sparklines)"),
+        ("3", "Secrets view"),
         ("l", "Logs for selected service"),
         ("?", "This help screen"),
     ] {
@@ -60,6 +61,7 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
     for (k, d) in [
         ("s", "Scale service (opens :scale prompt)"),
         ("x", "Stop selected service"),
+        ("c", "Collapse / expand the selected project"),
         ("p", "Filter by project of selected"),
         ("r", "Refresh immediately"),
         ("/", "Filter services by name"),
@@ -75,10 +77,11 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
         (":scale <svc> <n>", "Scale service to n replicas"),
         (":stop <svc>", "Stop a service"),
         (":stop-project <p>", "Stop entire project"),
-        (":deploy", "Info on redeploying"),
         (":filter <text>", "Filter services"),
         (":project <name>", "Filter by project"),
-        (":metrics", "Metrics view"),
+        (":secrets", "Open the secrets view"),
+        (":set <KEY> <val>", "Create or update a secret"),
+        (":rm <KEY>", "Remove a secret"),
         (":drain <id>", "Drain a node"),
         (":undrain <id>", "Undrain a node"),
         (":exec <svc> <cmd>", "Info on exec"),

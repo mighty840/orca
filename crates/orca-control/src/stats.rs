@@ -12,7 +12,9 @@ use orca_core::types::{RuntimeKind, WorkloadStatus};
 
 use crate::state::AppState;
 
-const STATS_INTERVAL: Duration = Duration::from_secs(30);
+// 2s matches the TUI refresh cadence so the sparkline gets a fresh sample
+// on every draw rather than showing 30s-old stale bars.
+const STATS_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Cached stats for a service (aggregated across instances).
 #[derive(Debug, Clone, serde::Serialize)]

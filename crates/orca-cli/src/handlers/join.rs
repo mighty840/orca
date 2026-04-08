@@ -14,11 +14,27 @@ pub async fn handle_join(
     labels: HashMap<String, String>,
     setup_key: Option<String>,
 ) -> anyhow::Result<()> {
+    // Persist the node_id to disk so repeated `orca join` calls from the
+    // same host reuse it. Without this each restart creates a fresh id and
+    // the master accumulates zombie entries from every previous join.
     let node_id = node_id.unwrap_or_else(|| {
-        std::time::SystemTime::now()
+        let path = dirs_next::home_dir()
+            .unwrap_or_else(|| ".".into())
+            .join(".orca/node.id");
+        if let Ok(s) = std::fs::read_to_string(&path)
+            && let Ok(id) = s.trim().parse::<u64>()
+        {
+            return id;
+        }
+        let id = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
-            .as_millis() as u64
+            .as_millis() as u64;
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(&path, id.to_string());
+        id
     });
 
     // If a NetBird setup key is provided, connect to the mesh first

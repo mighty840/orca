@@ -1,8 +1,47 @@
 //! TUI application state — k9s-style view stack navigation.
 
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 
 use crate::api::{ClusterInfo, NodeInfo, ServiceStatus, StatusResponse};
+
+/// How many samples to keep in each rolling history buffer. With a 2s
+/// refresh tick this gives ~3 minutes of trailing data.
+const HISTORY_LEN: usize = 90;
+
+/// Rolling per-service metric history. Reused for nodes too.
+#[derive(Debug, Default, Clone)]
+pub struct MetricHistory {
+    pub cpu: VecDeque<f64>,
+    pub mem_bytes: VecDeque<u64>,
+    pub disk_used: VecDeque<u64>,
+    pub net_rx: VecDeque<u64>,
+    pub net_tx: VecDeque<u64>,
+}
+
+impl MetricHistory {
+    /// Append a new (cpu_percent, memory_bytes) sample, dropping the oldest
+    /// once the buffer reaches `HISTORY_LEN`. Used by services and nodes.
+    pub fn push_basic(&mut self, cpu: f64, mem_bytes: u64) {
+        push_capped(&mut self.cpu, cpu);
+        push_capped(&mut self.mem_bytes, mem_bytes);
+    }
+
+    /// Extended sample for nodes (also tracks disk + network).
+    pub fn push_full(&mut self, cpu: f64, mem_bytes: u64, disk_used: u64, rx: u64, tx: u64) {
+        self.push_basic(cpu, mem_bytes);
+        push_capped(&mut self.disk_used, disk_used);
+        push_capped(&mut self.net_rx, rx);
+        push_capped(&mut self.net_tx, tx);
+    }
+}
+
+fn push_capped<T>(buf: &mut VecDeque<T>, value: T) {
+    if buf.len() >= HISTORY_LEN {
+        buf.pop_front();
+    }
+    buf.push_back(value);
+}
 
 /// Full-screen views (k9s style — each replaces the entire screen).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,7 +51,7 @@ pub enum View {
     Logs { service: String },
     Detail { service: String },
     Help,
-    Metrics,
+    Secrets,
 }
 
 /// Input mode for the TUI.
@@ -56,8 +95,23 @@ pub struct AppState {
     pub auto_refresh_logs: bool,
     /// Project filter (separate from text filter).
     pub project_filter: Option<String>,
-    /// Raw Prometheus metrics text.
-    pub metrics_text: String,
+    /// Set by `:sh` / `:exec` to signal the event loop to suspend the TUI
+    /// and run an interactive command inside a container. Contents:
+    /// (service name, optional node hostname, command argv).
+    pub pending_shell: Option<(String, Option<String>, Vec<String>)>,
+    /// Per-service rolling metric history (~3 minutes).
+    pub history: HashMap<String, MetricHistory>,
+    /// Per-node rolling metric history.
+    pub node_history: HashMap<u64, MetricHistory>,
+    /// Project rows the user has collapsed in the services view.
+    pub collapsed_projects: HashSet<String>,
+    /// Cluster version + commit hash from `/api/v1/cluster/info`.
+    pub cluster_version: Option<String>,
+    pub cluster_commit: Option<String>,
+    /// Secret keys (values are never sent to the TUI).
+    pub secret_keys: Vec<String>,
+    /// Currently selected row in the secrets view.
+    pub selected_secret: usize,
 }
 
 impl Default for AppState {
@@ -92,7 +146,52 @@ impl AppState {
             tick: 0,
             auto_refresh_logs: true,
             project_filter: None,
-            metrics_text: String::new(),
+            pending_shell: None,
+            history: HashMap::new(),
+            node_history: HashMap::new(),
+            collapsed_projects: HashSet::new(),
+            cluster_version: None,
+            cluster_commit: None,
+            secret_keys: Vec::new(),
+            selected_secret: 0,
+        }
+    }
+
+    /// Pull a fresh CPU% / mem sample from each service into its rolling
+    /// history buffer. Called on every successful status refresh.
+    pub fn record_service_samples(&mut self) {
+        for svc in &self.services {
+            let cpu = svc.cpu_percent.unwrap_or(0.0);
+            let mem = svc
+                .memory_usage
+                .as_deref()
+                .map(parse_human_bytes)
+                .unwrap_or(0);
+            self.history
+                .entry(svc.name.clone())
+                .or_default()
+                .push_basic(cpu, mem);
+        }
+    }
+
+    /// Append the latest node sample to the rolling buffer. Network
+    /// counters are stored raw; the nodes UI diffs consecutive entries
+    /// to get per-interval throughput.
+    pub fn record_node_samples(&mut self) {
+        for n in &self.nodes {
+            self.node_history.entry(n.node_id).or_default().push_full(
+                n.cpu_percent,
+                n.memory_bytes,
+                n.disk_used,
+                n.net_rx,
+                n.net_tx,
+            );
+        }
+    }
+
+    pub fn toggle_collapse_project(&mut self, project: &str) {
+        if !self.collapsed_projects.remove(project) {
+            self.collapsed_projects.insert(project.to_string());
         }
     }
 
@@ -114,9 +213,10 @@ impl AppState {
         self.cluster_name = resp.cluster_name;
         self.services = resp.services;
         self.connection = ConnectionStatus::Connected;
-        let filtered_len = self.filtered_services().len();
-        if self.selected_service >= filtered_len && filtered_len > 0 {
-            self.selected_service = filtered_len - 1;
+        self.record_service_samples();
+        let visible_len = self.visible_services().len();
+        if self.selected_service >= visible_len && visible_len > 0 {
+            self.selected_service = visible_len - 1;
         }
     }
 
@@ -127,6 +227,9 @@ impl AppState {
     pub fn update_cluster(&mut self, info: ClusterInfo) {
         self.nodes = info.nodes;
         self.node_count = info.node_count;
+        self.cluster_version = info.version;
+        self.cluster_commit = info.commit;
+        self.record_node_samples();
     }
 
     pub fn flash(&mut self, msg: String) {
@@ -160,14 +263,37 @@ impl AppState {
             .collect()
     }
 
+    /// Services in the order they actually appear on screen: grouped by
+    /// project alphabetically, services within a group in their original
+    /// order, and services under collapsed projects hidden. This is what
+    /// `selected_service` indexes into — using `filtered_services()` order
+    /// instead made Enter open the wrong row whenever projects didn't
+    /// match the input service list order.
+    pub fn visible_services(&self) -> Vec<&ServiceStatus> {
+        use std::collections::BTreeMap;
+        let mut grouped: BTreeMap<&str, Vec<&ServiceStatus>> = BTreeMap::new();
+        for svc in self.filtered_services() {
+            let key = svc.project.as_deref().unwrap_or("(no project)");
+            grouped.entry(key).or_default().push(svc);
+        }
+        let mut out: Vec<&ServiceStatus> = Vec::new();
+        for (project, svcs) in grouped {
+            if self.collapsed_projects.contains(project) {
+                continue;
+            }
+            out.extend(svcs);
+        }
+        out
+    }
+
     pub fn selected_service_name(&self) -> Option<&str> {
-        let filtered = self.filtered_services();
-        filtered.get(self.selected_service).map(|s| s.name.as_str())
+        let visible = self.visible_services();
+        visible.get(self.selected_service).map(|s| s.name.as_str())
     }
 
     pub fn selected_service_data(&self) -> Option<&ServiceStatus> {
-        let filtered = self.filtered_services();
-        filtered.get(self.selected_service).copied()
+        let visible = self.visible_services();
+        visible.get(self.selected_service).copied()
     }
 
     pub fn prev_service(&mut self) {
@@ -177,7 +303,7 @@ impl AppState {
     }
 
     pub fn next_service(&mut self) {
-        let len = self.filtered_services().len();
+        let len = self.visible_services().len();
         if len > 0 && self.selected_service < len - 1 {
             self.selected_service += 1;
         }
@@ -214,7 +340,31 @@ impl AppState {
             View::Logs { .. } => "Logs",
             View::Detail { .. } => "Detail",
             View::Help => "Help",
-            View::Metrics => "Metrics",
+            View::Secrets => "Secrets",
         }
     }
+}
+
+/// Best-effort parser for `42.5MiB` / `1024Ki` / `1.2G` style strings into
+/// raw bytes. Used to convert the string-form `memory_usage` reported by
+/// the API into a number we can plot.
+pub fn parse_human_bytes(s: &str) -> u64 {
+    let s = s.trim();
+    if s.is_empty() {
+        return 0;
+    }
+    let (num_part, suffix) = s
+        .find(|c: char| c.is_alphabetic())
+        .map(|i| (&s[..i], &s[i..]))
+        .unwrap_or((s, ""));
+    let n: f64 = num_part.parse().unwrap_or(0.0);
+    let mult: f64 = match suffix.to_ascii_lowercase().as_str() {
+        "" | "b" => 1.0,
+        "k" | "kb" | "ki" | "kib" => 1024.0,
+        "m" | "mb" | "mi" | "mib" => 1024.0 * 1024.0,
+        "g" | "gb" | "gi" | "gib" => 1024.0 * 1024.0 * 1024.0,
+        "t" | "tb" | "ti" | "tib" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        _ => 1.0,
+    };
+    (n * mult) as u64
 }

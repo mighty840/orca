@@ -34,6 +34,12 @@ pub struct ServiceStatus {
     pub memory_usage: Option<String>,
     #[serde(default)]
     pub cpu_percent: Option<f64>,
+    /// Node this service runs on. `None` means the master.
+    #[serde(default)]
+    pub node: Option<String>,
+    /// Configured memory limit in bytes, used to scale the sparkline.
+    #[serde(default)]
+    pub memory_limit_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -42,6 +48,10 @@ pub struct ClusterInfo {
     pub cluster_name: String,
     pub node_count: u64,
     pub nodes: Vec<NodeInfo>,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub commit: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -53,6 +63,26 @@ pub struct NodeInfo {
     pub labels: HashMap<String, String>,
     #[serde(default)]
     pub drain: bool,
+    /// Latest reported CPU percent (0..100). 0 if the node hasn't reported.
+    #[serde(default)]
+    pub cpu_percent: f64,
+    #[serde(default)]
+    pub memory_bytes: u64,
+    #[serde(default)]
+    pub memory_total: u64,
+    #[serde(default)]
+    pub disk_used: u64,
+    #[serde(default)]
+    pub disk_total: u64,
+    #[serde(default)]
+    pub net_rx: u64,
+    #[serde(default)]
+    pub net_tx: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SecretListResponse {
+    pub keys: Vec<String>,
 }
 
 impl ApiClient {
@@ -188,6 +218,39 @@ impl ApiClient {
             "{}/api/v1/cluster/nodes/{node_id}/undrain",
             self.base_url
         )))
+        .send()
+        .await?
+        .error_for_status()?;
+        Ok(())
+    }
+
+    pub async fn list_secrets(&self) -> anyhow::Result<Vec<String>> {
+        let resp = self
+            .auth(self.client.get(format!("{}/api/v1/secrets", self.base_url)))
+            .send()
+            .await?
+            .error_for_status()?;
+        let body: SecretListResponse = resp.json().await?;
+        Ok(body.keys)
+    }
+
+    pub async fn set_secret(&self, key: &str, value: &str) -> anyhow::Result<()> {
+        self.auth(
+            self.client
+                .post(format!("{}/api/v1/secrets/{key}", self.base_url))
+                .json(&serde_json::json!({"value": value})),
+        )
+        .send()
+        .await?
+        .error_for_status()?;
+        Ok(())
+    }
+
+    pub async fn remove_secret(&self, key: &str) -> anyhow::Result<()> {
+        self.auth(
+            self.client
+                .delete(format!("{}/api/v1/secrets/{key}", self.base_url)),
+        )
         .send()
         .await?
         .error_for_status()?;

@@ -28,6 +28,11 @@ fn required_action(path: &str, method: &str) -> &'static str {
         ("GET", p) if p.contains("/logs") => "logs",
         ("GET", "/api/v1/status") => "status",
         ("GET", "/api/v1/cluster/info") => "cluster_info",
+        // Secrets are admin-only — they read and write encrypted material
+        // and viewer/deployer roles must not see the key list either.
+        ("GET", "/api/v1/secrets") => "secrets",
+        ("POST", p) if p.starts_with("/api/v1/secrets/") => "secrets",
+        ("DELETE", p) if p.starts_with("/api/v1/secrets/") => "secrets",
         _ => "status", // default to viewer-level for unknown GETs
     }
 }

@@ -1,66 +1,114 @@
 //! Full-width service table (k9s style) — replaces the old services panel.
+//!
+//! Rows are grouped by `project`. Each project is a collapsible header row;
+//! pressing space on a service row collapses or expands the parent project.
+//! Services without a project fall under the synthetic group `(no project)`.
+
+use std::collections::BTreeMap;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::widgets::{Block, Borders, Row, Table};
 
+use crate::api::ServiceStatus;
 use crate::state::AppState;
 
 use super::{status_color, status_icon};
 
-/// Draw the full-width service table with scroll support.
+const NO_PROJECT: &str = "(no project)";
+
+/// One row of the rendered services table — either a project header or a
+/// child service. Selection only ever points at service rows.
+enum DisplayRow<'a> {
+    ProjectHeader { name: &'a str, count: usize },
+    Service(&'a ServiceStatus),
+}
+
+/// Draw the full-width service table with project grouping + scroll.
 pub fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
     let filtered = state.filtered_services();
+    let display = build_display_rows(&filtered, state);
     let title = build_title(state, filtered.len());
 
-    // Calculate visible area (subtract 3 for borders + header row)
+    // `selected_service` already indexes into `visible_services()` (the
+    // same ordering `build_display_rows` produces). Map it to the index
+    // inside the interleaved `display` vec by finding the Nth service row.
+    let selected_pos = display
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| matches!(r, DisplayRow::Service(_)))
+        .nth(state.selected_service)
+        .map(|(i, _)| i)
+        .unwrap_or(0);
+
     let visible_rows = if area.height > 4 {
         (area.height - 4) as usize
     } else {
         1
     };
+    let scroll = compute_scroll(selected_pos, visible_rows, display.len());
+    let end = (scroll + visible_rows).min(display.len());
 
-    let scroll = compute_scroll(state.selected_service, visible_rows, filtered.len());
-    let end = (scroll + visible_rows).min(filtered.len());
-
-    let rows: Vec<Row> = filtered[scroll..end]
+    let rows: Vec<Row> = display[scroll..end]
         .iter()
         .enumerate()
-        .map(|(vi, svc)| {
-            let actual_idx = scroll + vi;
-            let sel = actual_idx == state.selected_service;
-            let icon = status_icon(&svc.status);
-            let s_color = status_color(&svc.status);
-            let domain = svc.domain.as_deref().unwrap_or("-");
-            let project = svc.project.as_deref().unwrap_or("-");
-
-            let style = if sel {
-                Style::default()
-                    .bg(Color::DarkGray)
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD)
-            } else {
-                Style::default().fg(s_color)
-            };
-
-            let pointer = if sel { ">" } else { " " };
-
-            Row::new(vec![
-                format!("{pointer} {icon} {}", svc.name),
-                project.to_string(),
-                svc.image.clone(),
-                svc.runtime.clone(),
-                format!("{}/{}", svc.running_replicas, svc.desired_replicas),
-                svc.status.clone(),
-                domain.to_string(),
-            ])
-            .style(style)
+        .map(|(vi, row)| {
+            let actual = scroll + vi;
+            match row {
+                DisplayRow::ProjectHeader { name, count } => {
+                    let collapsed = state.collapsed_projects.contains(*name);
+                    let glyph = if collapsed { "▶" } else { "▼" };
+                    Row::new(vec![
+                        format!("  {glyph} {name}"),
+                        format!("{count} services"),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                        String::new(),
+                    ])
+                    .style(
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    )
+                }
+                DisplayRow::Service(svc) => {
+                    let sel = actual == selected_pos;
+                    let icon = status_icon(&svc.status);
+                    let s_color = status_color(&svc.status);
+                    let domain = svc.domain.as_deref().unwrap_or("-");
+                    let project = svc.project.as_deref().unwrap_or("-");
+                    let node = svc.node.as_deref().unwrap_or("master");
+                    let style = if sel {
+                        Style::default()
+                            .bg(Color::DarkGray)
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(s_color)
+                    };
+                    let pointer = if sel { ">" } else { " " };
+                    Row::new(vec![
+                        format!("{pointer}  {icon} {}", svc.name),
+                        project.to_string(),
+                        svc.image.clone(),
+                        svc.runtime.clone(),
+                        format!("{}/{}", svc.running_replicas, svc.desired_replicas),
+                        svc.status.clone(),
+                        node.to_string(),
+                        domain.to_string(),
+                    ])
+                    .style(style)
+                }
+            }
         })
         .collect();
 
     let header = Row::new(vec![
-        "  NAME", "PROJECT", "IMAGE", "RUNTIME", "REPLICAS", "STATUS", "DOMAIN",
+        "  NAME", "PROJECT", "IMAGE", "RUNTIME", "REPLICAS", "STATUS", "NODE", "DOMAIN",
     ])
     .style(
         Style::default()
@@ -76,16 +124,17 @@ pub fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
         Constraint::Length(10),
         Constraint::Length(10),
         Constraint::Length(10),
+        Constraint::Length(12),
         Constraint::Min(14),
     ];
 
-    let scroll_indicator = if filtered.len() > visible_rows {
+    let scroll_indicator = if display.len() > visible_rows {
         format!(
             " Services ({}) [{}-{}/{}] ",
             filtered.len(),
             scroll + 1,
             end,
-            filtered.len()
+            display.len()
         )
     } else {
         title
@@ -98,6 +147,33 @@ pub fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
 
     let table = Table::new(rows, widths).header(header).block(block);
     f.render_widget(table, area);
+}
+
+/// Build the interleaved (project header, service row, project header, ...)
+/// display list. Services in collapsed projects are dropped here.
+fn build_display_rows<'a>(filtered: &[&'a ServiceStatus], state: &AppState) -> Vec<DisplayRow<'a>> {
+    // Stable group order: alphabetical by project name. Services keep their
+    // original order within a group so the table doesn't reshuffle.
+    let mut grouped: BTreeMap<&'a str, Vec<&'a ServiceStatus>> = BTreeMap::new();
+    for svc in filtered {
+        let key = svc.project.as_deref().unwrap_or(NO_PROJECT);
+        grouped.entry(key).or_default().push(*svc);
+    }
+
+    let mut out: Vec<DisplayRow<'a>> = Vec::new();
+    for (project, svcs) in grouped {
+        out.push(DisplayRow::ProjectHeader {
+            name: project,
+            count: svcs.len(),
+        });
+        if state.collapsed_projects.contains(project) {
+            continue;
+        }
+        for s in svcs {
+            out.push(DisplayRow::Service(s));
+        }
+    }
+    out
 }
 
 fn build_title(state: &AppState, count: usize) -> String {

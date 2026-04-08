@@ -49,27 +49,93 @@ Services exceeding memory limits are OOM-killed and automatically restarted by t
 
 ## TUI Dashboard
 
-The terminal dashboard provides a real-time cluster overview:
+The terminal dashboard is a k9s-style full-screen view stack over the
+control-plane API. Launch it with:
 
 ```bash
 orca tui
 ```
 
-```
-┌─orca ──────────────────────────────────────────────┐
-│ Cluster: prod    Nodes: 3/3    Services: 6/6       │
-│ CPU: ████░░░░ 48%     Mem: █████░░░ 62%            │
-├────────────────────────────────────────────────────┤
-│ Services                │ Logs: api                 │
-│  ● api        3/3       │ 12:04:01 GET /health 200  │
-│  ● postgres   1/1       │ 12:04:02 POST /v1/… 201   │
-│  ● redis      1/1       │ 12:04:03 GET /health 200  │
-├─────────────────────────┴─────────────────────────┤
-│ [d]eploy  [s]cale  [l]ogs  [r]ollback  [q]uit     │
-└────────────────────────────────────────────────────┘
+Remote clusters work too — point `--api` at the master and set
+`ORCA_TOKEN`:
+
+```bash
+ORCA_TOKEN=$(cat ~/.orca/cluster.token) orca tui --api http://master.example.com:6880
 ```
 
-Keybindings: `j/k` navigate, `Enter` detail view, `l` logs, `d` deploy, `/` search, `?` help.
+### Views
+
+| Key | View | Purpose |
+| --- | --- | --- |
+| `1` | Services | Grouped by project, rolling CPU / memory sparkline on detail |
+| `2` | Nodes | Node addresses, labels, CPU / Mem / Disk / Net sparklines per node |
+| `3` | Secrets | List, set, and remove cluster secrets |
+| `?` | Help | Full key reference |
+| `Esc` | Back | Pop the current view off the stack |
+
+### Services view
+
+Services are grouped by project (collapsible). Each row shows name,
+project, image, runtime, replicas, status, node, and domain.
+
+| Key | Action |
+| --- | --- |
+| `j` / `k` or `↓` / `↑` | Next / previous service |
+| `g` / `G` | Jump to top / bottom |
+| `Enter` | Detail view (info panel + CPU/Mem sparklines + recent logs) |
+| `l` | Full-screen logs |
+| `c` | Collapse / expand the project of the selected service |
+| `p` | Filter to the project of the selected service |
+| `s` | Scale prompt |
+| `x` | Stop service |
+| `/` | Filter by text |
+| `:` | Command mode (`:scale`, `:stop`, `:logs`, `:set KEY VAL`, `:rm KEY`) |
+
+The detail view's **memory sparkline is scaled against the service's
+`resources.memory` limit** when configured. If no limit is set it falls
+back to the node's total memory, so the sparkline always shows a real
+percentage instead of auto-scaling to the sample peak.
+
+### Nodes view
+
+Each node shows its address, labels, heartbeat age, and a strip of
+**four sparklines**:
+
+- **CPU %** scaled 0–100
+- **Memory** scaled to the node's total RAM (`Mem 6.4/24 GiB`)
+- **Disk** scaled to total disk across all mounts
+- **Network** as a per-interval delta in KiB/s
+
+A master heartbeat task samples `sysinfo` on the master itself every
+2 s; joined nodes push their sample via the heartbeat body. Nodes with
+no heartbeat for 60 s are automatically pruned from the cluster view.
+
+### Secrets view
+
+The TUI calls `GET /api/v1/secrets` (admin role only). Values are never
+sent over the wire — only the key list. Use command mode to modify:
+
+```
+:set KEYCLOAK_DB_PASSWORD sup3rs3cret
+:rm STALE_API_KEY
+```
+
+### Header footer
+
+The header shows cluster name, running / total services, node count,
+uptime, and the **orca version + git commit** of both the TUI and the
+master. When the two differ the header prints both versions so you
+know one side is lagging.
+
+```
+ orca ● | breakpilot | 28/29 running | 3 nodes | 02:14:33 | v0.2.0-rc.1-95210a0
+```
+
+Footer hints on the services view:
+
+```
+[Services]  28/29 svc  |  1-3:views ↵:detail /filter s:scale x:stop p:project c:collapse ?:help
+```
 
 ## OpenTelemetry Integration
 

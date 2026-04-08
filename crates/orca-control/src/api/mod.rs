@@ -28,6 +28,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/v1/services/{name}", delete(handlers::stop_service))
         .route("/api/v1/projects/{project}", delete(handlers::stop_project))
         .route("/api/v1/stop", post(handlers::stop_all))
+        .route("/api/v1/secrets", get(handlers::secrets::list_secrets))
+        .route("/api/v1/secrets/{key}", post(handlers::secrets::set_secret))
+        .route(
+            "/api/v1/secrets/{key}",
+            delete(handlers::secrets::remove_secret),
+        )
         .merge(webhook::webhook_router())
         .merge(cluster_handlers::cluster_router())
         .layer(axum::middleware::from_fn_with_state(

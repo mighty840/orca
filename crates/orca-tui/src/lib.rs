@@ -90,10 +90,63 @@ async fn event_loop(
             }
         }
 
+        // If a :sh / :exec command left a pending shell request on the
+        // state, suspend the ratatui alternate-screen, run the child
+        // command with inherited stdio, then rebuild the screen.
+        if let Some((service, node, cmd)) = state.pending_shell.take() {
+            if let Err(e) = run_container_shell(terminal, &service, node.as_deref(), &cmd) {
+                state.error = Some(format!("Exec failed: {e}"));
+            } else {
+                state.flash(format!("Shell in {service} exited"));
+            }
+        }
+
         if state.should_quit {
             return Ok(());
         }
     }
+}
+
+/// Suspend ratatui and run `docker exec -it` (or `ssh <node> docker exec`
+/// for remote services), blocking until the child exits.
+fn run_container_shell(
+    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
+    service: &str,
+    node: Option<&str>,
+    cmd: &[String],
+) -> anyhow::Result<()> {
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    terminal.show_cursor()?;
+
+    let container = format!("orca-{service}");
+    let mut child = if let Some(host) = node {
+        // `-t` forces a pty on the remote side so interactive programs
+        // (vim, less, /bin/sh with a real prompt) behave correctly.
+        let mut c = std::process::Command::new("ssh");
+        c.args(["-t", host, "docker", "exec", "-it", &container]);
+        for a in cmd {
+            c.arg(a);
+        }
+        c
+    } else {
+        let mut c = std::process::Command::new("docker");
+        c.args(["exec", "-it", &container]);
+        for a in cmd {
+            c.arg(a);
+        }
+        c
+    };
+    let status = child.status()?;
+
+    enable_raw_mode()?;
+    execute!(io::stdout(), EnterAlternateScreen)?;
+    terminal.clear()?;
+    terminal.hide_cursor()?;
+    if !status.success() {
+        anyhow::bail!("exit status {status}");
+    }
+    Ok(())
 }
 
 /// Get the service name from the current view context or selection.
