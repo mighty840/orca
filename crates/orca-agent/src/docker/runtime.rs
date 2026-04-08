@@ -149,6 +149,50 @@ impl ContainerRuntime {
         Ok(host_port)
     }
 
+    /// Scan all orca-managed containers and return `(domain, host_port)` pairs
+    /// for any container that has both an `orca.domain` label and a host-port
+    /// binding for its `orca.port`. Used by node-local proxies to bootstrap
+    /// their route table from container metadata alone — no central state.
+    pub async fn list_local_routes(&self) -> Result<Vec<(String, u16)>> {
+        let mut filters = HashMap::new();
+        filters.insert("label", vec![ORCA_LABEL]);
+        let opts = ListContainersOptions {
+            all: false,
+            filters,
+            ..Default::default()
+        };
+        let containers = self
+            .docker
+            .list_containers(Some(opts))
+            .await
+            .map_err(|e| OrcaError::Runtime(format!("list containers failed: {e}")))?;
+
+        let mut routes = Vec::new();
+        for c in containers {
+            let id = match c.id {
+                Some(id) => id,
+                None => continue,
+            };
+            let labels = match &c.labels {
+                Some(l) => l,
+                None => continue,
+            };
+            let domain = match labels.get("orca.domain") {
+                Some(d) => d.clone(),
+                None => continue,
+            };
+            let port = match labels.get("orca.port").and_then(|p| p.parse::<u16>().ok()) {
+                Some(p) => p,
+                None => continue,
+            };
+            // Resolve the dynamic host port assignment for this container's port.
+            if let Ok(Some(host_port)) = self.get_host_port(&id, port).await {
+                routes.push((domain, host_port));
+            }
+        }
+        Ok(routes)
+    }
+
     /// List all orca-managed containers.
     pub async fn list_managed_containers(&self) -> Result<Vec<String>> {
         let mut filters = HashMap::new();

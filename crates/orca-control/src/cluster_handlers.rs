@@ -30,6 +30,8 @@ pub async fn cluster_info(State(state): State<Arc<AppState>>) -> impl IntoRespon
     let node_list: Vec<&RegisteredNode> = nodes.values().collect();
     Json(serde_json::json!({
         "cluster_name": state.cluster_config.cluster.name,
+        "domain": state.cluster_config.cluster.domain,
+        "acme_email": state.cluster_config.cluster.acme_email,
         "nodes": node_list,
         "node_count": nodes.len(),
     }))
@@ -78,11 +80,26 @@ pub async fn heartbeat(
     State(state): State<Arc<AppState>>,
     Json(req): Json<HeartbeatReq>,
 ) -> impl IntoResponse {
-    let mut nodes = state.registered_nodes.write().await;
-    if let Some(node) = nodes.get_mut(&req.node_id) {
-        node.last_heartbeat = chrono::Utc::now();
+    let known = {
+        let mut nodes = state.registered_nodes.write().await;
+        if let Some(node) = nodes.get_mut(&req.node_id) {
+            node.last_heartbeat = chrono::Utc::now();
+            true
+        } else {
+            false
+        }
+    };
+    // Tell agents whose node_id we don't know to re-register. This happens
+    // after a master restart wipes the in-memory node list — without this
+    // signal the agent would heartbeat forever into the void and the master
+    // would only see itself.
+    if !known {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "node not registered"})),
+        )
+            .into_response();
     }
-    drop(nodes);
 
     // Update service instance statuses from agent-reported workloads
     if !req.workloads.is_empty() {
@@ -109,7 +126,11 @@ pub async fn heartbeat(
             req.node_id
         );
     }
-    Json(serde_json::json!({"commands": commands}))
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({"commands": commands})),
+    )
+        .into_response()
 }
 
 pub async fn drain_node(

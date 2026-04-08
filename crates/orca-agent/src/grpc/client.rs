@@ -30,6 +30,11 @@ pub struct AgentClient {
     workloads: Arc<RwLock<HashMap<String, WorkloadInfo>>>,
     /// Commands that failed and should be retried (command, attempt_count).
     failed_commands: Arc<RwLock<Vec<(WorkloadCommand, u32)>>>,
+    /// Local listening address sent to the leader on register, kept so the
+    /// agent can re-register itself if the leader restarts and forgets us.
+    local_address: RwLock<String>,
+    /// Labels sent to the leader on register, kept for the same reason.
+    labels: RwLock<HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -71,7 +76,25 @@ impl AgentClient {
             client: reqwest::Client::new(),
             workloads: Arc::new(RwLock::new(HashMap::new())),
             failed_commands: Arc::new(RwLock::new(Vec::new())),
+            local_address: RwLock::new(String::new()),
+            labels: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Fetch cluster metadata from the leader (acme_email, domain, name).
+    /// Returns `None` if the leader is unreachable or the field is unset.
+    pub async fn fetch_cluster_info(&self) -> Option<serde_json::Value> {
+        let mut req = self
+            .client
+            .get(format!("{}/api/v1/cluster/info", self.leader_url));
+        if let Ok(token) = std::env::var("ORCA_TOKEN") {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().await.ok()?;
+        if !resp.status().is_success() {
+            return None;
+        }
+        resp.json().await.ok()
     }
 
     /// Register this node with the leader.
@@ -80,6 +103,11 @@ impl AgentClient {
         address: &str,
         labels: &HashMap<String, String>,
     ) -> anyhow::Result<()> {
+        // Stash the registration parameters so we can re-register later
+        // without the caller threading them through (see `re_register`).
+        *self.local_address.write().await = address.to_string();
+        *self.labels.write().await = labels.clone();
+
         let body = serde_json::json!({
             "node_id": self.node_id,
             "address": address,
@@ -105,6 +133,25 @@ impl AgentClient {
             let body = resp.text().await.unwrap_or_default();
             anyhow::bail!("Registration failed (HTTP {status}): {body}")
         }
+    }
+
+    /// Re-send the registration using the previously stashed address/labels.
+    /// Used when the leader returns 404 on heartbeat (its in-memory node list
+    /// was wiped, e.g. by a restart).
+    async fn re_register(&self) -> anyhow::Result<()> {
+        let address = self.local_address.read().await.clone();
+        let labels = self.labels.read().await.clone();
+        if address.is_empty() {
+            anyhow::bail!("cannot re-register: no prior registration recorded");
+        }
+        self.register(&address, &labels).await
+    }
+
+    /// Sentinel error meaning the leader does not know about this node and
+    /// the agent should immediately re-register before the next heartbeat.
+    /// Bubbles up out of [`heartbeat`] so the heartbeat loop can react.
+    fn unknown_node_error() -> anyhow::Error {
+        anyhow::anyhow!("leader does not know this node (re-register required)")
     }
 
     /// Send a heartbeat to the leader and receive commands.
@@ -135,6 +182,9 @@ impl AgentClient {
 
         let resp = hb_req.send().await?;
 
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Err(Self::unknown_node_error());
+        }
         if resp.status().is_success() {
             Ok(resp.json().await?)
         } else {
@@ -171,7 +221,18 @@ impl AgentClient {
                 }
                 Err(e) => {
                     failing = true;
-                    warn!("Heartbeat failed: {e}");
+                    let msg = e.to_string();
+                    warn!("Heartbeat failed: {msg}");
+                    if msg.contains("re-register required") {
+                        match self.re_register().await {
+                            Ok(()) => {
+                                info!("Re-registered with leader after restart");
+                                cur = interval;
+                                continue;
+                            }
+                            Err(rerr) => warn!("Re-register failed: {rerr}"),
+                        }
+                    }
                     cur = (cur * 2).max(MIN_BO).min(MAX_BO);
                 }
             }
