@@ -71,6 +71,7 @@ fn canary_config(name: &str, image: &str) -> ServiceConfig {
         depends_on: vec![],
         cmd: vec![],
         extra_ports: vec![],
+        strip_prefix: None,
     }
 }
 

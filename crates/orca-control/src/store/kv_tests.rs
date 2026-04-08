@@ -59,6 +59,7 @@ fn set_and_get_service() {
         depends_on: vec![],
         cmd: vec![],
         extra_ports: vec![],
+        strip_prefix: None,
     };
     store
         .apply(&RaftEntry::SetService(Box::new(config)))
@@ -144,6 +145,7 @@ fn snapshot_captures_all_state() {
             depends_on: vec![],
             cmd: vec![],
             extra_ports: vec![],
+            strip_prefix: None,
         })))
         .unwrap();
 

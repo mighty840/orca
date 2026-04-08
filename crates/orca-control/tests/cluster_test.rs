@@ -34,6 +34,13 @@ async fn register_node(state: &AppState, node_id: u64) {
         labels: HashMap::new(),
         last_heartbeat: chrono::Utc::now(),
         drain: false,
+        cpu_percent: 0.0,
+        memory_bytes: 0,
+        memory_total: 0,
+        disk_used: 0,
+        disk_total: 0,
+        net_rx: 0,
+        net_tx: 0,
     };
     let mut nodes = state.registered_nodes.write().await;
     nodes.insert(node_id, node);

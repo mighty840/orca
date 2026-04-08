@@ -98,6 +98,7 @@ async fn handle_create(
         depends_on: vec![],
         cmd: vec![],
         extra_ports: vec![],
+        strip_prefix: None,
     };
 
     // Store password as a secret

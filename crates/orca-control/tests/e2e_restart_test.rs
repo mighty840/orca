@@ -42,6 +42,7 @@ fn nginx_config() -> orca_core::config::ServiceConfig {
         depends_on: vec![],
         cmd: vec![],
         extra_ports: vec![],
+        strip_prefix: None,
     }
 }
 

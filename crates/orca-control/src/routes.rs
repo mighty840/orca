@@ -80,6 +80,7 @@ pub async fn update_container_routes(state: &AppState, config: &ServiceConfig) {
                 address: addr,
                 service_name: config.name.clone(),
                 path_pattern: path_pattern.clone(),
+                strip_prefix: config.strip_prefix.clone(),
                 weight,
             })
         })
@@ -186,6 +187,7 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
         internal: config.internal,
         cmd: config.cmd.clone(),
         extra_ports: config.extra_ports.clone(),
+        strip_prefix: config.strip_prefix.clone(),
     })
 }
 

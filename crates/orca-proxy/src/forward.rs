@@ -60,7 +60,23 @@ pub(crate) async fn forward_with_retry(
             (weighted_index(matched, base_idx) + 1) % matched.len()
         };
         let target = &matched[idx];
-        let uri = format!("http://{}{}", target.address, path_and_query);
+        // Apply per-target prefix stripping so backends that expect a
+        // clean URL (e.g. /users) don't see the full routed path
+        // (e.g. /admin/users). No-op when `strip_prefix` is None.
+        let forwarded_path: std::borrow::Cow<'_, str> = match &target.strip_prefix {
+            Some(prefix) if path_and_query.starts_with(prefix.as_str()) => {
+                let rest = &path_and_query[prefix.len()..];
+                if rest.is_empty() {
+                    std::borrow::Cow::Borrowed("/")
+                } else if rest.starts_with('/') {
+                    std::borrow::Cow::Borrowed(rest)
+                } else {
+                    std::borrow::Cow::Owned(format!("/{rest}"))
+                }
+            }
+            _ => std::borrow::Cow::Borrowed(path_and_query),
+        };
+        let uri = format!("http://{}{}", target.address, forwarded_path);
 
         debug!("Proxying {host}{path_and_query} -> {uri} (attempt {attempt})");
 
@@ -211,6 +227,7 @@ mod tests {
             address: addr.to_string(),
             service_name: addr.to_string(),
             path_pattern: None,
+            strip_prefix: None,
             weight,
         }
     }

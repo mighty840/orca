@@ -173,7 +173,7 @@ async fn spawn_local_proxy(
         .await
         .unwrap_or_default()
         .into_iter()
-        .map(|(d, _)| d)
+        .map(|r| r.domain)
         .collect();
 
     let acme_for_proxy = acme.clone();
@@ -220,17 +220,27 @@ async fn spawn_local_proxy(
             };
             let mut new_table: HashMap<String, Vec<RouteTarget>> = HashMap::new();
             let mut current: std::collections::HashSet<String> = std::collections::HashSet::new();
-            for (domain, host_port) in routes {
-                current.insert(domain.clone());
-                new_table
-                    .entry(domain.clone())
-                    .or_default()
-                    .push(RouteTarget {
-                        address: format!("127.0.0.1:{host_port}"),
-                        service_name: domain,
-                        path_pattern: None,
-                        weight: 100,
-                    });
+            for r in routes {
+                current.insert(r.domain.clone());
+                // Emit one RouteTarget per declared path pattern; services
+                // without any `routes` entry get a single catch-all.
+                let patterns: Vec<Option<String>> = if r.routes.is_empty() {
+                    vec![None]
+                } else {
+                    r.routes.iter().map(|p| Some(p.clone())).collect()
+                };
+                for pattern in patterns {
+                    new_table
+                        .entry(r.domain.clone())
+                        .or_default()
+                        .push(RouteTarget {
+                            address: format!("127.0.0.1:{}", r.host_port),
+                            service_name: r.service.clone(),
+                            path_pattern: pattern,
+                            strip_prefix: r.strip_prefix.clone(),
+                            weight: 100,
+                        });
+                }
             }
             // New domains discovered since last refresh — log them; the proxy
             // will provision certs lazily on the first matching connection.

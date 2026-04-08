@@ -121,6 +121,7 @@ mod tests {
             depends_on: vec![],
             cmd: vec![],
             extra_ports: vec![],
+            strip_prefix: None,
         }
     }
 

@@ -21,7 +21,28 @@ use orca_core::testing::MockRuntime;
 
 type HmacSha256 = Hmac<Sha256>;
 
+fn init_isolated_webhooks_path() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| {
+        let dir = std::env::temp_dir().join(format!(
+            "orca-webhook-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&dir).ok();
+        // SAFETY: set once, before any test uses AppState::new.
+        unsafe {
+            std::env::set_var("ORCA_WEBHOOKS_PATH", dir.join("webhooks.json"));
+        }
+    });
+}
+
 fn test_state() -> Arc<AppState> {
+    init_isolated_webhooks_path();
     let runtime = Arc::new(MockRuntime::with_host_port(9000));
     Arc::new(AppState::new(
         ClusterConfig {

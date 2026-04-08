@@ -51,6 +51,18 @@ pub struct ContainerRuntime {
     pub(crate) docker: Docker,
 }
 
+/// One entry returned by [`ContainerRuntime::list_local_routes`] — enough
+/// state for a node-local proxy to add a `RouteTarget` without any
+/// central coordination.
+#[derive(Debug, Clone)]
+pub struct LocalRoute {
+    pub service: String,
+    pub domain: String,
+    pub host_port: u16,
+    pub routes: Vec<String>,
+    pub strip_prefix: Option<String>,
+}
+
 impl ContainerRuntime {
     /// Connect to the local Docker daemon.
     ///
@@ -149,11 +161,12 @@ impl ContainerRuntime {
         Ok(host_port)
     }
 
-    /// Scan all orca-managed containers and return `(domain, host_port)` pairs
-    /// for any container that has both an `orca.domain` label and a host-port
-    /// binding for its `orca.port`. Used by node-local proxies to bootstrap
-    /// their route table from container metadata alone — no central state.
-    pub async fn list_local_routes(&self) -> Result<Vec<(String, u16)>> {
+    /// Scan all orca-managed containers and return one entry per
+    /// `(service_name, domain, host_port, routes, strip_prefix)` for any
+    /// container that has an `orca.domain` + host-port binding.
+    /// Used by node-local proxies to bootstrap their route table from
+    /// container metadata alone — no central state.
+    pub async fn list_local_routes(&self) -> Result<Vec<LocalRoute>> {
         let mut filters = HashMap::new();
         filters.insert("label", vec![ORCA_LABEL]);
         let opts = ListContainersOptions {
@@ -185,9 +198,29 @@ impl ContainerRuntime {
                 Some(p) => p,
                 None => continue,
             };
+            let service = labels
+                .get("orca.service")
+                .cloned()
+                .unwrap_or_else(|| domain.clone());
+            let route_patterns: Vec<String> = labels
+                .get("orca.routes")
+                .map(|s| {
+                    s.split(',')
+                        .filter(|s| !s.is_empty())
+                        .map(String::from)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let strip_prefix = labels.get("orca.strip_prefix").cloned();
             // Resolve the dynamic host port assignment for this container's port.
             if let Ok(Some(host_port)) = self.get_host_port(&id, port).await {
-                routes.push((domain, host_port));
+                routes.push(LocalRoute {
+                    service,
+                    domain,
+                    host_port,
+                    routes: route_patterns,
+                    strip_prefix,
+                });
             }
         }
         Ok(routes)

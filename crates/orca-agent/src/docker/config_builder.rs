@@ -184,6 +184,16 @@ fn build_labels(spec: &WorkloadSpec) -> HashMap<String, String> {
     if let Some(port) = spec.port {
         labels.insert("orca.port".to_string(), port.to_string());
     }
+    // Path pattern and strip-prefix let the node-local proxy reconstruct
+    // path-based routing (e.g. /admin/* → admin, /* → storefront) from
+    // container labels alone. Stored as a comma-joined list for routes
+    // and the raw string for strip_prefix.
+    if !spec.routes.is_empty() {
+        labels.insert("orca.routes".to_string(), spec.routes.join(","));
+    }
+    if let Some(sp) = &spec.strip_prefix {
+        labels.insert("orca.strip_prefix".to_string(), sp.clone());
+    }
     labels
 }
 
@@ -220,6 +230,7 @@ mod tests {
             internal: false,
             cmd: vec![],
             extra_ports: vec![],
+            strip_prefix: None,
         }
     }
 

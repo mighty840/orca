@@ -46,6 +46,11 @@ pub struct RouteTarget {
     /// Traffic weight (1-100, default 100). Used for weighted routing
     /// during canary deployments. Higher weight = more traffic.
     pub weight: u32,
+    /// Prefix to strip from the request path before forwarding upstream,
+    /// e.g. `"/admin"`. With `path_pattern = "/admin/*"` and
+    /// `strip_prefix = Some("/admin")`, a request for `/admin/users` is
+    /// forwarded as `/users` — same semantics as Caddy's `handle_path`.
+    pub strip_prefix: Option<String>,
 }
 
 /// A Wasm HTTP trigger: maps a path pattern to a Wasm runtime instance.

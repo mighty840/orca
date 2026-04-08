@@ -44,7 +44,12 @@ fn default_branch() -> String {
 pub type WebhookStore = Arc<RwLock<Vec<WebhookConfig>>>;
 
 /// Path to the on-disk webhook config file (under `~/.orca`).
+///
+/// Honors `ORCA_WEBHOOKS_PATH` as an override for tests.
 fn webhooks_path() -> std::path::PathBuf {
+    if let Ok(p) = std::env::var("ORCA_WEBHOOKS_PATH") {
+        return std::path::PathBuf::from(p);
+    }
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
     std::path::PathBuf::from(home).join(".orca/webhooks.json")
 }

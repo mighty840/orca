@@ -113,6 +113,7 @@ fn convert_service(name: &str, svc: &ComposeService, network: &str) -> ServiceCo
         depends_on: vec![],
         cmd: vec![],
         extra_ports: vec![],
+        strip_prefix: None,
     }
 }
 
@@ -259,6 +260,7 @@ services:
                 depends_on: vec![],
                 cmd: vec![],
                 extra_ports: vec![],
+                strip_prefix: None,
             }],
         };
         let toml_str = services_to_toml(&config).unwrap();

@@ -145,4 +145,11 @@ pub struct ServiceConfig {
     /// Extra fixed host:container port bindings (e.g. ["22222:22"]).
     #[serde(default)]
     pub extra_ports: Vec<String>,
+    /// Prefix to strip from incoming request paths before forwarding to
+    /// this service. Used with `routes` to mount a backend under a
+    /// subpath without exposing that subpath to the backend itself —
+    /// e.g. `routes = ["/admin/*"]`, `strip_prefix = "/admin"` sends
+    /// `/admin/users` upstream as `/users`.
+    #[serde(default)]
+    pub strip_prefix: Option<String>,
 }

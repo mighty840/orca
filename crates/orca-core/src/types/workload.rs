@@ -50,6 +50,9 @@ pub struct WorkloadSpec {
     /// Extra fixed host:container port bindings (e.g. ["22222:22"] for git SSH).
     #[serde(default)]
     pub extra_ports: Vec<String>,
+    /// Prefix stripped from proxied paths before forwarding upstream.
+    #[serde(default)]
+    pub strip_prefix: Option<String>,
 }
 
 /// Replica count: either a fixed number or "auto" for auto-scaling.
