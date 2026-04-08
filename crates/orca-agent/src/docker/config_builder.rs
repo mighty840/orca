@@ -12,7 +12,21 @@ use orca_core::types::WorkloadSpec;
 pub(crate) fn build_container_config(spec: &WorkloadSpec) -> Config<String> {
     let env: Vec<String> = spec.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
 
-    let (port_bindings, exposed_ports) = build_port_config(spec.port, spec.host_port);
+    let (mut port_bindings, mut exposed_ports) = build_port_config(spec.port, spec.host_port);
+    for entry in &spec.extra_ports {
+        let Some((host, container)) = entry.split_once(':') else {
+            continue;
+        };
+        let key = format!("{container}/tcp");
+        exposed_ports.insert(key.clone(), HashMap::new());
+        port_bindings.insert(
+            key,
+            Some(vec![PortBinding {
+                host_ip: Some("0.0.0.0".to_string()),
+                host_port: Some(host.to_string()),
+            }]),
+        );
+    }
     let binds = build_all_binds(spec);
     let device_requests = build_gpu_requests(spec);
     let labels = build_labels(spec);
@@ -195,7 +209,7 @@ mod tests {
             tls_cert: None,
             tls_key: None,
             internal: false,
-            cmd: vec![],
+            cmd: vec![], extra_ports: vec![],
         }
     }
 

@@ -121,7 +121,7 @@ pub(crate) async fn forward_with_retry(
                             | "transfer-encoding"
                             | "upgrade"
                     ) {
-                        response.headers_mut().insert(k.clone(), v.clone());
+                        response.headers_mut().append(k.clone(), v.clone());
                     }
                 }
                 return response;

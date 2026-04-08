@@ -142,4 +142,7 @@ pub struct ServiceConfig {
     /// Command to run in the container (overrides image CMD).
     #[serde(default)]
     pub cmd: Vec<String>,
+    /// Extra fixed host:container port bindings (e.g. ["22222:22"]).
+    #[serde(default)]
+    pub extra_ports: Vec<String>,
 }

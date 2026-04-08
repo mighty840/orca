@@ -9,7 +9,7 @@ use orca_core::types::{DeployKind, HealthState, WorkloadSpec, WorkloadStatus};
 
 /// Resolve `${secrets.KEY}` patterns in env vars using the local secrets store.
 fn resolve_secrets(env: &HashMap<String, String>) -> HashMap<String, String> {
-    match orca_core::secrets::SecretStore::open("secrets.json") {
+    match orca_core::secrets::SecretStore::open(orca_core::secrets::default_path()) {
         Ok(store) => store.resolve_env(env),
         Err(_) => env.clone(),
     }
@@ -185,6 +185,7 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
         tls_key: config.tls_key.clone(),
         internal: config.internal,
         cmd: config.cmd.clone(),
+        extra_ports: config.extra_ports.clone(),
     })
 }
 

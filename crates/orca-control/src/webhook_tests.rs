@@ -22,7 +22,7 @@ fn validate_signature_works() {
 
 #[tokio::test]
 async fn webhook_store_remove_by_service_name() {
-    let store = new_store();
+    let store: WebhookStore = std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new()));
     {
         let mut webhooks = store.write().await;
         webhooks.push(WebhookConfig {
@@ -58,7 +58,7 @@ async fn webhook_store_remove_by_service_name() {
 
 #[tokio::test]
 async fn webhook_store_remove_nonexistent() {
-    let store = new_store();
+    let store: WebhookStore = std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new()));
     {
         let mut webhooks = store.write().await;
         webhooks.push(WebhookConfig {

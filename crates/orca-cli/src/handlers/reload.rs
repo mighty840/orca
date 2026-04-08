@@ -2,8 +2,14 @@ use anyhow::Result;
 use tracing::info;
 
 /// Reload: shutdown daemon, restart, and redeploy all services.
+///
+/// Re-launches the server in the SAME working directory the daemon was
+/// originally started in (recorded in `~/.orca/orca.cwd`), not the cwd of
+/// the user who runs `orca reload`. This guarantees `cluster.toml` and the
+/// `services/` directory continue to resolve correctly.
 pub async fn handle_reload() -> Result<()> {
-    let cwd = std::env::current_dir()?;
+    let cwd = super::daemon::read_cwd()
+        .unwrap_or_else(|| std::env::current_dir().expect("could not determine cwd"));
 
     // Read current server args from the running process
     let pid = super::daemon::read_pid();

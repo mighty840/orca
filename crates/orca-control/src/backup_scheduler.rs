@@ -48,19 +48,63 @@ pub fn spawn_backup_scheduler(config: BackupConfig) -> Option<tokio::task::JoinH
 }
 
 /// Execute a backup run for all configured targets.
+///
+/// This backs up:
+///   1. `cluster.db` (orca control plane state)
+///   2. `secrets.json` (encrypted secrets store)
+///   3. All orca-managed Docker volumes (per-service data)
+///
+/// Volume backups are delegated to `orca backup all` as a subprocess so we
+/// can reuse the bollard logic in orca-cli without creating a circular
+/// dependency between orca-control and orca-cli.
 async fn run_scheduled_backup(mgr: &BackupManager) {
     info!("Starting scheduled backup run");
-    // Back up the orca state directory if it exists
     let state_dir = dirs_next::home_dir()
         .unwrap_or_else(|| ".".into())
         .join(".orca");
 
     if state_dir.exists() {
-        match mgr.backup_file("orca-state", &state_dir.join("cluster.db")) {
-            Ok(()) => info!("Backed up cluster.db"),
-            Err(e) => error!("Failed to backup cluster.db: {e}"),
+        let cluster_db = state_dir.join("cluster.db");
+        if cluster_db.exists() {
+            match mgr.backup_file("cluster-db", &cluster_db) {
+                Ok(()) => info!("Backed up cluster.db"),
+                Err(e) => error!("Failed to backup cluster.db: {e}"),
+            }
+        }
+        let secrets = state_dir.join("secrets.json");
+        if secrets.exists() {
+            match mgr.backup_file("secrets", &secrets) {
+                Ok(()) => info!("Backed up secrets.json"),
+                Err(e) => error!("Failed to backup secrets.json: {e}"),
+            }
         }
     }
+
+    // Run volume backups via the CLI subprocess. We resolve the binary by
+    // looking at our own executable path so the subprocess uses the same
+    // build, which avoids version skew.
+    if let Ok(exe) = std::env::current_exe() {
+        match tokio::process::Command::new(&exe)
+            .args(["backup", "all"])
+            .output()
+            .await
+        {
+            Ok(out) if out.status.success() => {
+                info!(
+                    "Volume backup completed: {}",
+                    String::from_utf8_lossy(&out.stdout).trim()
+                );
+            }
+            Ok(out) => {
+                error!(
+                    "Volume backup failed: {}",
+                    String::from_utf8_lossy(&out.stderr)
+                );
+            }
+            Err(e) => error!("Failed to spawn volume backup: {e}"),
+        }
+    }
+
     info!("Scheduled backup run complete");
 }
 

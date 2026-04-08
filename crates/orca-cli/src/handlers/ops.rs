@@ -69,7 +69,7 @@ pub fn handle_alerts(action: AlertsAction) {
 }
 
 fn open_secrets() -> orca_core::secrets::SecretStore {
-    orca_core::secrets::SecretStore::open("secrets.json").unwrap_or_else(|e| {
+    orca_core::secrets::SecretStore::open(orca_core::secrets::default_path()).unwrap_or_else(|e| {
         tracing::error!("Failed to open secrets store: {e}");
         std::process::exit(1);
     })

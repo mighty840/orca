@@ -12,7 +12,39 @@ use tracing::{debug, info, warn};
 use orca_core::error::{OrcaError, Result};
 
 use super::ORCA_LABEL;
+use base64::Engine;
+use bollard::auth::DockerCredentials;
 use bollard::container::InspectContainerOptions;
+
+/// Read registry credentials for an image's host from `~/.docker/config.json`.
+///
+/// Returns `None` if the image is on Docker Hub, the config file is missing,
+/// or the host has no entry. Used to authenticate pulls from private registries.
+fn registry_credentials(image: &str) -> Option<DockerCredentials> {
+    let host = image.split_once('/').and_then(|(h, _)| {
+        if h.contains('.') || h.contains(':') {
+            Some(h.to_string())
+        } else {
+            None
+        }
+    })?;
+    let path = std::env::var("HOME")
+        .ok()
+        .map(|h| format!("{h}/.docker/config.json"))?;
+    let raw = std::fs::read_to_string(path).ok()?;
+    let cfg: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let auth_b64 = cfg.get("auths")?.get(&host)?.get("auth")?.as_str()?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(auth_b64)
+        .ok()?;
+    let creds = String::from_utf8(decoded).ok()?;
+    let (user, pass) = creds.split_once(':')?;
+    Some(DockerCredentials {
+        username: Some(user.to_string()),
+        password: Some(pass.to_string()),
+        ..Default::default()
+    })
+}
 
 /// Docker container runtime.
 pub struct ContainerRuntime {
@@ -33,8 +65,12 @@ impl ContainerRuntime {
 
     /// Pull an image if it does not exist locally.
     pub(crate) async fn ensure_image(&self, image: &str) -> Result<()> {
-        // Check if image exists locally
-        if self.docker.inspect_image(image).await.is_ok() {
+        // For mutable tags (`:latest` or no tag), always pull to pick up
+        // upstream updates. For pinned tags (e.g. `:1.2.3` or `:sha`),
+        // skip the pull if the image is already present locally.
+        let tag = image.rsplit_once(':').map(|(_, t)| t).unwrap_or("latest");
+        let is_mutable = tag == "latest";
+        if !is_mutable && self.docker.inspect_image(image).await.is_ok() {
             debug!("Image {image} already available locally");
             return Ok(());
         }
@@ -45,7 +81,8 @@ impl ContainerRuntime {
             ..Default::default()
         };
 
-        let mut stream = self.docker.create_image(Some(opts), None, None);
+        let creds = registry_credentials(image);
+        let mut stream = self.docker.create_image(Some(opts), None, creds);
         while let Some(result) = stream.next().await {
             match result {
                 Ok(info) => {

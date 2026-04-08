@@ -3,17 +3,17 @@ use orca_core::backup::{BackupConfig, BackupManager, BackupTarget};
 
 use super::volume_backup;
 
-pub fn handle_backup(action: BackupAction) {
+pub async fn handle_backup(action: BackupAction) {
+    // The two volume operations are async, so we just `.await` them on the
+    // ambient `#[tokio::main]` runtime — creating a nested `Runtime::new()`
+    // here would panic with "Cannot start a runtime from within a runtime".
     match &action {
         BackupAction::All => {
-            let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-            rt.block_on(volume_backup::backup_all_volumes());
+            volume_backup::backup_all_volumes().await;
             return;
         }
         BackupAction::RestoreVolume { volume_name } => {
-            let name = volume_name.clone();
-            let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
-            rt.block_on(volume_backup::restore_volume(&name));
+            volume_backup::restore_volume(volume_name).await;
             return;
         }
         _ => {}

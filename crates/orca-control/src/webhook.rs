@@ -43,9 +43,37 @@ fn default_branch() -> String {
 /// Shared webhook config store, stored in [`AppState`] extension.
 pub type WebhookStore = Arc<RwLock<Vec<WebhookConfig>>>;
 
-/// Create a new empty webhook store.
+/// Path to the on-disk webhook config file (under `~/.orca`).
+fn webhooks_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+    std::path::PathBuf::from(home).join(".orca/webhooks.json")
+}
+
+/// Load persisted webhooks from disk, returning an empty list on first run.
 pub fn new_store() -> WebhookStore {
-    Arc::new(RwLock::new(Vec::new()))
+    let configs: Vec<WebhookConfig> = std::fs::read_to_string(webhooks_path())
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default();
+    Arc::new(RwLock::new(configs))
+}
+
+/// Persist the current webhook list to disk. Errors are logged, not returned,
+/// so they don't fail the request that triggered the change.
+async fn persist(store: &WebhookStore) {
+    let snapshot = store.read().await.clone();
+    let path = webhooks_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match serde_json::to_string_pretty(&snapshot) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&path, json) {
+                error!("Failed to persist webhooks to {}: {e}", path.display());
+            }
+        }
+        Err(e) => error!("Failed to serialize webhooks: {e}"),
+    }
 }
 
 /// Subset of GitHub push webhook payload we care about.
@@ -215,14 +243,17 @@ pub async fn register(
         "Webhook: registering {}#{} -> {}",
         config.repo, config.branch, config.service_name
     );
-    let mut webhooks = state.webhooks.write().await;
-    // Remove existing config for same repo+branch+service to allow updates
-    webhooks.retain(|w| {
-        !(w.repo == config.repo
-            && w.branch == config.branch
-            && w.service_name == config.service_name)
-    });
-    webhooks.push(config);
+    {
+        let mut webhooks = state.webhooks.write().await;
+        // Remove existing config for same repo+branch+service to allow updates
+        webhooks.retain(|w| {
+            !(w.repo == config.repo
+                && w.branch == config.branch
+                && w.service_name == config.service_name)
+        });
+        webhooks.push(config);
+    }
+    persist(&state.webhooks).await;
     (
         StatusCode::CREATED,
         Json(serde_json::json!({"status": "registered"})),
@@ -244,10 +275,15 @@ pub async fn remove_webhook(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> impl IntoResponse {
-    let mut webhooks = state.webhooks.write().await;
-    let before = webhooks.len();
-    webhooks.retain(|w| w.service_name != id);
-    let removed = before - webhooks.len();
+    let removed = {
+        let mut webhooks = state.webhooks.write().await;
+        let before = webhooks.len();
+        webhooks.retain(|w| w.service_name != id);
+        before - webhooks.len()
+    };
+    if removed > 0 {
+        persist(&state.webhooks).await;
+    }
 
     if removed == 0 {
         (

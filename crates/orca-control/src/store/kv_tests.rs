@@ -58,6 +58,7 @@ fn set_and_get_service() {
         internal: false,
         depends_on: vec![],
         cmd: vec![],
+        extra_ports: vec![],
     };
     store
         .apply(&RaftEntry::SetService(Box::new(config)))
@@ -142,6 +143,7 @@ fn snapshot_captures_all_state() {
             internal: false,
             depends_on: vec![],
             cmd: vec![],
+            extra_ports: vec![],
         })))
         .unwrap();
 

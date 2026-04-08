@@ -292,6 +292,7 @@ pub(crate) async fn serve_loop_with_fallback(
     let client = Arc::new(
         reqwest::Client::builder()
             .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .expect("failed to build HTTP client"),
     );

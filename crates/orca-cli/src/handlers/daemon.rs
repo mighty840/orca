@@ -16,6 +16,24 @@ fn pid_path() -> Result<PathBuf> {
     Ok(orca_dir()?.join("orca.pid"))
 }
 
+/// Returns the path to `~/.orca/orca.cwd` — records the working directory the
+/// daemon was started in so `orca reload` can re-launch from the same place.
+fn cwd_path() -> Result<PathBuf> {
+    Ok(orca_dir()?.join("orca.cwd"))
+}
+
+/// Read the working directory the running daemon was started in.
+pub fn read_cwd() -> Option<PathBuf> {
+    let path = cwd_path().ok()?;
+    let contents = fs::read_to_string(path).ok()?;
+    let trimmed = contents.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(trimmed))
+    }
+}
+
 /// Returns the path to `~/.orca/orca.log`.
 fn log_path() -> Result<PathBuf> {
     Ok(orca_dir()?.join("orca.log"))
@@ -108,6 +126,9 @@ pub fn daemonize(args: &[String]) -> Result<()> {
     // Write PID file
     let pid_file = pid_path()?;
     fs::write(&pid_file, pid.to_string()).context("failed to write PID file")?;
+    // Record the working directory so `orca reload` can re-launch with the
+    // same cwd (cluster.toml and services/ are resolved relative to it).
+    let _ = fs::write(cwd_path()?, cwd.to_string_lossy().as_ref());
 
     println!(
         "Orca running in background (PID: {pid})\n  Log: {}",

@@ -35,6 +35,7 @@ fn minimal_config(image: Option<String>, module: Option<String>) -> ServiceConfi
         internal: false,
         depends_on: vec![],
         cmd: vec![],
+        extra_ports: vec![],
     }
 }
 

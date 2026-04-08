@@ -178,23 +178,19 @@ async fn populate_state_from_existing(
     let runtime = state.container_runtime.as_ref();
     let mut instances: Vec<InstanceState> = Vec::new();
     for handle in handles {
-        // Try metadata first, fall back to runtime resolution
-        let mut host_port = handle
-            .metadata
-            .get("host_port")
-            .and_then(|p| p.parse::<u16>().ok());
-        if host_port.is_none()
-            && let Some(p) = config.port
-            && let Ok(Some(port)) = runtime.resolve_host_port(&handle, p).await
-        {
-            host_port = Some(port);
-        }
-        // If still none and we have a config port, try once more with the
-        // resolved address (some containers map differently).
-        if host_port.is_none()
-            && let Some(p) = config.port
-        {
-            host_port = runtime.resolve_host_port(&handle, p).await.ok().flatten();
+        // Always resolve host_port using the configured container port —
+        // metadata's first-port-binding heuristic is unreliable when extra_ports
+        // are present (e.g. gitea SSH on 22222 vs HTTP on 3000).
+        let mut host_port = if let Some(p) = config.port {
+            runtime.resolve_host_port(&handle, p).await.ok().flatten()
+        } else {
+            None
+        };
+        if host_port.is_none() {
+            host_port = handle
+                .metadata
+                .get("host_port")
+                .and_then(|p| p.parse::<u16>().ok());
         }
         info!(
             service = %config.name,

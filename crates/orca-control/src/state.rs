@@ -208,6 +208,7 @@ mod tests {
             internal: false,
             depends_on: vec![],
             cmd: vec![],
+            extra_ports: vec![],
         }
     }
 

@@ -152,10 +152,11 @@ pub(crate) async fn reconcile_service(
         svc_state
             .instances
             .retain(|i| i.status == WorkloadStatus::Running);
-        // If all instances got pruned, fall through to re-create
-        if svc_state.instances.is_empty() {
+        // If all instances got pruned AND we still want some replicas,
+        // fall through to re-create. Without the `desired > 0` guard this
+        // would infinitely recurse for services declared with replicas=0.
+        if svc_state.instances.is_empty() && desired > 0 {
             drop(services);
-            // Re-acquire and proceed to scale up
             return Box::pin(reconcile_service(state, config)).await;
         }
         drop(services);

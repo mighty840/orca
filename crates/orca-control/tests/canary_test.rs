@@ -70,6 +70,7 @@ fn canary_config(name: &str, image: &str) -> ServiceConfig {
         internal: false,
         depends_on: vec![],
         cmd: vec![],
+        extra_ports: vec![],
     }
 }
 

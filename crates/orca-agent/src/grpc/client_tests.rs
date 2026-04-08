@@ -52,7 +52,7 @@ fn make_test_spec(name: &str) -> WorkloadSpec {
         tls_cert: None,
         tls_key: None,
         internal: false,
-        cmd: vec![],
+        cmd: vec![], extra_ports: vec![],
     }
 }
 

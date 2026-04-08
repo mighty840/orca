@@ -25,6 +25,7 @@ export default defineConfig({
           { text: 'Installation', link: '/guide/getting-started' },
           { text: 'Configuration', link: '/guide/configuration' },
           { text: 'Services', link: '/guide/services' },
+          { text: 'DevOps Guide', link: '/guide/devops' },
         ],
       },
       {
