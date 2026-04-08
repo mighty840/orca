@@ -3,6 +3,27 @@
 Tracked work items, grouped by area. Each entry should be specific enough
 to start without re-research.
 
+## File size cleanup
+
+- **Split files over 275 lines back under the original limit.** The
+  multi-node rollout pushed 12 files over 275 lines. CI limit was
+  temporarily relaxed to 420 to unblock v0.2.0-rc.2; needs to come
+  back down. Offenders:
+  - `crates/orca-proxy/src/lib.rs` (406) — move `RouteTarget` to its
+    own module
+  - `crates/orca-agent/src/docker/runtime.rs` (384) — split out
+    `LocalRoute` + `registry_credentials` helpers
+  - `crates/orca-tui/src/state.rs` (370) — extract `MetricHistory` +
+    `parse_human_bytes` into a `metrics` submodule
+  - `crates/orca-agent/src/grpc/client.rs` (347) — split heartbeat
+    loop and re-register logic
+  - `crates/orca-control/src/reconciler.rs` (338) — move remote
+    placement + placeholder instance into a separate file
+  - `crates/orca-control/src/lib.rs` (314), `webhook.rs` (311),
+    `health.rs` (305), `api/handlers/ops.rs`, `ui/nodes.rs`,
+    `ui.rs`, `handlers/server.rs` — each has one module-sized chunk
+    that can be moved cleanly.
+
 ## Remote log + exec streaming
 
 - **Secure websocket log stream from joined nodes to master.** Today
