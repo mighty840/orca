@@ -143,11 +143,10 @@ pub(crate) async fn reconcile_service(
         .or_insert_with(|| ServiceState::from_config(config.clone()));
 
     // Skip scaling if we already have the right number of instances
-    // with the same image — prevents duplicate containers on re-deploy.
-    let same_image = svc_state.config.image == config.image
-        && svc_state.config.module == config.module
-        && svc_state.config.env == config.env
-        && svc_state.config.cmd == config.cmd;
+    // with the same spec — prevents duplicate containers on re-deploy.
+    // Compares image, env, cmd, ports, mounts, volume, domain, aliases,
+    // extra_ports, strip_prefix, network, internal, and health.
+    let same_spec = svc_state.config.spec_matches(config);
 
     svc_state.config = config.clone();
     svc_state.desired_replicas = desired;
@@ -163,7 +162,7 @@ pub(crate) async fn reconcile_service(
         .instances
         .retain(|i| i.status == WorkloadStatus::Running);
 
-    if current == desired && same_image {
+    if current == desired && same_spec {
         info!(
             "Service {} already at desired state ({} replicas, same image) — skipping",
             config.name, desired
@@ -202,7 +201,7 @@ pub(crate) async fn reconcile_service(
     }
 
     // Config changed but replica count is the same — update in place.
-    if current == desired && !same_image {
+    if current == desired && !same_spec {
         let is_canary = config
             .deploy
             .as_ref()

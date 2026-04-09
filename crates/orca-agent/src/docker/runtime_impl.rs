@@ -31,7 +31,7 @@ impl Runtime for ContainerRuntime {
     }
 
     async fn create(&self, spec: &WorkloadSpec) -> Result<WorkloadHandle> {
-        self.ensure_image(&spec.image).await?;
+        self.ensure_image(&spec.image, spec.pull_policy).await?;
 
         let container_name = format!("orca-{}", spec.name);
         let config = super::config_builder::build_container_config(spec);

@@ -37,6 +37,7 @@ fn minimal_config(image: Option<String>, module: Option<String>) -> ServiceConfi
         cmd: vec![],
         extra_ports: vec![],
         strip_prefix: None,
+        pull_policy: Default::default(),
     }
 }
 

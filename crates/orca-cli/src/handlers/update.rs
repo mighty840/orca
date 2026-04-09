@@ -72,8 +72,36 @@ pub async fn handle_update() -> Result<()> {
 
     std::fs::rename(&tmp_path, &current_exe).context("failed to replace binary")?;
 
+    // Restore cap_net_bind_service so orca can still bind 80/443.
+    restore_setcap(&current_exe);
+
     println!("Updated to v{latest}. Restart orca to apply.");
     Ok(())
+}
+
+/// Restore `cap_net_bind_service` on the binary after an update.
+///
+/// `mv`/`rename` across filesystems creates a new inode, which clears
+/// the capability. This runs `sudo -n setcap` to restore it silently.
+fn restore_setcap(exe: &std::path::Path) {
+    let status = std::process::Command::new("sudo")
+        .arg("-n")
+        .arg("setcap")
+        .arg("cap_net_bind_service=+ep")
+        .arg(exe)
+        .status();
+    match status {
+        Ok(s) if s.success() => {
+            println!("Restored cap_net_bind_service on {}", exe.display());
+        }
+        _ => {
+            println!(
+                "Could not restore cap_net_bind_service. Run manually:\n  \
+                 sudo setcap 'cap_net_bind_service=+ep' {}",
+                exe.display()
+            );
+        }
+    }
 }
 
 /// Extract the semver portion from VERSION (e.g. "0.1.0-rc.3-abc123" -> "0.1.0-rc.3").

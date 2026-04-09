@@ -70,6 +70,12 @@ pub enum Command {
         service: Option<String>,
     },
 
+    /// Force redeploy a service (pull image + recreate)
+    Redeploy {
+        /// Service name
+        service: String,
+    },
+
     /// Rollback a service to previous version
     Rollback {
         /// Service name
@@ -179,6 +185,9 @@ pub enum Command {
 
     /// Self-update orca to the latest release
     Update,
+
+    /// Install orca as a systemd service (auto-start on boot)
+    InstallService,
 
     /// Build a Docker image from source for a service
     Build {

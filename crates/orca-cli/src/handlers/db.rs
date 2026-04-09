@@ -99,6 +99,7 @@ async fn handle_create(
         cmd: vec![],
         extra_ports: vec![],
         strip_prefix: None,
+        pull_policy: Default::default(),
     };
 
     // Store password as a secret

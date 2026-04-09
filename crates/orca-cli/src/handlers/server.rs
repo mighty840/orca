@@ -3,11 +3,15 @@ use std::sync::Arc;
 
 use tracing::info;
 
-use super::port::{check_privileged_port, is_permission_denied, setup_port_redirect};
+use super::port::{
+    check_privileged_port, cleanup_port_redirects, cleanup_stale_redirects, is_permission_denied,
+    setup_port_redirect,
+};
 
 /// Handle the `orca server` command.
 pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> {
     check_privileged_port(proxy_port);
+    cleanup_stale_redirects();
     let cluster_config = match orca_core::config::ClusterConfig::load(config.as_ref()) {
         Ok(c) => c,
         Err(e) => {
@@ -202,6 +206,7 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
     .await?;
 
     info!("Shutting down, cleaning up containers...");
+    cleanup_port_redirects();
     cleanup_runtime.cleanup_all().await;
     info!("Shutdown complete");
     Ok(())

@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::types::{
-    DeployStrategy, PlacementConstraint, Replicas, ResourceLimits, RuntimeKind, VolumeSpec,
+    DeployStrategy, PlacementConstraint, PullPolicy, Replicas, ResourceLimits, RuntimeKind,
+    VolumeSpec,
 };
 
 /// Probe configuration for readiness/liveness checks.
@@ -152,4 +153,192 @@ pub struct ServiceConfig {
     /// `/admin/users` upstream as `/users`.
     #[serde(default)]
     pub strip_prefix: Option<String>,
+    /// Image pull policy: auto (default), always, never, if-not-present.
+    #[serde(default)]
+    pub pull_policy: PullPolicy,
+}
+
+impl ServiceConfig {
+    /// Returns `true` if the deployment-relevant fields of two configs match.
+    ///
+    /// Used by the reconciler to decide whether a running service needs to
+    /// be recreated. Fields like `name`, `project`, `replicas` are handled
+    /// separately by the reconciler and are NOT compared here.
+    pub fn spec_matches(&self, other: &Self) -> bool {
+        self.image == other.image
+            && self.module == other.module
+            && self.env == other.env
+            && self.cmd == other.cmd
+            && self.port == other.port
+            && self.host_port == other.host_port
+            && self.domain == other.domain
+            && self.routes == other.routes
+            && self.volume == other.volume
+            && self.mounts == other.mounts
+            && self.aliases == other.aliases
+            && self.extra_ports == other.extra_ports
+            && self.strip_prefix == other.strip_prefix
+            && self.network == other.network
+            && self.internal == other.internal
+            && self.health == other.health
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn base_config() -> ServiceConfig {
+        ServiceConfig {
+            name: "test-svc".into(),
+            project: None,
+            runtime: RuntimeKind::Container,
+            image: Some("nginx:latest".into()),
+            module: None,
+            replicas: Replicas::Fixed(1),
+            port: Some(80),
+            host_port: None,
+            domain: Some("test.example.com".into()),
+            routes: vec!["/*".into()],
+            health: Some("/healthz".into()),
+            readiness: None,
+            liveness: None,
+            env: HashMap::from([("KEY".into(), "val".into())]),
+            resources: None,
+            volume: None,
+            deploy: None,
+            placement: None,
+            network: Some("web".into()),
+            aliases: vec!["test".into()],
+            mounts: vec!["/host:/container".into()],
+            triggers: vec![],
+            assets: None,
+            build: None,
+            tls_cert: None,
+            tls_key: None,
+            internal: false,
+            depends_on: vec![],
+            cmd: vec![],
+            extra_ports: vec!["8080:80".into()],
+            strip_prefix: Some("/api".into()),
+            pull_policy: Default::default(),
+        }
+    }
+
+    #[test]
+    fn identical_configs_match() {
+        let a = base_config();
+        let b = base_config();
+        assert!(a.spec_matches(&b));
+    }
+
+    #[test]
+    fn image_change_detected() {
+        let a = base_config();
+        let mut b = base_config();
+        b.image = Some("nginx:1.27".into());
+        assert!(!a.spec_matches(&b));
+    }
+
+    #[test]
+    fn env_change_detected() {
+        let a = base_config();
+        let mut b = base_config();
+        b.env.insert("NEW_KEY".into(), "new_val".into());
+        assert!(!a.spec_matches(&b));
+    }
+
+    #[test]
+    fn extra_ports_change_detected() {
+        let a = base_config();
+        let mut b = base_config();
+        b.extra_ports = vec!["9090:90".into()];
+        assert!(!a.spec_matches(&b));
+    }
+
+    #[test]
+    fn mounts_change_detected() {
+        let a = base_config();
+        let mut b = base_config();
+        b.mounts.push("/extra:/path".into());
+        assert!(!a.spec_matches(&b));
+    }
+
+    #[test]
+    fn volume_change_detected() {
+        let a = base_config();
+        let mut b = base_config();
+        b.volume = Some(crate::types::VolumeSpec {
+            path: "/data".into(),
+            size: None,
+        });
+        assert!(!a.spec_matches(&b));
+    }
+
+    #[test]
+    fn domain_change_detected() {
+        let a = base_config();
+        let mut b = base_config();
+        b.domain = Some("new.example.com".into());
+        assert!(!a.spec_matches(&b));
+    }
+
+    #[test]
+    fn aliases_change_detected() {
+        let a = base_config();
+        let mut b = base_config();
+        b.aliases.push("new-alias".into());
+        assert!(!a.spec_matches(&b));
+    }
+
+    #[test]
+    fn strip_prefix_change_detected() {
+        let a = base_config();
+        let mut b = base_config();
+        b.strip_prefix = None;
+        assert!(!a.spec_matches(&b));
+    }
+
+    #[test]
+    fn network_change_detected() {
+        let a = base_config();
+        let mut b = base_config();
+        b.network = Some("internal".into());
+        assert!(!a.spec_matches(&b));
+    }
+
+    #[test]
+    fn internal_flag_change_detected() {
+        let a = base_config();
+        let mut b = base_config();
+        b.internal = true;
+        assert!(!a.spec_matches(&b));
+    }
+
+    #[test]
+    fn port_change_detected() {
+        let a = base_config();
+        let mut b = base_config();
+        b.port = Some(8080);
+        assert!(!a.spec_matches(&b));
+    }
+
+    #[test]
+    fn cmd_change_detected() {
+        let a = base_config();
+        let mut b = base_config();
+        b.cmd = vec!["--debug".into()];
+        assert!(!a.spec_matches(&b));
+    }
+
+    #[test]
+    fn non_spec_fields_ignored() {
+        let a = base_config();
+        let mut b = base_config();
+        // These changes should NOT trigger a recreate
+        b.name = "different-name".into();
+        b.project = Some("other-project".into());
+        b.replicas = Replicas::Fixed(5);
+        assert!(a.spec_matches(&b));
+    }
 }

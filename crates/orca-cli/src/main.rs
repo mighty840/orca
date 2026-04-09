@@ -98,6 +98,9 @@ async fn main() -> anyhow::Result<()> {
         Command::Stop { service } => {
             handlers::ops::handle_stop(service, cli.api).await?;
         }
+        Command::Redeploy { service } => {
+            handlers::ops::handle_redeploy(service, cli.api).await?;
+        }
         Command::Rollback { service } => {
             handlers::ops::handle_rollback(service, cli.api).await?;
         }
@@ -136,6 +139,9 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Db { action } => {
             handlers::db::handle_db(action, cli.api).await?;
+        }
+        Command::InstallService => {
+            handlers::install_service::handle_install_service()?;
         }
         Command::Build { service, file } => {
             handlers::build::handle_build(&file, service).await?;

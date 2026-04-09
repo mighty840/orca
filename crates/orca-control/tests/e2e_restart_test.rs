@@ -43,6 +43,7 @@ fn nginx_config() -> orca_core::config::ServiceConfig {
         cmd: vec![],
         extra_ports: vec![],
         strip_prefix: None,
+        pull_policy: Default::default(),
     }
 }
 

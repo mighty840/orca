@@ -75,16 +75,42 @@ impl ContainerRuntime {
         Ok(Self { docker })
     }
 
-    /// Pull an image if it does not exist locally.
-    pub(crate) async fn ensure_image(&self, image: &str) -> Result<()> {
-        // For mutable tags (`:latest` or no tag), always pull to pick up
-        // upstream updates. For pinned tags (e.g. `:1.2.3` or `:sha`),
-        // skip the pull if the image is already present locally.
-        let tag = image.rsplit_once(':').map(|(_, t)| t).unwrap_or("latest");
-        let is_mutable = tag == "latest";
-        if !is_mutable && self.docker.inspect_image(image).await.is_ok() {
-            debug!("Image {image} already available locally");
-            return Ok(());
+    /// Pull an image according to the given pull policy.
+    pub(crate) async fn ensure_image(
+        &self,
+        image: &str,
+        policy: orca_core::types::PullPolicy,
+    ) -> Result<()> {
+        use orca_core::types::PullPolicy;
+
+        let exists = self.docker.inspect_image(image).await.is_ok();
+
+        match policy {
+            PullPolicy::Never => {
+                if exists {
+                    return Ok(());
+                }
+                return Err(OrcaError::Runtime(format!(
+                    "image {image} not found locally and pull_policy=never"
+                )));
+            }
+            PullPolicy::IfNotPresent => {
+                if exists {
+                    debug!("Image {image} already available locally (if-not-present)");
+                    return Ok(());
+                }
+            }
+            PullPolicy::Always => {
+                // Always pull, even if exists
+            }
+            PullPolicy::Auto => {
+                let tag = image.rsplit_once(':').map(|(_, t)| t).unwrap_or("latest");
+                let is_mutable = tag == "latest";
+                if !is_mutable && exists {
+                    debug!("Image {image} already available locally");
+                    return Ok(());
+                }
+            }
         }
 
         info!("Pulling image: {image}");

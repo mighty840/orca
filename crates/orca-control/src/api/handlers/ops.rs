@@ -159,6 +159,16 @@ pub(crate) async fn rollback(
     )
 }
 
+pub(crate) async fn redeploy(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    ok_or_500(
+        reconciler::redeploy(&state, &name).await,
+        &format!("redeploy {name}"),
+    )
+}
+
 pub(crate) async fn promote(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,

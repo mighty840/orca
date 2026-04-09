@@ -55,6 +55,7 @@ fn make_test_spec(name: &str) -> WorkloadSpec {
         cmd: vec![],
         extra_ports: vec![],
         strip_prefix: None,
+        pull_policy: Default::default(),
     }
 }
 

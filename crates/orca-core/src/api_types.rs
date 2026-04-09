@@ -148,6 +148,7 @@ mod tests {
                 cmd: vec![],
                 extra_ports: vec![],
                 strip_prefix: None,
+                pull_policy: Default::default(),
             }],
         };
         let json = serde_json::to_string(&req).unwrap();

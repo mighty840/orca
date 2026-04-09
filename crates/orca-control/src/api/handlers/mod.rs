@@ -14,7 +14,9 @@ use crate::state::AppState;
 mod ops;
 pub(crate) mod secrets;
 
-pub(crate) use ops::{logs, promote, rollback, scale, stop_all, stop_project, stop_service};
+pub(crate) use ops::{
+    logs, promote, redeploy, rollback, scale, stop_all, stop_project, stop_service,
+};
 
 /// Health check endpoint.
 pub(crate) async fn health() -> impl IntoResponse {

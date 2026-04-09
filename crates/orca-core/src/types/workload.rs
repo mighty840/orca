@@ -53,6 +53,9 @@ pub struct WorkloadSpec {
     /// Prefix stripped from proxied paths before forwarding upstream.
     #[serde(default)]
     pub strip_prefix: Option<String>,
+    /// Image pull policy.
+    #[serde(default)]
+    pub pull_policy: super::PullPolicy,
 }
 
 /// Replica count: either a fixed number or "auto" for auto-scaling.
@@ -131,7 +134,7 @@ pub struct ResourceLimits {
     pub gpu: Option<GpuSpec>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VolumeSpec {
     pub path: String,
     pub size: Option<String>,

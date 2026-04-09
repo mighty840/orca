@@ -97,6 +97,17 @@ impl OrcaClient {
         Ok(())
     }
 
+    pub async fn redeploy(&self, service: &str) -> anyhow::Result<()> {
+        self.auth(
+            self.client
+                .post(self.url(&format!("/api/v1/services/{service}/redeploy"))),
+        )
+        .send()
+        .await?
+        .error_for_status()?;
+        Ok(())
+    }
+
     pub async fn rollback(&self, service: &str) -> anyhow::Result<()> {
         self.auth(
             self.client

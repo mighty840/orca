@@ -1,0 +1,31 @@
+[Unit]
+Description=Orca Container + Wasm Orchestrator
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=sharang
+WorkingDirectory=%h/orca
+ExecStart=%h/.local/bin/orca server --daemon
+Restart=on-failure
+RestartSec=5
+
+# Allow binding to privileged ports (80, 443) without root.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+# Ensure the capability is kept even after execve.
+SecureBits=keep-caps
+
+# Sensible resource limits.
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Logging.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=orca
+
+[Install]
+WantedBy=multi-user.target

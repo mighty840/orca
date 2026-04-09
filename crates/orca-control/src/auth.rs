@@ -21,6 +21,7 @@ fn required_action(path: &str, method: &str) -> &'static str {
         ("POST", "/api/v1/stop") => "stop",
         ("POST", p) if p.contains("/scale") => "scale",
         ("POST", p) if p.contains("/rollback") => "rollback",
+        ("POST", p) if p.contains("/redeploy") => "deploy",
         ("POST", p) if p.contains("/drain") => "deploy",
         ("POST", p) if p.contains("/undrain") => "deploy",
         ("POST", p) if p.contains("/register") => "deploy",
@@ -95,4 +96,59 @@ pub async fn auth_middleware(
     }
 
     (StatusCode::UNAUTHORIZED, "invalid bearer token").into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deploy_requires_deploy_action() {
+        assert_eq!(required_action("/api/v1/deploy", "POST"), "deploy");
+    }
+
+    #[test]
+    fn redeploy_requires_deploy_action() {
+        assert_eq!(
+            required_action("/api/v1/services/nginx/redeploy", "POST"),
+            "deploy"
+        );
+    }
+
+    #[test]
+    fn rollback_requires_rollback_action() {
+        assert_eq!(
+            required_action("/api/v1/services/nginx/rollback", "POST"),
+            "rollback"
+        );
+    }
+
+    #[test]
+    fn scale_requires_scale_action() {
+        assert_eq!(
+            required_action("/api/v1/services/nginx/scale", "POST"),
+            "scale"
+        );
+    }
+
+    #[test]
+    fn stop_service_requires_stop_action() {
+        assert_eq!(required_action("/api/v1/services/nginx", "DELETE"), "stop");
+    }
+
+    #[test]
+    fn status_requires_status_action() {
+        assert_eq!(required_action("/api/v1/status", "GET"), "status");
+    }
+
+    #[test]
+    fn secrets_requires_secrets_action() {
+        assert_eq!(required_action("/api/v1/secrets", "GET"), "secrets");
+        assert_eq!(required_action("/api/v1/secrets/MY_KEY", "POST"), "secrets");
+    }
+
+    #[test]
+    fn unknown_path_defaults_to_status() {
+        assert_eq!(required_action("/unknown/path", "GET"), "status");
+    }
 }

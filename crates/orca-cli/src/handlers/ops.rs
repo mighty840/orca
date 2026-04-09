@@ -200,6 +200,13 @@ pub fn handle_gpus() {
     println!("GPU monitoring: use `orca nodes --gpus`");
 }
 
+pub async fn handle_redeploy(service: String, api: String) -> anyhow::Result<()> {
+    let client = OrcaClient::new(api);
+    client.redeploy(&service).await?;
+    println!("Redeployed service: {service}");
+    Ok(())
+}
+
 pub async fn handle_rollback(service: String, api: String) -> anyhow::Result<()> {
     let client = OrcaClient::new(api);
     client.rollback(&service).await?;

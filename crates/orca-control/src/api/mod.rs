@@ -24,6 +24,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/v1/services/{name}/logs", get(handlers::logs))
         .route("/api/v1/services/{name}/scale", post(handlers::scale))
         .route("/api/v1/services/{name}/rollback", post(handlers::rollback))
+        .route("/api/v1/services/{name}/redeploy", post(handlers::redeploy))
         .route("/api/v1/services/{name}/promote", post(handlers::promote))
         .route("/api/v1/services/{name}", delete(handlers::stop_service))
         .route("/api/v1/projects/{project}", delete(handlers::stop_project))
