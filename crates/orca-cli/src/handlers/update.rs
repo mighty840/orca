@@ -6,12 +6,16 @@ use serde::Deserialize;
 use crate::VERSION;
 
 const RELEASES_URL: &str = "https://api.github.com/repos/mighty840/orca/releases/latest";
+const ALL_RELEASES_URL: &str = "https://api.github.com/repos/mighty840/orca/releases?per_page=10";
 const ASSET_NAME: &str = "orca-linux-x86_64";
 
 #[derive(Deserialize)]
 struct GithubRelease {
     tag_name: String,
     assets: Vec<GithubAsset>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    prerelease: bool,
 }
 
 #[derive(Deserialize)]
@@ -26,14 +30,9 @@ pub async fn handle_update() -> Result<()> {
 
     let client = reqwest::Client::builder().user_agent("orca-cli").build()?;
 
-    let release: GithubRelease = client
-        .get(RELEASES_URL)
-        .send()
-        .await
-        .context("failed to fetch latest release")?
-        .json()
-        .await
-        .context("failed to parse release JSON")?;
+    // Try /releases/latest first (stable). If current version is a prerelease,
+    // also check recent releases to find newer RCs.
+    let release = find_newest_release(&client).await?;
 
     let latest = release.tag_name.trim_start_matches('v');
     let current = current_version();
@@ -47,7 +46,9 @@ pub async fn handle_update() -> Result<()> {
         .assets
         .iter()
         .find(|a| a.name == ASSET_NAME)
-        .context("release asset not found")?;
+        .context(format!(
+            "binary asset '{ASSET_NAME}' not found in release {latest}"
+        ))?;
 
     println!("Downloading {ASSET_NAME} v{latest}...");
     let bytes = client
@@ -102,6 +103,52 @@ fn restore_setcap(exe: &std::path::Path) {
             );
         }
     }
+}
+
+/// Find the newest release, including prereleases if the current version is a prerelease.
+async fn find_newest_release(client: &reqwest::Client) -> Result<GithubRelease> {
+    let current = current_version();
+    let is_prerelease = current.contains("rc");
+
+    // Always try stable latest first
+    if let Ok(resp) = client.get(RELEASES_URL).send().await
+        && let Ok(release) = resp.json::<GithubRelease>().await
+    {
+        let ver = release.tag_name.trim_start_matches('v');
+        if is_newer(ver, current) {
+            return Ok(release);
+        }
+    }
+
+    // If running a prerelease, also scan recent releases for newer RCs
+    if is_prerelease
+        && let Ok(resp) = client.get(ALL_RELEASES_URL).send().await
+        && let Ok(releases) = resp.json::<Vec<GithubRelease>>().await
+    {
+        let mut best: Option<GithubRelease> = None;
+        for rel in releases {
+            let ver = rel.tag_name.trim_start_matches('v');
+            if !is_newer(ver, current) {
+                continue;
+            }
+            if rel.assets.iter().any(|a| a.name == ASSET_NAME) {
+                match &best {
+                    None => best = Some(rel),
+                    Some(prev) => {
+                        let prev_ver = prev.tag_name.trim_start_matches('v');
+                        if is_newer(ver, prev_ver) {
+                            best = Some(rel);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(release) = best {
+            return Ok(release);
+        }
+    }
+
+    anyhow::bail!("no newer release found (current: {current})")
 }
 
 /// Extract the semver portion from VERSION (e.g. "0.1.0-rc.3-abc123" -> "0.1.0-rc.3").
