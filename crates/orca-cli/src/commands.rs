@@ -187,7 +187,15 @@ pub enum Command {
     Update,
 
     /// Install orca as a systemd service (auto-start on boot)
-    InstallService,
+    InstallService {
+        /// Leader address for agent nodes (e.g., "46.225.100.82:6880").
+        /// If set, installs an agent (join) unit instead of a server unit.
+        #[arg(long)]
+        leader: Option<String>,
+        /// Cluster token (reads from ~/.orca/cluster.token if omitted)
+        #[arg(long)]
+        token: Option<String>,
+    },
 
     /// Build a Docker image from source for a service
     Build {

@@ -140,8 +140,8 @@ async fn main() -> anyhow::Result<()> {
         Command::Db { action } => {
             handlers::db::handle_db(action, cli.api).await?;
         }
-        Command::InstallService => {
-            handlers::install_service::handle_install_service()?;
+        Command::InstallService { leader, token } => {
+            handlers::install_service::handle_install_service(leader, token)?;
         }
         Command::Build { service, file } => {
             handlers::build::handle_build(&file, service).await?;
