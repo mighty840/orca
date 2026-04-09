@@ -38,12 +38,51 @@ cargo build --release
 # Binary at target/release/orca
 ```
 
-### Port binding (one-time)
+### Systemd service (recommended)
 
-Orca's proxy needs ports 80 and 443. On Linux, grant the capability after each install:
+Install orca as a systemd service for auto-start on boot and automatic
+port 80/443 binding (no manual `setcap` needed):
+
+```bash
+# Master node (control plane + proxy):
+orca install-service
+sudo systemctl start orca
+
+# Agent node (joined to a master):
+orca install-service --leader <master-ip>:6880
+sudo systemctl start orca-agent
+```
+
+The systemd unit uses `AmbientCapabilities=CAP_NET_BIND_SERVICE`, so
+the binary can bind to privileged ports without root or setcap.
+
+View logs with `journalctl -u orca -f` (or `orca-agent` on agent nodes).
+
+### Port binding (manual, without systemd)
+
+If not using systemd, grant the capability after each install or update:
 
 ```bash
 sudo setcap 'cap_net_bind_service=+ep' $(which orca)
+```
+
+> **Note:** `orca update` attempts to restore setcap automatically via
+> `sudo -n setcap`. If passwordless sudo isn't configured, you'll need
+> to run the setcap command manually after each update. Using systemd
+> avoids this entirely.
+
+## Updating
+
+```bash
+orca update          # Downloads latest release, restores setcap
+orca reload          # Restarts the daemon and redeploys all services
+```
+
+If running via systemd:
+
+```bash
+orca update
+sudo systemctl restart orca   # or orca-agent on agent nodes
 ```
 
 ## Your First Cluster

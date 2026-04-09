@@ -48,11 +48,24 @@ The orca server reads services from the `services/` directory **relative to its 
 # On the host, once:
 git clone ssh://git@gitea.meghsakha.com:22222/sharang/orca-infra.git ~/orca
 
-# Then always start orca from ~/orca:
+# Install as a systemd service (recommended):
+orca install-service                                    # master node
+orca install-service --leader <master-ip>:6880          # agent nodes
+sudo systemctl start orca       # or orca-agent
+
+# Or start manually:
 cd ~/orca && orca server -d
 ```
 
-To roll out a change: commit in `orca-infra`, `git pull` on the host, `orca deploy <service>`.
+To roll out a change: commit in `orca-infra`, `git pull` on the host, `orca deploy`.
+
+To update the binary on all nodes:
+
+```bash
+orca update                                 # downloads latest from GitHub
+sudo systemctl restart orca                 # master
+sudo systemctl restart orca-agent           # agent nodes
+```
 
 ### A real example: Keycloak
 
@@ -114,7 +127,7 @@ A few things to note:
 ::: danger Pitfall: always run orca from the same working directory
 orca looks for `services/` **relative to the current working directory**. If you run `orca server -d` from `~`, it will look for `~/services/` and find nothing. Worse, if you run `orca deploy keycloak` from `~` while the server is running in `~/orca`, the deploy command will fail to find the toml.
 
-**Rule:** always `cd ~/orca` before running any orca command. Put it in a shell alias or a systemd `WorkingDirectory=` line. Don't rely on muscle memory.
+**Rule:** use `orca install-service` — it sets `WorkingDirectory=~/orca` in the systemd unit automatically. If running manually, always `cd ~/orca` first.
 :::
 
 ## 2. cluster.toml
@@ -535,9 +548,12 @@ It should now pick up the restored data and pass its liveness check.
 
 A skimmable list of every pitfall covered above:
 
-- **cwd matters for services/.** Always `cd ~/orca` before `orca server` or `orca deploy`. Orca resolves `services/` relative to the current working directory.
+- **cwd matters for services/.** Use `orca install-service` (sets `WorkingDirectory` automatically) or always `cd ~/orca` before commands.
 - **cwd matters for secrets.json.** `orca secrets set` writes to `$PWD/secrets.json`. Always run from `~/orca`. (Being fixed.)
-- **cluster.toml is only read on startup.** Restart orca after editing: `orca shutdown && cd ~/orca && orca server -d`.
+- **cluster.toml is only read on startup.** Restart orca after editing: `sudo systemctl restart orca`.
+- **setcap is not needed with systemd.** `orca install-service` generates a unit with `AmbientCapabilities=CAP_NET_BIND_SERVICE`. Only use `setcap` if running without systemd.
+- **Agent nodes need `--leader` for systemd.** Use `orca install-service --leader <ip>:6880` on joined nodes — this creates `orca-agent.service` with the join command.
+- **`orca update` auto-restores setcap** via `sudo -n setcap`. If passwordless sudo isn't configured, run `sudo setcap` manually or use systemd (which doesn't need it).
 - **Webhooks are in-memory.** Re-register them after every restart. Keep the `curl` commands in a script. (Being fixed.)
 - **`orca backup all` has a tokio nesting bug.** Use scheduled backups until it's fixed.
 - **Pre-pull your registry image** before the first boot if your registry is managed by orca. Otherwise bootstrap deadlock.

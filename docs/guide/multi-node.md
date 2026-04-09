@@ -38,7 +38,41 @@ labels = { zone = "eu-1", role = "gpu" }
 On each worker node, join the cluster:
 
 ```bash
-orca join <leader-address>
+# One-time join (foreground):
+orca join <leader-ip>:6880 --token <cluster-token>
+
+# Or as a daemon:
+orca join <leader-ip>:6880 --token <cluster-token> --daemon
+```
+
+### Systemd setup (recommended)
+
+Install orca as a systemd service on each node for auto-start on boot:
+
+```bash
+# Master node:
+orca install-service
+sudo systemctl start orca
+
+# Agent/worker nodes:
+orca install-service --leader <leader-ip>:6880
+sudo systemctl start orca-agent
+```
+
+The `--token` is auto-read from `~/.orca/cluster.token`. Pass
+`--token <value>` explicitly if the file doesn't exist.
+
+Each agent node runs a local reverse proxy (HTTP :80 + HTTPS :443)
+for domains assigned to services placed on that node. The systemd unit
+includes `AmbientCapabilities=CAP_NET_BIND_SERVICE` so no `setcap` is
+needed.
+
+### Updating nodes
+
+```bash
+orca update                          # Downloads latest binary
+sudo systemctl restart orca          # Master
+sudo systemctl restart orca-agent    # Agent nodes
 ```
 
 The first node to run `orca server` becomes the leader.

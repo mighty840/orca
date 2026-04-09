@@ -37,8 +37,22 @@ Docker Compose ──> Coolify ──> Orca ──> Kubernetes
 
 ```bash
 cargo install mallorca
+
+# Option A: systemd (recommended — handles port binding automatically)
+orca install-service
+sudo systemctl start orca
+
+# Option B: manual (requires setcap after each install/update)
 sudo setcap 'cap_net_bind_service=+ep' $(which orca)
-orca server
+orca server --daemon
+```
+
+Add worker nodes:
+
+```bash
+# On the worker node:
+orca install-service --leader <master-ip>:6880
+sudo systemctl start orca-agent
 ```
 
 Create a service in `services/web/service.toml` and deploy:
