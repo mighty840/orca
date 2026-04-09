@@ -7,6 +7,7 @@ use bollard::container::{
     Config, CreateContainerOptions, RemoveContainerOptions, StartContainerOptions,
     WaitContainerOptions,
 };
+use bollard::image::CreateImageOptions;
 use bollard::models::HostConfig;
 use bollard::volume::ListVolumesOptions;
 use futures_util::StreamExt;
@@ -108,12 +109,29 @@ pub(crate) fn backup_dir_path(home: &std::path::Path, epoch_secs: u64) -> String
         .to_string()
 }
 
+async fn ensure_busybox(docker: &Docker) -> anyhow::Result<()> {
+    if docker.inspect_image("busybox:latest").await.is_ok() {
+        return Ok(());
+    }
+    tracing::info!("Pulling busybox:latest for backup");
+    let opts = CreateImageOptions {
+        from_image: "busybox:latest",
+        ..Default::default()
+    };
+    let mut stream = docker.create_image(Some(opts), None, None);
+    while let Some(result) = stream.next().await {
+        result.map_err(|e| anyhow::anyhow!("failed to pull busybox: {e}"))?;
+    }
+    Ok(())
+}
+
 async fn run_busybox_tar(
     docker: &Docker,
     volume: &str,
     backup_dir: &str,
     cmd: Vec<String>,
 ) -> anyhow::Result<()> {
+    ensure_busybox(docker).await?;
     let container_name = format!("orca-backup-{}", rand::random::<u32>());
     let binds = vec![format!("{volume}:/data"), format!("{backup_dir}:/backup")];
     let config = Config {

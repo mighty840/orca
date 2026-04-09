@@ -142,3 +142,27 @@ to start without re-research.
   volume needs to roll up to S3 (e.g. cache/temp).
 - **Restore from S3.** `s3_backend::restore` is unimplemented; the CLI
   prints "S3 restore not yet supported."
+
+## TUI
+
+- **Single-project view filter.** Let user scope the TUI to one project
+  at a time instead of a flat list of all services.
+- **Remember last-opened project.** On TUI launch, reopen whichever
+  project was active last session. If none (first run or project
+  deleted), start with no project selected.
+- **Backups per node.** Show backup status grouped by node — last run
+  time, volume count, total size, any failures. Needs
+  `GET /api/v1/cluster/backups` aggregating results from all nodes.
+
+## Tags & project-level config
+
+- **Tags on nodes, services, and projects.** Free-form key-value labels
+  (e.g. `env=prod`, `team=compliance`, `tier=frontend`) on nodes,
+  services, and projects. Stored in cluster.db, surfaced in TUI and
+  `orca status`. Enables filtering, batch ops, and placement affinity
+  beyond the current `placement.node` field.
+- **Project-level environment variables (secrets).** Today secrets are
+  global. Add per-project scoping so `${secrets.X}` resolves project
+  scope first, then falls back to global. CLI: `orca secrets set
+  --project <name> KEY VALUE`. Stored alongside global secrets with a
+  project prefix in the secrets store.
