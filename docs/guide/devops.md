@@ -1,6 +1,6 @@
 # DevOps Guide
 
-A practical, opinionated playbook for running orca in production. Every recommendation here comes from real operational experience migrating a ~20-service cluster (keycloak, gitea, litellm, searxng, compliance-agent, certifai-dashboard, and friends) off other orchestrators. Every pitfall listed was learned the hard way.
+A practical, opinionated playbook for running orca in production. Every recommendation here comes from real operational experience migrating a ~20-service cluster (keycloak, gitea, litellm, searxng, and friends) off other orchestrators. Every pitfall listed was learned the hard way.
 
 If you're just getting started, read the [Getting Started](./getting-started) and [Configuration](./configuration) guides first. This page assumes you already have an `orca` binary and a host to run it on.
 
@@ -12,7 +12,7 @@ Orca services are defined declaratively as `service.toml` files. You should trea
 
 ### The orca-infra repo
 
-Create a dedicated repo — we use `gitea.meghsakha.com/sharang/orca-infra`. Layout:
+Create a dedicated repo — we use `git.example.com/myorg/infra`. Layout:
 
 ```
 orca-infra/
@@ -21,7 +21,7 @@ orca-infra/
 │   ├── keycloak/
 │   │   ├── service.toml
 │   │   └── config/
-│   │       └── certifai-theme/
+│   │       └── custom-theme/
 │   │           └── ...theme files...
 │   ├── gitea/
 │   │   └── service.toml
@@ -33,7 +33,7 @@ orca-infra/
 │   │   └── service.toml
 │   ├── compliance-agent/
 │   │   └── service.toml
-│   └── certifai-dashboard/
+│   └── my-app/
 │       └── service.toml
 └── README.md
 ```
@@ -46,7 +46,7 @@ The orca server reads services from the `services/` directory **relative to its 
 
 ```bash
 # On the host, once:
-git clone ssh://git@gitea.meghsakha.com:22222/sharang/orca-infra.git ~/orca
+git clone ssh://git@git.example.com:22222/myorg/infra.git ~/orca
 
 # Install as a systemd service (recommended):
 orca install-service                                    # master node
@@ -91,7 +91,7 @@ name = "keycloak"
 image = "quay.io/keycloak/keycloak:25.0"
 runtime = "docker"
 command = ["start", "--optimized", "--http-enabled=true", "--hostname-strict=false"]
-domain = "auth.meghsakha.com"
+domain = "auth.example.com"
 port = 8080
 depends_on = ["keycloak-db"]
 
@@ -100,14 +100,14 @@ KC_DB = "postgres"
 KC_DB_URL = "jdbc:postgresql://keycloak-db:5432/keycloak"
 KC_DB_USERNAME = "${secrets.KEYCLOAK_DB_USER}"
 KC_DB_PASSWORD = "${secrets.KEYCLOAK_DB_PASSWORD}"
-KC_HOSTNAME = "auth.meghsakha.com"
+KC_HOSTNAME = "auth.example.com"
 KC_PROXY_HEADERS = "xforwarded"
 KEYCLOAK_ADMIN = "${secrets.KEYCLOAK_ADMIN_USERNAME}"
 KEYCLOAK_ADMIN_PASSWORD = "${secrets.KEYCLOAK_BOOTSTRAP_PASSWORD}"
 
 [[service.mounts]]
-source = "./services/keycloak/config/certifai-theme"
-target = "/opt/keycloak/themes/certifai"
+source = "./services/keycloak/config/custom-theme"
+target = "/opt/keycloak/themes/custom-theme"
 read_only = true
 
 [service.liveness]
@@ -134,15 +134,15 @@ orca looks for `services/` **relative to the current working directory**. If you
 
 `cluster.toml` is the single source of truth for cluster-level configuration: cluster identity, default domain, ACME settings, and the backup schedule. It lives at the root of your orca-infra repo next to `services/`.
 
-Here's what the breakpilot cluster looks like:
+Here's what the cluster config looks like:
 
 ```toml
 [cluster]
-name = "breakpilot"
-domain = "meghsakha.com"
+name = "my-cluster"
+domain = "example.com"
 
 [acme]
-email = "ops@meghsakha.com"
+email = "ops@example.com"
 directory = "https://acme-v02.api.letsencrypt.org/directory"
 
 [proxy]
@@ -161,7 +161,7 @@ path = "/var/lib/orca/backups"
 [[backup.targets]]
 type = "s3"
 endpoint = "https://nbg1.your-objectstorage.com"
-bucket = "breakpilot-backups"
+bucket = "my-backups"
 region = "nbg1"
 access_key = "${secrets.HETZNER_S3_ACCESS_KEY}"
 secret_key = "${secrets.HETZNER_S3_SECRET_KEY}"
@@ -230,11 +230,11 @@ Your CI builds an image, pushes `:latest` (and optionally `:<sha>` for debugging
 
 Your CI builds an image tagged `:<sha>` only, then opens a PR against `orca-infra` to bump the toml. A human merges. Orca picks up the change on `orca deploy`. Best for databases, auth services, anything where you want an auditable history and a one-click revert.
 
-The rest of this section walks through Pattern 1 using **certifai-dashboard**.
+The rest of this section walks through Pattern 1 using **my-app**.
 
 ### Gitea Actions workflow
 
-`.gitea/workflows/ci.yml` in the certifai-dashboard repo:
+`.gitea/workflows/ci.yml` in the my-app repo:
 
 ```yaml
 name: build-and-deploy
@@ -252,28 +252,28 @@ jobs:
       - name: Log in to registry
         run: |
           echo "${{ secrets.REGISTRY_PASSWORD }}" | \
-            docker login registry.meghsakha.com \
+            docker login registry.example.com \
               -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
 
       - name: Build image
         run: |
           docker build \
-            -t registry.meghsakha.com/certifai-dashboard:latest \
-            -t registry.meghsakha.com/certifai-dashboard:${{ github.sha }} \
+            -t registry.example.com/my-app:latest \
+            -t registry.example.com/my-app:${{ github.sha }} \
             .
 
       - name: Push image
         run: |
-          docker push registry.meghsakha.com/certifai-dashboard:latest
-          docker push registry.meghsakha.com/certifai-dashboard:${{ github.sha }}
+          docker push registry.example.com/my-app:latest
+          docker push registry.example.com/my-app:${{ github.sha }}
 
       - name: Trigger orca webhook
         env:
           SECRET: ${{ secrets.ORCA_WEBHOOK_SECRET }}
         run: |
-          BODY='{"repo":"sharang/certifai-dashboard","ref":"refs/heads/main","sha":"${{ github.sha }}"}'
+          BODY='{"repo":"myorg/my-app","ref":"refs/heads/main","sha":"${{ github.sha }}"}'
           SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')
-          curl -fsSL -X POST https://orca.meghsakha.com/api/v1/webhooks/github \
+          curl -fsSL -X POST https://orca.example.com/api/v1/webhooks/github \
             -H "Content-Type: application/json" \
             -H "X-Hub-Signature-256: sha256=$SIG" \
             -d "$BODY"
@@ -294,8 +294,8 @@ curl -X POST http://127.0.0.1:6880/api/v1/webhooks \
   -H "Authorization: Bearer $(cat ~/.orca/cluster.token)" \
   -H "Content-Type: application/json" \
   -d '{
-    "repo": "sharang/certifai-dashboard",
-    "service_name": "certifai-dashboard",
+    "repo": "myorg/my-app",
+    "service_name": "my-app",
     "branch": "main",
     "secret": "the-same-value-as-ORCA_WEBHOOK_SECRET"
   }'
@@ -320,10 +320,10 @@ Registered webhooks live in the orca server's in-memory state and are **lost on 
 Orca uses the host's `~/.docker/config.json` for registry authentication. Log in once on the host:
 
 ```bash
-docker login registry.meghsakha.com
+docker login registry.example.com
 ```
 
-From then on, any `service.toml` that references `registry.meghsakha.com/foo:tag` will be pulled with those credentials.
+From then on, any `service.toml` that references `registry.example.com/foo:tag` will be pulled with those credentials.
 
 ### The chicken-and-egg problem
 
@@ -360,7 +360,7 @@ path = "/var/lib/orca/backups"
 [[backup.targets]]
 type = "s3"
 endpoint = "https://nbg1.your-objectstorage.com"
-bucket = "breakpilot-backups"
+bucket = "my-backups"
 region = "nbg1"
 access_key = "${secrets.HETZNER_S3_ACCESS_KEY}"
 secret_key = "${secrets.HETZNER_S3_SECRET_KEY}"
@@ -440,11 +440,11 @@ Orca's built-in proxy listens on 80/443 and routes HTTP(S) traffic to services b
 [[service]]
 name = "gitea"
 image = "gitea/gitea:1.22"
-domain = "gitea.meghsakha.com"
+domain = "git.example.com"
 port = 3000
 ```
 
-Any request to `https://gitea.meghsakha.com` gets routed to the `gitea` container on port 3000. No extra config.
+Any request to `https://git.example.com` gets routed to the `gitea` container on port 3000. No extra config.
 
 ### Non-HTTP ports: extra_ports
 
@@ -454,12 +454,12 @@ For services that need a raw TCP port exposed outside the proxy — Gitea SSH, P
 [[service]]
 name = "gitea"
 image = "gitea/gitea:1.22"
-domain = "gitea.meghsakha.com"
+domain = "git.example.com"
 port = 3000
 extra_ports = ["22222:22"]
 ```
 
-This publishes container port 22 on host port 22222. That's how Gitea SSH (`ssh://git@gitea.meghsakha.com:22222`) works on this cluster.
+This publishes container port 22 on host port 22222. That's how Gitea SSH (`ssh://git@git.example.com:22222`) works on this cluster.
 
 ### Strict-cookie clients: Keycloak, etc.
 
@@ -490,10 +490,10 @@ Pay attention to: `Env`, `Mounts`, `NetworkSettings.Networks`, `HostConfig.PortB
 **2. For DB-backed services, stop the app first, then dump the DB.**
 
 ```bash
-docker stop certifai-dashboard               # disconnect all clients
-docker exec certifai-db \
-  pg_dump -U postgres -d certifai -F c -f /tmp/db.dump
-docker cp certifai-db:/tmp/db.dump ./certifai.dump
+docker stop my-app               # disconnect all clients
+docker exec my-app-db \
+  pg_dump -U postgres -d myapp -F c -f /tmp/db.dump
+docker cp my-app-db:/tmp/db.dump ./myapp.dump
 ```
 
 Stopping the app first guarantees a consistent dump — no half-written rows, no surprise migrations mid-dump.
@@ -504,15 +504,15 @@ Stopping the app first guarantees a consistent dump — no half-written rows, no
 
 ```bash
 cd ~/orca
-orca secrets set CERTIFAI_DB_USER postgres
-orca secrets set CERTIFAI_DB_PASSWORD 'value-from-docker-inspect'
+orca secrets set MY_APP_DB_USER postgres
+orca secrets set MY_APP_DB_PASSWORD 'value-from-docker-inspect'
 # ... repeat for every secret
 ```
 
 **5. Deploy the new orca-managed containers.**
 
 ```bash
-cd ~/orca && orca deploy certifai-dashboard
+cd ~/orca && orca deploy my-app
 ```
 
 This starts the new DB (empty) and the new app. The app will almost certainly fail its liveness check because the DB is empty — that's fine, we're about to fix it.
@@ -520,14 +520,14 @@ This starts the new DB (empty) and the new app. The app will almost certainly fa
 **6. Restore the DB dump into the new DB container.**
 
 ```bash
-docker cp ./certifai.dump orca-certifai-db:/tmp/db.dump
+docker cp ./myapp.dump orca-my-app-db:/tmp/db.dump
 
-docker exec orca-certifai-db \
-  psql -U postgres -d certifai \
+docker exec orca-my-app-db \
+  psql -U postgres -d myapp \
   -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
 
-docker exec orca-certifai-db \
-  pg_restore -U postgres -d certifai /tmp/db.dump
+docker exec orca-my-app-db \
+  pg_restore -U postgres -d myapp /tmp/db.dump
 ```
 
 The `DROP SCHEMA` is important — `pg_restore` doesn't like pre-existing tables from the fresh init.
@@ -535,7 +535,7 @@ The `DROP SCHEMA` is important — `pg_restore` doesn't like pre-existing tables
 **7. Restart the app.**
 
 ```bash
-orca restart certifai-dashboard
+orca restart my-app
 ```
 
 It should now pick up the restored data and pass its liveness check.

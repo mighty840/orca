@@ -128,7 +128,7 @@ master. When the two differ the header prints both versions so you
 know one side is lagging.
 
 ```
- orca ● | breakpilot | 28/29 running | 3 nodes | 02:14:33 | v0.2.0-rc.1-95210a0
+ orca ● | my-cluster | 28/29 running | 3 nodes | 02:14:33 | v0.2.0-rc.1-95210a0
 ```
 
 Footer hints on the services view:
