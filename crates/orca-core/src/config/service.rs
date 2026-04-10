@@ -341,4 +341,25 @@ mod tests {
         b.replicas = Replicas::Fixed(5);
         assert!(a.spec_matches(&b));
     }
+
+    #[test]
+    fn unresolved_secret_templates_match() {
+        let mut a = base_config();
+        let mut b = base_config();
+        // Both have the same unresolved template — should match
+        a.env.insert("TOKEN".into(), "${secrets.MY_TOKEN}".into());
+        b.env.insert("TOKEN".into(), "${secrets.MY_TOKEN}".into());
+        assert!(a.spec_matches(&b));
+    }
+
+    #[test]
+    fn resolved_vs_unresolved_differs() {
+        let mut a = base_config();
+        let mut b = base_config();
+        // a has the template, b has a resolved value — should NOT match
+        a.env.insert("TOKEN".into(), "${secrets.MY_TOKEN}".into());
+        b.env
+            .insert("TOKEN".into(), "actual-secret-value-123".into());
+        assert!(!a.spec_matches(&b));
+    }
 }

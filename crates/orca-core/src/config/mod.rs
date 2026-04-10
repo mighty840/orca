@@ -58,15 +58,9 @@ impl ServicesConfig {
                 let mut config = Self::load(&svc_file)?;
                 let project_name = entry.file_name().to_string_lossy().to_string();
 
-                // Resolve secrets from per-service secrets.json
-                let secrets_file = entry.path().join("secrets.json");
-                if secrets_file.exists()
-                    && let Ok(store) = crate::secrets::SecretStore::open(&secrets_file)
-                {
-                    for svc in &mut config.service {
-                        svc.env = store.resolve_env(&svc.env);
-                    }
-                }
+                // Secrets are resolved later in service_config_to_spec()
+                // so that spec_matches() compares unresolved templates,
+                // preventing unnecessary restarts when token values change.
 
                 // Set project name and default network from directory
                 for svc in &mut config.service {

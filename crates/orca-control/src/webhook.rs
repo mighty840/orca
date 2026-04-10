@@ -347,27 +347,15 @@ async fn handle_infra_deploy(state: &AppState) -> anyhow::Result<usize> {
         orca_core::config::ServicesConfig::load("services.toml".as_ref())?
     };
 
-    // Resolve secrets from the on-disk store
-    let secret_store =
-        orca_core::secrets::SecretStore::open(orca_core::secrets::default_path()).ok();
-
-    let resolved: Vec<_> = configs
-        .service
-        .into_iter()
-        .map(|mut svc| {
-            if let Some(store) = &secret_store {
-                svc.env = store.resolve_env(&svc.env);
-            }
-            svc
-        })
-        .collect();
-
-    let count = resolved.len();
-    let (deployed, errors) = reconciler::reconcile(state, &resolved).await;
+    // Secrets are resolved in service_config_to_spec() at container creation
+    // time, not here. This ensures spec_matches() compares unresolved templates
+    // and doesn't restart containers just because a token was refreshed.
+    let count = configs.service.len();
+    let (deployed, errors) = reconciler::reconcile(state, &configs.service).await;
 
     // Persist deployed services to store
     if let Some(store) = &state.store {
-        for config in &resolved {
+        for config in &configs.service {
             if deployed.contains(&config.name)
                 && let Err(e) = store.set_service(&config.name, config)
             {
