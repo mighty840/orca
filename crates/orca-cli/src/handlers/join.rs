@@ -139,17 +139,18 @@ pub async fn handle_join(
     // on every locally-managed container.
     let route_table: Arc<RwLock<HashMap<String, Vec<RouteTarget>>>> =
         Arc::new(RwLock::new(HashMap::new()));
-    spawn_local_proxy(route_table.clone(), docker_runtime.clone(), acme_email).await;
+    let (acme, resolver) =
+        spawn_local_proxy(route_table.clone(), docker_runtime.clone(), acme_email).await;
 
-    // Channel for domain discovery notifications (WS deploy → proxy route)
+    // Channel for domain discovery notifications (WS deploy → proxy route + cert)
     let (domain_tx, mut domain_rx) = tokio::sync::mpsc::channel::<(String, String, u16)>(32);
 
     // Spawn domain discovery listener that updates the proxy route table
+    // AND hot-provisions TLS certs for newly discovered domains.
     let route_table_for_domains = route_table.clone();
-    let _docker_rt_for_domains = docker_runtime.clone();
     tokio::spawn(async move {
         while let Some((service, domain, port)) = domain_rx.recv().await {
-            info!("Domain notification: {domain} for {service} (port {port})");
+            info!("WS domain notification: {domain} for {service} (port {port})");
             let target = RouteTarget {
                 address: format!("127.0.0.1:{port}"),
                 service_name: service,
@@ -158,7 +159,18 @@ pub async fn handle_join(
                 weight: 100,
             };
             let mut routes = route_table_for_domains.write().await;
-            routes.insert(domain, vec![target]);
+            routes.insert(domain.clone(), vec![target]);
+            drop(routes);
+
+            // Hot-provision TLS cert for the new domain
+            if let Some(res) = &resolver
+                && !res.has_cert(&domain)
+            {
+                match acme.ensure_cert_for_resolver(&domain, res).await {
+                    Ok(()) => info!("Hot-provisioned TLS cert for {domain}"),
+                    Err(e) => tracing::warn!("Cert provisioning failed for {domain}: {e}"),
+                }
+            }
         }
     });
 
@@ -189,10 +201,14 @@ pub async fn handle_join(
 /// even if no domains exist yet — `ensure_cert_for_resolver` is called
 /// hot whenever the route refresher discovers a new domain, so a service
 /// can be added later without restarting the agent.
+/// Returns the ACME manager and cert resolver for hot cert provisioning.
 async fn spawn_local_proxy(
     route_table: Arc<RwLock<HashMap<String, Vec<RouteTarget>>>>,
     runtime: Arc<orca_agent::docker::ContainerRuntime>,
     acme_email: String,
+) -> (
+    orca_proxy::acme::AcmeManager,
+    Option<orca_proxy::SharedCertResolver>,
 ) {
     let triggers: orca_proxy::SharedWasmTriggers = Arc::new(RwLock::new(Vec::new()));
     let cache = dirs_next::home_dir()
@@ -213,32 +229,37 @@ async fn spawn_local_proxy(
     let routes_for_proxy = route_table.clone();
     let triggers_for_proxy = triggers.clone();
     let domains_for_proxy = initial_domains.clone();
-    let proxy_handle = tokio::spawn(async move {
-        match orca_proxy::run_proxy_with_acme_and_fallback(
-            routes_for_proxy,
-            triggers_for_proxy,
-            None,
-            acme_for_proxy,
-            domains_for_proxy,
-            None,
-        )
-        .await
-        {
-            Ok(_resolver) => {}
-            Err(e) => tracing::error!("Node-local proxy failed: {e}"),
+    // Start the proxy and capture the cert resolver for hot provisioning.
+    let resolver_for_refresh = match orca_proxy::run_proxy_with_acme_and_fallback(
+        routes_for_proxy,
+        triggers_for_proxy,
+        None,
+        acme_for_proxy.clone(),
+        domains_for_proxy,
+        None,
+    )
+    .await
+    {
+        Ok(resolver) => {
+            info!(
+                "Node-local proxy started (HTTP :80 + HTTPS :443) with {} initial domain(s)",
+                initial_domains.len()
+            );
+            Some(resolver)
         }
-    });
-    // Detach: the proxy spawns its own listeners and we don't await it here.
-    drop(proxy_handle);
-    info!(
-        "Node-local proxy started (HTTP :80 + HTTPS :443) with {} initial domain(s)",
-        initial_domains.len()
-    );
+        Err(e) => {
+            tracing::error!("Node-local proxy failed: {e}");
+            None
+        }
+    };
+
+    let resolver_out = resolver_for_refresh.clone();
 
     // Background route refresher: rescans docker every 5s and rebuilds the
-    // route table from `orca.domain` / `orca.port` labels. New domains are
-    // added immediately so the next request lands correctly.
+    // route table from `orca.domain` / `orca.port` labels. New domains get
+    // their TLS cert hot-provisioned immediately.
     let refresher = route_table.clone();
+    let acme_for_refresh = acme.clone();
     tokio::spawn(async move {
         let mut known_domains: std::collections::HashSet<String> =
             initial_domains.into_iter().collect();
@@ -275,13 +296,23 @@ async fn spawn_local_proxy(
                         });
                 }
             }
-            // New domains discovered since last refresh — log them; the proxy
-            // will provision certs lazily on the first matching connection.
+            // New domains discovered since last refresh — hot-provision TLS certs.
             for d in current.difference(&known_domains) {
                 info!("Discovered new domain on this node: {d}");
+                if let Some(resolver) = &resolver_for_refresh
+                    && !resolver.has_cert(d)
+                {
+                    if let Err(e) = acme_for_refresh.ensure_cert_for_resolver(d, resolver).await {
+                        tracing::warn!("Failed to provision cert for {d}: {e}");
+                    } else {
+                        info!("Hot-provisioned TLS cert for {d}");
+                    }
+                }
             }
             known_domains = current;
             *refresher.write().await = new_table;
         }
     });
+
+    (acme, resolver_out)
 }
