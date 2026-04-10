@@ -180,13 +180,66 @@ async fn handle_master_message(
         MasterMessage::Ack { node_id } => {
             info!("WS: master acknowledged node {node_id}");
         }
-        MasterMessage::Reconcile { expected: _ } => {
-            // TODO: implement reconciliation in #21
-            warn!("WS: reconcile not yet implemented");
+        MasterMessage::Reconcile { expected } => {
+            info!("WS: reconciling {} expected services", expected.len());
+            reconcile_services(expected, runtime, agent, domain_tx).await;
         }
     }
 
     Ok(())
+}
+
+/// Reconcile: compare expected services from master against what's actually
+/// running locally. Deploy any missing services, skip ones already running.
+#[allow(clippy::vec_box)]
+async fn reconcile_services(
+    expected: Vec<Box<orca_core::types::WorkloadSpec>>,
+    runtime: &Arc<dyn Runtime>,
+    agent: &Arc<AgentClient>,
+    domain_tx: &mpsc::Sender<(String, String, u16)>,
+) {
+    let running = agent.collect_workload_reports(runtime.as_ref()).await;
+    let running_names: std::collections::HashSet<String> =
+        running.iter().map(|r| r.service_name.clone()).collect();
+
+    let mut deployed = 0u32;
+    let mut skipped = 0u32;
+
+    for spec in &expected {
+        if running_names.contains(&spec.name) {
+            skipped += 1;
+            continue;
+        }
+
+        info!("Reconcile: deploying missing service {}", spec.name);
+        match agent.deploy_spec(runtime.as_ref(), spec).await {
+            Ok(()) => {
+                deployed += 1;
+                // Notify domain discovery
+                if let Some(domain) = &spec.domain
+                    && let Ok(Some(port)) = runtime
+                        .resolve_host_port(
+                            &orca_core::runtime::WorkloadHandle {
+                                runtime_id: format!("orca-{}", spec.name),
+                                name: format!("orca-{}", spec.name),
+                                metadata: Default::default(),
+                            },
+                            spec.port.unwrap_or(80),
+                        )
+                        .await
+                {
+                    let _ = domain_tx
+                        .send((spec.name.clone(), domain.clone(), port))
+                        .await;
+                }
+            }
+            Err(e) => {
+                error!("Reconcile: failed to deploy {}: {e}", spec.name);
+            }
+        }
+    }
+
+    info!("Reconcile complete: {deployed} deployed, {skipped} already running");
 }
 
 /// Build heartbeat message with current workload status and host stats.

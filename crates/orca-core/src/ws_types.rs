@@ -57,6 +57,7 @@ pub enum MasterMessage {
     Ack { node_id: u64 },
     /// Report which services should be running on this node
     /// so the agent can reconcile on reconnect.
+    #[allow(clippy::vec_box)]
     Reconcile { expected: Vec<Box<WorkloadSpec>> },
 }
 
