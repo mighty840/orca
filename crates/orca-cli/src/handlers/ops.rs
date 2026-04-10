@@ -1,6 +1,24 @@
 use crate::client::OrcaClient;
 use crate::commands::{AlertsAction, SecretsAction, WebhookAction};
 
+/// Resolve the API URL: on agent nodes, fall back to the saved leader URL
+/// if the default localhost:6880 isn't reachable.
+pub fn resolve_api(api: &str) -> String {
+    if api != "http://127.0.0.1:6880" {
+        return api.to_string();
+    }
+    let leader_file = dirs_next::home_dir()
+        .unwrap_or_else(|| ".".into())
+        .join(".orca/leader.url");
+    if let Ok(url) = std::fs::read_to_string(&leader_file) {
+        let url = url.trim().to_string();
+        if !url.is_empty() {
+            return url;
+        }
+    }
+    api.to_string()
+}
+
 pub async fn handle_stop(service: Option<String>, api: String) -> anyhow::Result<()> {
     let client = OrcaClient::new(api);
     match service {
@@ -222,24 +240,7 @@ pub async fn handle_promote(service: String, api: String) -> anyhow::Result<()> 
 }
 
 pub async fn handle_tui(api: &str) -> anyhow::Result<()> {
-    // On agent nodes, fall back to saved leader URL if default API isn't reachable
-    let api = if api == "http://127.0.0.1:6880" {
-        let leader_file = dirs_next::home_dir()
-            .unwrap_or_else(|| ".".into())
-            .join(".orca/leader.url");
-        if let Ok(url) = std::fs::read_to_string(&leader_file) {
-            let url = url.trim().to_string();
-            if !url.is_empty() {
-                url
-            } else {
-                api.to_string()
-            }
-        } else {
-            api.to_string()
-        }
-    } else {
-        api.to_string()
-    };
+    let api = resolve_api(api);
     orca_tui::run_tui(&api).await
 }
 pub async fn handle_web(_port: u16) -> anyhow::Result<()> {

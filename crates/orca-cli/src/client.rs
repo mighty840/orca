@@ -14,10 +14,12 @@ pub struct OrcaClient {
 
 impl OrcaClient {
     /// Create a new client. Auto-reads token from `~/.orca/cluster.token` or `ORCA_TOKEN`.
+    /// On agent nodes, falls back to saved leader URL if the default localhost API is used.
     pub fn new(base_url: String) -> Self {
         let token = crate::handlers::server::read_token(None);
+        let resolved = crate::handlers::ops::resolve_api(&base_url);
         Self {
-            base_url: base_url.trim_end_matches('/').to_string(),
+            base_url: resolved.trim_end_matches('/').to_string(),
             client: reqwest::Client::new(),
             token,
         }
