@@ -118,7 +118,9 @@ async fn ws_sends_reconcile_on_connect() {
     }
 
     let addr = start_server(state).await;
-    let url = format!("ws://{addr}/api/v1/ws/agent?token=test-token-123&node_id=77");
+    let url = format!(
+        "ws://{addr}/api/v1/ws/agent?token=test-token-123&node_id=77&address=contabo-host%3A6881"
+    );
     let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
 
     // First message: Ack
