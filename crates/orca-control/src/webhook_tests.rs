@@ -30,18 +30,21 @@ async fn webhook_store_remove_by_service_name() {
             service_name: "api".to_string(),
             branch: "main".to_string(),
             secret: None,
+            infra: false,
         });
         webhooks.push(WebhookConfig {
             repo: "org/web".to_string(),
             service_name: "web".to_string(),
             branch: "main".to_string(),
             secret: None,
+            infra: false,
         });
         webhooks.push(WebhookConfig {
             repo: "org/api".to_string(),
             service_name: "api".to_string(),
             branch: "develop".to_string(),
             secret: None,
+            infra: false,
         });
     }
 
@@ -66,6 +69,7 @@ async fn webhook_store_remove_nonexistent() {
             service_name: "api".to_string(),
             branch: "main".to_string(),
             secret: None,
+            infra: false,
         });
     }
 
@@ -87,6 +91,7 @@ fn webhook_config_serialization() {
         service_name: "app".to_string(),
         branch: "main".to_string(),
         secret: None,
+        infra: false,
     };
     let json = serde_json::to_string(&config).unwrap();
     let parsed: WebhookConfig = serde_json::from_str(&json).unwrap();
