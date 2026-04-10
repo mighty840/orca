@@ -163,8 +163,16 @@ to start without re-research.
 - **Secrets organizer.** Group secrets by project, show which services
   reference each secret, add/edit/delete from TUI. Today secrets are
   a flat list managed via `orca secrets set`.
+- **AI chat interface as TUI landing page.** Open the TUI to an
+  `orca ask`-style chat pane by default. The user types questions,
+  the AI responds with cluster context (services, health, stats).
+  Previous conversations persist in the session. Services/logs/etc
+  are secondary tabs. This makes the TUI the primary ops interface.
 - **Log viewer.** Stream logs from any service (local or remote) in a
   TUI pane. Depends on WS log streaming (#12).
+- **Alert delivery: Slack, webhook, email (#24).** Config exists but
+  delivery is unimplemented. Conversational alerts only visible via
+  `orca alerts list` today.
 
 ## CLI
 
