@@ -168,6 +168,17 @@ to start without re-research.
 
 ## CLI
 
+- **`orca ask` should work locally without a running server.** Today it
+  sends the question to the API which reads AI config from the running
+  server's cluster.toml. Should fall back to reading cluster.toml from
+  CWD or `~/.orca/` and calling the LLM directly from the CLI.
+- **Resolve `cluster.toml` and `services/` upward.** Today all CLI
+  commands only work from the orca working directory. Should walk up
+  to find `cluster.toml` like git finds `.git/`, or fall back to
+  `~/.orca/cluster.toml` for global config.
+- **Secrets resolution in `cluster.toml`.** Today `${secrets.X}` only
+  works in service.toml env vars. AI api_key and other cluster config
+  values should also resolve from the secrets store.
 - **Multi-argument commands.** `orca redeploy`, `orca stop`, `orca deploy`,
   and `orca logs` should accept multiple service names in a single
   invocation, e.g. `orca redeploy api web worker`. Today each command
