@@ -154,6 +154,18 @@ to start without re-research.
   time, volume count, total size, any failures. Needs
   `GET /api/v1/cluster/backups` aggregating results from all nodes.
 
+- **Webhook management.** View, add, edit, and delete webhooks from
+  the TUI. Show last trigger time, status, and matched repo/branch.
+  Today webhooks can only be managed via curl to the REST API.
+- **Backup dashboard.** Per-node backup status: last run, volume count,
+  total size, failures, retention. Trigger manual backup. View/restore
+  individual volume snapshots. Needs `GET /api/v1/cluster/backups`.
+- **Secrets organizer.** Group secrets by project, show which services
+  reference each secret, add/edit/delete from TUI. Today secrets are
+  a flat list managed via `orca secrets set`.
+- **Log viewer.** Stream logs from any service (local or remote) in a
+  TUI pane. Depends on WS log streaming (#12).
+
 ## Tags & project-level config
 
 - **Tags on nodes, services, and projects.** Free-form key-value labels
