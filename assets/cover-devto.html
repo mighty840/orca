@@ -26,12 +26,11 @@
   }
   .logo {
     width: 140px; height: 140px;
-    background: linear-gradient(135deg, #388bfd, #a371f7);
-    border-radius: 28px;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 72px; font-weight: 800;
     flex-shrink: 0;
-    box-shadow: 0 0 60px rgba(56,139,253,0.3);
+    filter: drop-shadow(0 0 30px rgba(6,182,212,0.4));
+  }
+  .logo img {
+    width: 100%; height: 100%;
   }
   .text h1 {
     font-size: 52px; font-weight: 800;
@@ -78,7 +77,7 @@
 <body>
   <div class="grid"></div>
   <div class="content">
-    <div class="logo">O</div>
+    <div class="logo"><img src="logo.svg" alt="Orca"></div>
     <div class="text">
       <h1><span>Orca</span> — Container Orchestrator</h1>
       <p>Single binary. Auto-TLS. Multi-node. No Kubernetes required.</p>

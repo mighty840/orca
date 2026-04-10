@@ -166,6 +166,21 @@ to start without re-research.
 - **Log viewer.** Stream logs from any service (local or remote) in a
   TUI pane. Depends on WS log streaming (#12).
 
+## CLI
+
+- **Multi-argument commands.** `orca redeploy`, `orca stop`, `orca deploy`,
+  and `orca logs` should accept multiple service names in a single
+  invocation, e.g. `orca redeploy api web worker`. Today each command
+  takes only one service name, requiring separate calls.
+- **Shell auto-completion.** Generate completions for bash/zsh/fish via
+  `orca completions bash > /etc/bash_completion.d/orca`. Use clap's
+  built-in `clap_complete` crate. Should complete subcommands, flags,
+  and dynamically complete service names by querying the API.
+- **`orca redeploy` must route to the correct node.** Today `redeploy`
+  runs on master and tries to create the container locally even when
+  the service is placed on a remote agent. Should check placement and
+  dispatch via WS/heartbeat to the target node.
+
 ## Tags & project-level config
 
 - **Tags on nodes, services, and projects.** Free-form key-value labels
