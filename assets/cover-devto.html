@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 1000px; height: 420px;
+    background: linear-gradient(135deg, #0d1117 0%, #161b22 50%, #0d1117 100%);
+    display: flex; align-items: center; justify-content: center;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: #e6edf3;
+    overflow: hidden;
+    position: relative;
+  }
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(56,139,253,0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(56,139,253,0.05) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  .content {
+    position: relative; z-index: 1;
+    display: flex; align-items: center; gap: 48px;
+    padding: 0 60px;
+  }
+  .logo {
+    width: 140px; height: 140px;
+    background: linear-gradient(135deg, #388bfd, #a371f7);
+    border-radius: 28px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 72px; font-weight: 800;
+    flex-shrink: 0;
+    box-shadow: 0 0 60px rgba(56,139,253,0.3);
+  }
+  .text h1 {
+    font-size: 52px; font-weight: 800;
+    background: linear-gradient(90deg, #e6edf3, #8b949e);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    line-height: 1.1;
+  }
+  .text h1 span {
+    background: linear-gradient(90deg, #388bfd, #a371f7);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .text p {
+    font-size: 18px; color: #8b949e; margin-top: 12px;
+    line-height: 1.4;
+  }
+  .spectrum {
+    margin-top: 20px;
+    display: flex; align-items: center; gap: 0;
+    font-size: 13px; font-weight: 600;
+  }
+  .spectrum .seg {
+    padding: 6px 14px;
+    border: 1px solid rgba(139,148,158,0.3);
+    color: #8b949e;
+  }
+  .spectrum .seg:first-child { border-radius: 6px 0 0 6px; }
+  .spectrum .seg:last-child { border-radius: 0 6px 6px 0; }
+  .spectrum .seg.active {
+    background: linear-gradient(135deg, #388bfd, #a371f7);
+    color: #fff;
+    border-color: #388bfd;
+  }
+  .spectrum .arrow { color: #30363d; margin: 0 -1px; font-size: 16px; }
+  .badge {
+    position: absolute; bottom: 20px; right: 30px;
+    font-size: 13px; color: #484f58;
+  }
+  .badge code {
+    background: #21262d; padding: 3px 8px; border-radius: 4px;
+    color: #7ee787; font-family: monospace;
+  }
+</style>
+</head>
+<body>
+  <div class="grid"></div>
+  <div class="content">
+    <div class="logo">O</div>
+    <div class="text">
+      <h1><span>Orca</span> — Container Orchestrator</h1>
+      <p>Single binary. Auto-TLS. Multi-node. No Kubernetes required.</p>
+      <div class="spectrum">
+        <div class="seg">Compose</div>
+        <div class="seg">Coolify</div>
+        <div class="seg active">Orca (2-20 nodes)</div>
+        <div class="seg">Kubernetes</div>
+      </div>
+    </div>
+  </div>
+  <div class="badge">Written in Rust | <code>cargo install mallorca</code></div>
+</body>
+</html>
