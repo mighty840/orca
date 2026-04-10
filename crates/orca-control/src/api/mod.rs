@@ -12,9 +12,11 @@ mod handlers;
 
 /// Build the axum router for the API.
 pub fn router(state: Arc<AppState>) -> Router {
-    // Unauthenticated routes (metrics for Prometheus scraping).
+    // Unauthenticated routes (metrics, WS agent endpoint).
+    // WS does its own token auth via query param.
     let public = Router::new()
         .route("/metrics", get(crate::metrics::metrics_handler))
+        .route("/api/v1/ws/agent", get(crate::ws_handler::ws_agent_handler))
         .with_state(state.clone());
 
     let authed = Router::new()

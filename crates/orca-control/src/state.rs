@@ -50,6 +50,10 @@ pub struct AppState {
     pub container_stats: RwLock<HashMap<String, ContainerStats>>,
     /// Persistent cluster store (redb). None in tests without persistence.
     pub store: Option<Arc<crate::store::ClusterStore>>,
+    /// WebSocket senders for connected agent nodes, keyed by node_id.
+    pub ws_agents: RwLock<HashMap<u64, crate::ws_handler::AgentSender>>,
+    /// Log stream listeners: request_id → (data, done) sender.
+    pub log_listeners: RwLock<HashMap<String, tokio::sync::mpsc::Sender<(String, bool)>>>,
 }
 
 /// A node registered in the cluster.
@@ -141,6 +145,8 @@ impl AppState {
             cert_resolver: None,
             container_stats: RwLock::new(HashMap::new()),
             store: None,
+            ws_agents: RwLock::new(HashMap::new()),
+            log_listeners: RwLock::new(HashMap::new()),
         }
     }
 

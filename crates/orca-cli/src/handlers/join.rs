@@ -96,7 +96,7 @@ pub async fn handle_join(
     });
     let local_address = format!("{local_ip}:6881");
 
-    let agent = orca_agent::grpc::AgentClient::new(leader_url, node_id);
+    let agent = orca_agent::grpc::AgentClient::new(leader_url.clone(), node_id);
 
     // Retry registration with exponential backoff
     let mut delay = Duration::from_secs(2);
@@ -141,8 +141,41 @@ pub async fn handle_join(
         Arc::new(RwLock::new(HashMap::new()));
     spawn_local_proxy(route_table.clone(), docker_runtime.clone(), acme_email).await;
 
+    // Channel for domain discovery notifications (WS deploy → proxy route)
+    let (domain_tx, mut domain_rx) = tokio::sync::mpsc::channel::<(String, String, u16)>(32);
+
+    // Spawn domain discovery listener that updates the proxy route table
+    let route_table_for_domains = route_table.clone();
+    let _docker_rt_for_domains = docker_runtime.clone();
+    tokio::spawn(async move {
+        while let Some((service, domain, port)) = domain_rx.recv().await {
+            info!("Domain notification: {domain} for {service} (port {port})");
+            let target = RouteTarget {
+                address: format!("127.0.0.1:{port}"),
+                service_name: service,
+                path_pattern: Some("/*".to_string()),
+                strip_prefix: None,
+                weight: 100,
+            };
+            let mut routes = route_table_for_domains.write().await;
+            routes.insert(domain, vec![target]);
+        }
+    });
+
+    // Read cluster token for WS auth
+    let token = std::env::var("ORCA_TOKEN").unwrap_or_default();
+    let agent_arc = Arc::new(agent);
+
     tokio::select! {
-        _ = agent.run_heartbeat_loop(Duration::from_secs(5), container_runtime.clone()) => {},
+        // Try WS streaming (auto-reconnects, sends heartbeats over WS)
+        _ = orca_agent::ws_client::run_ws_loop(
+            &leader_url,
+            node_id,
+            &token,
+            container_runtime.clone(),
+            agent_arc.clone(),
+            domain_tx,
+        ) => {},
         _ = tokio::signal::ctrl_c() => {
             info!("Shutdown signal received");
         }

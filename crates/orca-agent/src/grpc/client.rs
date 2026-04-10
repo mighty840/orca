@@ -331,6 +331,69 @@ impl AgentClient {
         }
     }
 
+    /// Deploy a workload spec directly (used by WS client).
+    pub async fn deploy_spec(
+        &self,
+        runtime: &dyn Runtime,
+        spec: &orca_core::types::WorkloadSpec,
+    ) -> anyhow::Result<()> {
+        let handle = runtime.create(spec).await?;
+        runtime.start(&handle).await?;
+        self.update_workload_status(&handle.runtime_id, &spec.name, WorkloadStatus::Running)
+            .await;
+        Ok(())
+    }
+
+    /// Stop a service by name (used by WS client).
+    pub async fn stop_service(&self, runtime: &dyn Runtime, service_name: &str) {
+        let handles: Vec<_> = {
+            let workloads = self.workloads.read().await;
+            workloads
+                .iter()
+                .filter(|(_, info)| info.service_name == service_name)
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+        for id in &handles {
+            let handle = orca_core::runtime::WorkloadHandle {
+                runtime_id: id.clone(),
+                name: format!("orca-{service_name}"),
+                metadata: Default::default(),
+            };
+            let _ = runtime
+                .stop(&handle, std::time::Duration::from_secs(10))
+                .await;
+            let _ = runtime.remove(&handle).await;
+        }
+        let mut workloads = self.workloads.write().await;
+        for id in handles {
+            workloads.remove(&id);
+        }
+    }
+
+    /// Collect workload status reports for heartbeat (used by WS client).
+    pub async fn collect_workload_reports(
+        &self,
+        _runtime: &dyn Runtime,
+    ) -> Vec<orca_core::ws_types::WorkloadReport> {
+        let workloads = self.workloads.read().await;
+        workloads
+            .iter()
+            .map(|(id, info)| orca_core::ws_types::WorkloadReport {
+                service_name: info.service_name.clone(),
+                status: match info.status {
+                    WorkloadStatus::Running => "running",
+                    WorkloadStatus::Stopped | WorkloadStatus::Completed => "stopped",
+                    WorkloadStatus::Failed => "failed",
+                    WorkloadStatus::Pending | WorkloadStatus::Creating => "pending",
+                    WorkloadStatus::Stopping => "stopping",
+                }
+                .into(),
+                container_id: Some(id.clone()),
+            })
+            .collect()
+    }
+
     pub async fn update_workload_status(&self, id: &str, service: &str, status: WorkloadStatus) {
         let mut workloads = self.workloads.write().await;
         workloads.insert(

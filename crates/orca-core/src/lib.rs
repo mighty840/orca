@@ -8,3 +8,4 @@ pub mod runtime;
 pub mod secrets;
 pub mod testing;
 pub mod types;
+pub mod ws_types;

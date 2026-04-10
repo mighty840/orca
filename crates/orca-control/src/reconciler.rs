@@ -325,8 +325,31 @@ async fn find_target_node(state: &AppState, config: &ServiceConfig) -> Option<u6
     None
 }
 
-/// Queue a deploy command for a remote agent node.
+/// Send a deploy command to a remote agent node.
+///
+/// If the agent is connected via WebSocket, send immediately.
+/// Otherwise, queue for the next HTTP heartbeat.
 async fn queue_remote_deploy(state: &AppState, node_id: u64, spec: &WorkloadSpec) {
+    // Try WS first (instant delivery)
+    let ws_sent = {
+        let agents = state.ws_agents.read().await;
+        if let Some(tx) = agents.get(&node_id) {
+            tx.send(orca_core::ws_types::MasterMessage::Deploy {
+                spec: Box::new(spec.clone()),
+            })
+            .await
+            .is_ok()
+        } else {
+            false
+        }
+    };
+
+    if ws_sent {
+        info!("Sent deploy via WS to node {node_id}: {}", spec.name);
+        return;
+    }
+
+    // Fallback: queue for HTTP heartbeat
     let cmd = serde_json::json!({
         "action": "deploy",
         "spec": spec,
