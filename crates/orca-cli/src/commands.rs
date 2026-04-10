@@ -21,6 +21,8 @@ pub enum Command {
 
     /// Deploy services from config (file or directory)
     Deploy {
+        /// Service name to deploy (deploys all if omitted)
+        service: Option<String>,
         /// Path to services dir or single .toml file
         #[arg(short, long, default_value = "services")]
         file: String,

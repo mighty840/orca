@@ -66,8 +66,8 @@ async fn main() -> anyhow::Result<()> {
             }
             handlers::server::handle_server(&config, proxy_port).await?;
         }
-        Command::Deploy { file } => {
-            handlers::deploy::handle_deploy(&file, cli.api).await?;
+        Command::Deploy { service, file } => {
+            handlers::deploy::handle_deploy(&file, service, cli.api).await?;
         }
         Command::Status => {
             handlers::status::handle_status(cli.api).await?;
