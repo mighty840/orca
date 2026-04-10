@@ -311,8 +311,48 @@ From then on, every push to `main` will:
 Orca force-pulls `:latest` tags on every reconcile (this landed in main today). For `:<sha>` or any other immutable tag, orca skips the pull if the image already exists locally. This means Pattern 1 ("just bump latest") works as expected, and Pattern 2 ("bump the sha in toml") is efficient — no pointless re-pulls.
 :::
 
-::: warning Pitfall: webhooks are currently in-memory
-Registered webhooks live in the orca server's in-memory state and are **lost on restart**. After every `orca shutdown` / `orca server -d`, you need to re-register them. This is being fixed — webhook persistence is tracked as a known issue. Until then, keep the `curl` registration commands in a script in your orca-infra repo so you can replay them.
+::: tip Webhooks are persisted
+As of v0.2.2, registered webhooks are saved to `~/.orca/webhooks.json` and survive restarts. You no longer need to re-register them after a reboot or `orca shutdown`.
+:::
+
+### Infra webhook: GitOps auto-deploy
+
+In addition to per-service webhooks, orca supports an **infra webhook** that
+triggers a full `git pull` + `orca deploy` whenever you push to your
+orca-infra repo. This is the simplest GitOps setup -- no CI runner required.
+
+Register the infra webhook:
+
+```bash
+curl -X POST http://127.0.0.1:6880/api/v1/webhooks \
+  -H "Authorization: Bearer $(cat ~/.orca/cluster.token)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repo": "myorg/orca-infra",
+    "service_name": "__infra__",
+    "branch": "main",
+    "secret": "your-infra-webhook-secret"
+  }'
+```
+
+Then add a webhook in your Git host (Gitea, GitHub, etc.) pointing at
+`https://orca.example.com/api/v1/webhooks/github` with the same secret.
+
+Now the workflow is:
+
+1. Edit a `service.toml` in orca-infra, commit, push
+2. Git host fires the webhook
+3. Orca runs `git pull` in its working directory and redeploys changed services
+
+### `orca deploy` vs `orca redeploy`
+
+- **`orca deploy`** (no args) -- discovers all `services/*/service.toml` files and reconciles. Only containers whose spec has changed are recreated.
+- **`orca deploy <service-name>`** -- same as above, but scoped to a single service. Useful for deploying one service without touching the rest.
+- **`orca redeploy <service>`** -- force-pulls the container image and restarts the service, even if the spec hasn't changed. Use this when you've pushed a new `:latest` image and want to pick it up immediately.
+
+::: tip When to use which
+Use `orca deploy` for config changes (env vars, ports, domains, mounts).
+Use `orca redeploy` for image-only updates where the tag hasn't changed (e.g., `:latest`).
 :::
 
 ## 5. Private Docker registry pulls
@@ -554,7 +594,7 @@ A skimmable list of every pitfall covered above:
 - **setcap is not needed with systemd.** `orca install-service` generates a unit with `AmbientCapabilities=CAP_NET_BIND_SERVICE`. Only use `setcap` if running without systemd.
 - **Agent nodes need `--leader` for systemd.** Use `orca install-service --leader <ip>:6880` on joined nodes — this creates `orca-agent.service` with the join command.
 - **`orca update` auto-restores setcap** via `sudo -n setcap`. If passwordless sudo isn't configured, run `sudo setcap` manually or use systemd (which doesn't need it).
-- **Webhooks are in-memory.** Re-register them after every restart. Keep the `curl` commands in a script. (Being fixed.)
+- **Webhooks are persisted** to `~/.orca/webhooks.json` as of v0.2.2. No need to re-register after restarts.
 - **`orca backup all` has a tokio nesting bug.** Use scheduled backups until it's fixed.
 - **Pre-pull your registry image** before the first boot if your registry is managed by orca. Otherwise bootstrap deadlock.
 - **Slow-starting services need `initial_delay_secs`.** Keycloak: 120s. Don't skimp.

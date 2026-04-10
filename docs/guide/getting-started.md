@@ -117,6 +117,13 @@ orca server &        # Start the control plane
 orca deploy          # Auto-discovers services/*/service.toml
 ```
 
+Deploy or redeploy individual services:
+
+```bash
+orca deploy web              # Deploy only the "web" service
+orca redeploy web            # Force pull the image and restart
+```
+
 ## Verify
 
 ```bash
@@ -136,6 +143,28 @@ orca db create postgres mydb
 # Deploys postgres:16 with auto-generated password, volume, and health check
 # Stores credentials as secrets, prints the connection string
 ```
+
+## GitOps with the Infra Webhook
+
+If you keep your service definitions in a git repo (recommended -- see the
+[DevOps guide](/guide/devops)), you can set up an infra webhook so that every
+`git push` to the repo automatically runs `git pull` + `orca deploy` on the
+cluster:
+
+```bash
+curl -X POST http://127.0.0.1:6880/api/v1/webhooks \
+  -H "Authorization: Bearer $(cat ~/.orca/cluster.token)" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repo": "myorg/orca-infra",
+    "service_name": "__infra__",
+    "branch": "main",
+    "secret": "your-webhook-secret"
+  }'
+```
+
+Now pushing to `main` in your infra repo triggers a full cluster reconcile --
+no SSH, no `git pull && orca deploy` by hand.
 
 ## Next Steps
 

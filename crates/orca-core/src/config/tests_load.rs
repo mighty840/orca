@@ -70,8 +70,11 @@ PLAIN = "hello"
     store.set("DB_PASS", "s3cret").unwrap();
     drop(store);
 
+    // Secrets are no longer resolved at load time — they stay as templates
+    // so the reconciler can compare unresolved values and skip unchanged services.
+    // Resolution happens in service_config_to_spec() at container creation time.
     let config = ServicesConfig::load_dir(dir.path()).unwrap();
-    assert_eq!(config.service[0].env["DB_PASS"], "s3cret");
+    assert_eq!(config.service[0].env["DB_PASS"], "${secrets.DB_PASS}");
     assert_eq!(config.service[0].env["PLAIN"], "hello");
 }
 

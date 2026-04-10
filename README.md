@@ -14,7 +14,7 @@
   <a href="https://crates.io/crates/mallorca"><img src="https://img.shields.io/crates/v/mallorca.svg" alt="crates.io"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/rust-2024_edition-orange.svg" alt="Rust">
-  <img src="https://img.shields.io/badge/tests-63_passing-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-~120_passing-brightgreen.svg" alt="Tests">
 </p>
 
 <p align="center">
@@ -71,6 +71,19 @@ health = "/"
 orca deploy && orca status
 ```
 
+## What's New in v0.2.2
+
+- **WebSocket streaming** -- agents connect to the master over a persistent bidirectional WebSocket, replacing HTTP heartbeat polling.
+- **Agent proxy hot-adds routes + TLS certs** on container deploy -- no proxy restart needed.
+- **Reconcile on reconnect** -- after a network partition, agents automatically converge to the desired state.
+- **Infra webhook** -- git push to your orca-infra repo triggers `git pull` + redeploy. Full GitOps.
+- **Single-service deploys** -- `orca deploy <service-name>` and `orca redeploy <service>` for force pull + restart.
+- **CLI auto-connects** -- on agent nodes, all commands work without `--api`.
+- **Smart reconciler** -- compares unresolved env templates so OAuth token refreshes don't cause unnecessary restarts.
+- **Webhook persistence** -- webhooks survive restarts (`~/.orca/webhooks.json`).
+
+See [CHANGELOG.md](CHANGELOG.md) for the full history.
+
 ## Features
 
 ### Single Binary, Batteries Included
@@ -111,7 +124,7 @@ TOML config that fits on one screen. TUI dashboard with k9s-style navigation. Gi
 │  API server (axum)                  │
 │  Health checker + AI monitor        │
 └──────────────┬──────────────────────┘
-               │ gRPC
+               │ WebSocket
     ┌──────────┼──────────┐
     ▼          ▼          ▼
 ┌────────┐ ┌────────┐ ┌────────┐
@@ -122,7 +135,7 @@ TOML config that fits on one screen. TUI dashboard with k9s-style navigation. Gi
 └────────┘ └────────┘ └────────┘
 ```
 
-**8 Rust crates** | **~12k lines** | **63 tests** | **all files under 250 lines**
+**8 Rust crates** | **~28k lines** | **~120 tests** | **all files under 250 lines**
 
 ## Documentation
 

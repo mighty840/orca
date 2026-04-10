@@ -11,7 +11,7 @@ Orca scales from a single server to a 20-node cluster with no config rewrites.
 │  Scheduler (bin-packing)    │
 │  API server (axum)          │
 └──────────┬──────────────────┘
-           │ gRPC
+           │ WebSocket (bidirectional)
     ┌──────┼──────┐
     ▼      ▼      ▼
  Node 1  Node 2  Node 3
@@ -19,6 +19,7 @@ Orca scales from a single server to a 20-node cluster with no config rewrites.
 
 - **Raft consensus** via `openraft` with `redb` storage -- no etcd dependency
 - **Bin-packing scheduler** with GPU awareness and Wasm preference
+- **Bidirectional WebSocket streaming** between agents and master -- replaces HTTP heartbeat polling. Agents maintain a persistent WS connection for real-time state sync, command dispatch, and log streaming.
 - Reads served by any node, writes go through the Raft leader
 
 ## Adding Nodes
@@ -76,6 +77,17 @@ sudo systemctl restart orca-agent    # Agent nodes
 ```
 
 The first node to run `orca server` becomes the leader.
+
+### Reconnect and reconciliation
+
+When an agent loses its WebSocket connection (network blip, master restart,
+etc.), it reconnects automatically with exponential backoff. On reconnect,
+the master replays the full desired state for that agent. The agent's
+reconciler then converges: it starts missing containers, stops unknown ones,
+and updates any whose spec has drifted.
+
+This means you can restart the master, upgrade it, or recover from a network
+partition -- agents will self-heal without manual intervention.
 
 ## Placement Constraints
 
