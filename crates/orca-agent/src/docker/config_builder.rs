@@ -34,7 +34,7 @@ pub(crate) fn build_container_config(spec: &WorkloadSpec) -> Config<String> {
         );
     }
     let binds = build_all_binds(spec);
-    let device_requests = build_gpu_requests(spec);
+    let gpu = build_gpu_passthrough(spec);
     let labels = build_labels(spec);
 
     let (memory_limit, nano_cpus) = parse_resource_limits(spec);
@@ -44,10 +44,20 @@ pub(crate) fn build_container_config(spec: &WorkloadSpec) -> Config<String> {
     let host_config = HostConfig {
         port_bindings: Some(port_bindings),
         binds: if binds.is_empty() { None } else { Some(binds) },
-        device_requests: if device_requests.is_empty() {
+        device_requests: if gpu.device_requests.is_empty() {
             None
         } else {
-            Some(device_requests)
+            Some(gpu.device_requests)
+        },
+        devices: if gpu.devices.is_empty() {
+            None
+        } else {
+            Some(gpu.devices)
+        },
+        group_add: if gpu.group_add.is_empty() {
+            None
+        } else {
+            Some(gpu.group_add)
         },
         memory: memory_limit,
         nano_cpus,
@@ -122,19 +132,79 @@ fn build_all_binds(spec: &WorkloadSpec) -> Vec<String> {
     binds
 }
 
-fn build_gpu_requests(spec: &WorkloadSpec) -> Vec<bollard::models::DeviceRequest> {
-    let mut device_requests = Vec::new();
-    if let Some(res) = &spec.resources
-        && let Some(gpu) = &res.gpu
-    {
-        device_requests.push(bollard::models::DeviceRequest {
-            count: Some(gpu.count as i64),
-            driver: Some("nvidia".to_string()),
-            capabilities: Some(vec![vec!["gpu".to_string()]]),
-            ..Default::default()
-        });
+/// GPU passthrough configuration for Docker containers.
+///
+/// - **nvidia**: Uses Docker's `--gpus` via DeviceRequest (requires nvidia-container-toolkit).
+/// - **amd**: Mounts `/dev/kfd` + `/dev/dri` devices directly (requires ROCm on host).
+/// - **unspecified vendor**: Defaults to nvidia DeviceRequest.
+struct GpuPassthrough {
+    device_requests: Vec<bollard::models::DeviceRequest>,
+    devices: Vec<bollard::models::DeviceMapping>,
+    group_add: Vec<String>,
+}
+
+fn build_gpu_passthrough(spec: &WorkloadSpec) -> GpuPassthrough {
+    let mut result = GpuPassthrough {
+        device_requests: Vec::new(),
+        devices: Vec::new(),
+        group_add: Vec::new(),
+    };
+
+    let Some(res) = &spec.resources else {
+        return result;
+    };
+    let Some(gpu) = &res.gpu else {
+        return result;
+    };
+
+    let vendor = gpu.vendor.as_deref().unwrap_or("nvidia");
+    match vendor {
+        "amd" | "rocm" => {
+            // AMD ROCm: mount /dev/kfd (kernel fusion driver) + /dev/dri (render nodes)
+            result.devices.push(bollard::models::DeviceMapping {
+                path_on_host: Some("/dev/kfd".into()),
+                path_in_container: Some("/dev/kfd".into()),
+                cgroup_permissions: Some("rwm".into()),
+            });
+            result.devices.push(bollard::models::DeviceMapping {
+                path_on_host: Some("/dev/dri".into()),
+                path_in_container: Some("/dev/dri".into()),
+                cgroup_permissions: Some("rwm".into()),
+            });
+            // Container needs video + render group access. Use GIDs
+            // because containers often lack the group name definitions.
+            // Standard GIDs: video=39 (or from /dev/kfd), render=105 (or from renderD128).
+            let video_gid = device_group_id("/dev/kfd").unwrap_or(39);
+            let render_gid = device_group_id("/dev/dri/renderD128").unwrap_or(105);
+            result.group_add.push(video_gid.to_string());
+            result.group_add.push(render_gid.to_string());
+        }
+        _ => {
+            // nvidia (default): use Docker device_requests (--gpus)
+            result.device_requests.push(bollard::models::DeviceRequest {
+                count: Some(gpu.count as i64),
+                driver: Some("nvidia".into()),
+                capabilities: Some(vec![vec!["gpu".into()]]),
+                ..Default::default()
+            });
+        }
     }
-    device_requests
+
+    result
+}
+
+/// Get the owning group ID of a device file (e.g. /dev/kfd → 39).
+fn device_group_id(path: &str) -> Option<u32> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(path).ok().map(|m| m.gid())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        None
+    }
 }
 
 /// Parse resource limits from the workload spec into Docker host config values.
