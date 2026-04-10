@@ -34,6 +34,9 @@ pub struct WebhookConfig {
     /// Optional HMAC secret for signature validation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub secret: Option<String>,
+    /// If true, this is an infra webhook: git pull + redeploy all services.
+    #[serde(default)]
+    pub infra: bool,
 }
 
 fn default_branch() -> String {
@@ -207,6 +210,20 @@ pub async fn handle_push(
             continue;
         }
 
+        if wh.infra {
+            info!("Webhook: infra push detected, running git pull + deploy all");
+            match handle_infra_deploy(&state).await {
+                Ok(count) => {
+                    deployed.push(format!("infra ({count} services)"));
+                }
+                Err(e) => {
+                    error!("Webhook: infra deploy failed: {e}");
+                    errors.push(format!("infra: {e}"));
+                }
+            }
+            continue;
+        }
+
         info!("Webhook: triggering redeploy of {}", wh.service_name);
         match reconciler::redeploy(&state, &wh.service_name).await {
             Ok(()) => deployed.push(wh.service_name.clone()),
@@ -304,6 +321,70 @@ pub async fn remove_webhook(
         )
             .into_response()
     }
+}
+
+/// Handle an infra webhook: git pull the working directory, then redeploy
+/// all services from the refreshed service.toml files.
+async fn handle_infra_deploy(state: &AppState) -> anyhow::Result<usize> {
+    // Run `git pull` in the current working directory
+    let output = tokio::process::Command::new("git")
+        .args(["pull", "--ff-only"])
+        .output()
+        .await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git pull failed: {stderr}");
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    info!("Infra git pull: {}", stdout.trim());
+
+    // Load all services from the services/ directory
+    let services_dir = std::path::Path::new("services");
+    let configs = if services_dir.is_dir() {
+        orca_core::config::ServicesConfig::load_dir(services_dir)?
+    } else {
+        orca_core::config::ServicesConfig::load("services.toml".as_ref())?
+    };
+
+    // Resolve secrets from the on-disk store
+    let secret_store =
+        orca_core::secrets::SecretStore::open(orca_core::secrets::default_path()).ok();
+
+    let resolved: Vec<_> = configs
+        .service
+        .into_iter()
+        .map(|mut svc| {
+            if let Some(store) = &secret_store {
+                svc.env = store.resolve_env(&svc.env);
+            }
+            svc
+        })
+        .collect();
+
+    let count = resolved.len();
+    let (deployed, errors) = reconciler::reconcile(state, &resolved).await;
+
+    // Persist deployed services to store
+    if let Some(store) = &state.store {
+        for config in &resolved {
+            if deployed.contains(&config.name)
+                && let Err(e) = store.set_service(&config.name, config)
+            {
+                tracing::warn!("Failed to persist {}: {e}", config.name);
+            }
+        }
+    }
+
+    if !errors.is_empty() {
+        warn!("Infra deploy: {} errors: {:?}", errors.len(), errors);
+    }
+    info!(
+        "Infra deploy complete: {}/{} services",
+        deployed.len(),
+        count
+    );
+    Ok(count)
 }
 
 #[cfg(test)]
