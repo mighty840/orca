@@ -1,197 +1,224 @@
 ---
-title: "Orca: The Container Orchestrator Between Coolify and Kubernetes"
+title: "I Built a Container Orchestrator in Rust Because Kubernetes Was Too Much and Coolify Wasn't Enough"
 published: false
+description: "Orca is a single-binary container orchestrator for 2-20 node clusters. Auto-TLS, multi-node Raft consensus, WebSocket streaming, GitOps webhooks, AI ops — all in one 47MB binary. No etcd, no YAML, no PhD required."
 tags: rust, devops, containers, opensource
+canonical_url: https://github.com/mighty840/orca
+cover_image: https://raw.githubusercontent.com/mighty840/orca/main/assets/logo.svg
 ---
 
-There's a gap in the container orchestration world.
+There's a gap in the container orchestration world that nobody talks about.
 
-If you're running 1-3 services, Docker Compose or Coolify works great. If you're at 50+ nodes, Kubernetes is the answer. But what about the middle ground — 2 to 20 nodes, 20 to 100 services, a small team that doesn't want to maintain a K8s cluster?
+**Docker Compose** works for 1 server. **Coolify** and **Dokploy** give you a nice GUI but still cap at one node. **Kubernetes** handles 10,000 nodes but requires a team of platform engineers just to keep the lights on.
 
-That's where **Orca** lives.
+What if you have **2 to 20 servers**, **20 to 100 services**, and a team of 1 to 5 engineers who'd rather ship features than debug etcd quorum failures?
+
+That's exactly where I was. So I built **Orca**.
 
 ```
-Docker Compose ──> Coolify ──> Orca ──> Kubernetes
-   (1 node)        (1 node)   (2-20)     (20-10k)
+Docker Compose ──> Coolify/Dokploy ──> Orca ──> Kubernetes
+   (1 node)         (1 node, GUI)      (2-20)     (20-10k)
 ```
 
-## What is Orca?
+## TL;DR
 
-Orca is a **single-binary container orchestrator** written in Rust. One 47MB executable is the control plane, agent, CLI, reverse proxy, and TUI dashboard. `scp` it to a server and you have a production-ready orchestrator with:
+Orca is a **single-binary container + WebAssembly orchestrator** written in Rust. One 47MB executable replaces your control plane, container agent, CLI, reverse proxy with auto-TLS, and terminal dashboard. Deploy with TOML configs that fit on one screen — no YAML empires, no Helm charts, no CRDs.
 
-- **Auto-TLS** via Let's Encrypt (ACME HTTP-01)
-- **Multi-node clustering** with Raft consensus (no etcd)
-- **Reverse proxy** with Host/path routing, WebSocket support
-- **Secrets management** (encrypted at rest, `${secrets.X}` in configs)
-- **Health checks** with configurable liveness/readiness probes
-- **Rolling updates** and canary deploys
-- **Git push deploy** via webhooks
-- **AI operations** — `orca ask "why is the API returning 503s?"`
-- **WebAssembly support** — run Wasm modules alongside containers
+**GitHub:** [github.com/mighty840/orca](https://github.com/mighty840/orca)
+**Install:** `cargo install mallorca`
 
-## Why Not Just Use [X]?
+## The Problem
 
-| | Coolify | Orca | Kubernetes |
-|---|---------|------|------------|
-| Nodes | 1 | 2-20 | 20-10,000 |
-| Config | GUI | TOML | YAML |
-| Binary | Docker image | Single binary | Many components |
-| TLS | Built-in | Built-in (ACME) | cert-manager addon |
-| Secrets | Built-in | Built-in (AES-256) | etcd + RBAC |
-| Learning curve | Low | Low | High |
-| Multi-node | No | Yes (Raft) | Yes (etcd) |
-| Wasm support | No | Yes (wasmtime) | No (needs Krustlet) |
+I was running ~60 services across 3 servers for multiple projects — compliance platforms, trading bots, YouTube automation pipelines, chat servers, AI gateways. Coolify worked great at first, but then I needed:
 
-**Coolify** is excellent for single-server setups but doesn't scale to multiple nodes. **Kubernetes** scales infinitely but brings enormous complexity for small teams. Orca fills the gap with multi-node support, zero external dependencies, and TOML configs that fit on one screen.
+- Services on **multiple nodes** with DNS-based routing per node
+- **Auto-TLS** without manually configuring Caddy/Traefik per domain
+- **Git push deploys** that actually work across nodes
+- **Rolling updates** that don't take down the whole stack
+- Config as code, not clicking through a GUI
 
-## Getting Started in 60 Seconds
+Kubernetes was the obvious answer, but for 3 nodes and a solo developer? That's like buying a Boeing 747 to commute to work.
+
+## What Orca Actually Does
+
+### Single Binary, Everything Included
 
 ```bash
-cargo install mallorca   # installs the `orca` binary
-
-# Set up systemd (handles port binding automatically):
-orca install-service
+cargo install mallorca
+orca install-service          # systemd unit with auto port binding
 sudo systemctl start orca
-
-# Create a service:
-mkdir -p services/web
-cat > services/web/service.toml << 'EOF'
-[[service]]
-name = "web"
-image = "nginx:alpine"
-port = 80
-domain = "example.com"
-health = "/"
-EOF
-
-# Deploy:
-orca deploy
 ```
 
-That's it. Orca provisions a TLS certificate, sets up the reverse proxy, and starts health checking — all from 7 lines of TOML.
+That one binary runs:
+- **Control plane** with Raft consensus (openraft + redb — no etcd)
+- **Container runtime** via Docker/bollard
+- **WebAssembly runtime** via wasmtime (5ms cold start, ~2MB per instance)
+- **Reverse proxy** with Host/path routing, WebSocket proxying, rate limiting
+- **ACME client** for automatic Let's Encrypt certificates
+- **Secrets store** with AES-256 encryption at rest
+- **Health checker** with liveness/readiness probes and auto-restart
+- **AI assistant** that diagnoses cluster issues in natural language
 
-## Multi-Node: No etcd, No YAML
+### TOML Config That Humans Can Read
 
-Adding a second node is one command:
+```toml
+[[service]]
+name = "api"
+image = "myorg/api:latest"
+port = 8080
+domain = "api.example.com"
+health = "/healthz"
+
+[service.env]
+DATABASE_URL = "${secrets.DB_URL}"
+REDIS_URL = "redis://cache:6379"
+
+[service.resources]
+memory = "512Mi"
+cpu = 1.0
+
+[service.liveness]
+path = "/healthz"
+interval_secs = 30
+failure_threshold = 3
+```
+
+Compare that to the equivalent Kubernetes YAML. I'll wait.
+
+### Multi-Node in One Command
 
 ```bash
-# On the worker node:
+# On worker nodes:
 orca install-service --leader 10.0.0.1:6880
 sudo systemctl start orca-agent
 ```
 
-The agent connects to the master via WebSocket, receives deploy commands in real-time, and runs a local reverse proxy for domains assigned to it. No shared filesystem, no etcd cluster, no certificate rotation headaches.
-
-Pin services to specific nodes:
+The agent connects to the master via **bidirectional WebSocket** — no HTTP polling, no gRPC complexity. Deploy commands arrive instantly. When an agent reconnects after a network blip, the master sends the full desired state and the agent self-heals.
 
 ```toml
-[[service]]
-name = "gpu-worker"
-image = "my-ml-model:latest"
-port = 8080
-
 [service.placement]
-node = "gpu-box-1"
-
-[service.resources]
-memory = "8Gi"
-cpu = 4.0
+node = "gpu-box"         # Pin to a specific node
 ```
 
-## GitOps: Push to Deploy
+### GitOps Without a CI Runner
 
-Orca supports two deployment patterns:
-
-**Pattern 1: Image webhook** — CI builds and pushes `:latest`, webhook triggers redeploy:
+Orca has a built-in **infra webhook**. Point your git host at the orca API, and every push triggers `git pull` + full reconciliation:
 
 ```bash
-# Register the webhook:
+# One-time setup:
 curl -X POST http://localhost:6880/api/v1/webhooks \
   -H "Authorization: Bearer $TOKEN" \
-  -d '{"repo":"myorg/api","service_name":"api","branch":"main","secret":"..."}'
+  -d '{"repo":"myorg/infra","service_name":"infra","branch":"main",
+       "secret":"...","infra":true}'
 ```
 
-**Pattern 2: Infra webhook** — push config changes, orca auto-pulls and redeploys:
+Push a config change → orca pulls → deploys only what changed. No Jenkins, no GitHub Actions runner, no ArgoCD.
+
+For image-only updates (CI pushes new `:latest`), register a per-service webhook and orca force-pulls + restarts.
+
+## How It Compares
+
+| Feature | Coolify | Dokploy | Orca | K8s |
+|---------|---------|---------|------|-----|
+| Multi-node | No | No | Yes (Raft) | Yes (etcd) |
+| Config format | GUI | GUI | TOML | YAML |
+| Auto-TLS | Yes | Yes | Yes (ACME) | cert-manager |
+| Secrets | GUI | GUI | AES-256, `${secrets.X}` | etcd + RBAC |
+| Rolling updates | Basic | Basic | Yes + canary | Yes |
+| Health checks | Basic | Basic | Liveness + readiness | Yes |
+| WebSocket proxy | Partial | Partial | Full | Ingress-dependent |
+| Wasm support | No | No | Yes (wasmtime) | Krustlet (dead) |
+| AI ops | No | No | Yes | No |
+| GitOps webhook | Yes | Yes | Yes + infra webhook | ArgoCD/Flux |
+| Self-update | No | Docker pull | `orca update` | Cluster upgrade |
+| Lines of config per service | ~0 (GUI) | ~0 (GUI) | ~10 TOML | ~50-100 YAML |
+| External dependencies | Docker, DB | Docker | Docker only | etcd, CoreDNS, ... |
+| Binary size | Docker image | Docker image | 47MB | N/A |
+
+## The Smart Reconciler
+
+One thing that drove me crazy with other orchestrators: redeploy a stack and *everything* restarts, even services that haven't changed.
+
+Orca's reconciler compares the **unresolved config templates** (with `${secrets.X}` intact), not the resolved values. If your OAuth token refreshed but your config didn't change, the container stays running. Only actual config changes trigger a rolling update.
 
 ```bash
-# Register as an infra webhook:
-curl -X POST http://localhost:6880/api/v1/webhooks \
-  -d '{"repo":"myorg/infra","service_name":"infra","branch":"main","secret":"...","infra":true}'
+orca deploy              # Reconcile all — skips unchanged services
+orca deploy api          # Reconcile just one service
+orca redeploy api        # Force pull image + restart (for :latest updates)
 ```
 
-With infra webhooks, your entire cluster state lives in git. Push a config change → orca pulls → reconciles all services. No manual `ssh` + `deploy` needed.
+## What's Coming in v0.3
 
-## The TUI Dashboard
+The roadmap is driven by what we actually need in production:
 
-Orca comes with a terminal dashboard inspired by k9s:
+- **Remote log streaming** — `orca logs <service>` for containers on any node, piped via WebSocket
+- **Preview environments** — `orca env create pr-123` spins up an ephemeral copy of a project
+- **Per-project secrets** — `${secrets.X}` resolves project scope first, then global
+- **TUI webhook manager** — add/edit/delete webhooks from the terminal dashboard
+- **TUI backup dashboard** — per-node backup status, manual trigger, restore
+- **ARM64 builds** — native binaries for Raspberry Pi / Graviton
+- **Log forwarding** — ship container logs to Loki, SigNoz, or any OpenTelemetry collector
+- **Nixpacks integration** — auto-detect and build without Dockerfiles
 
-```
-orca tui
-```
-
-It shows all services across all nodes, their status, resource usage, and health. Navigate with vim-style keys, view logs, trigger redeploys.
-
-## AI Operations
-
-This is where it gets fun. Orca has a built-in AI assistant that understands your cluster:
-
-```bash
-orca ask "why is the API slow?"
-```
-
-It reads your service configs, checks container stats, inspects logs, and gives you a diagnosis. Works with any OpenAI-compatible API (Ollama, LiteLLM, vLLM).
-
-## Architecture
+## Architecture for the Curious
 
 ```
-CLI / TUI / Web API
-        |
-   Control Plane
-   (Raft + redb)
-        |  WebSocket
-   +----|----+
-   v    v    v
- Node  Node  Node
- (Docker + Wasm + Proxy)
+┌─────────────────────────────────────┐
+│         CLI / TUI / API             │
+└──────────────┬──────────────────────┘
+               │
+┌──────────────▼──────────────────────┐
+│         Control Plane               │
+│  Raft consensus (openraft + redb)   │
+│  Scheduler (bin-packing + GPU)      │
+│  API server (axum)                  │
+│  Health checker + AI monitor        │
+└──────────────┬──────────────────────┘
+               │ WebSocket
+    ┌──────────┼──────────┐
+    ▼          ▼          ▼
+┌────────┐ ┌────────┐ ┌────────┐
+│ Node 1 │ │ Node 2 │ │ Node 3 │
+│ Docker │ │ Docker │ │ Docker │
+│ Wasm   │ │ Wasm   │ │ Wasm   │
+│ Proxy  │ │ Proxy  │ │ Proxy  │
+└────────┘ └────────┘ └────────┘
 ```
 
-8 Rust crates, ~15k lines, 120+ tests. Every file under 250 lines. The dependency flow is clean: `core` <- `agent` <- `control` <- `cli`.
+8 Rust crates, ~15k lines, 120+ tests. Every source file under 250 lines. The dependency flow is strict: `core` <- `agent` <- `control` <- `cli`. No circular deps, no god modules.
 
-## What's New in v0.2.2
+## Want to Contribute?
 
-The latest release adds:
+Orca is open source (AGPL-3.0) and actively looking for contributors. The codebase is designed to be approachable:
 
-- **WebSocket streaming** between master and agents (real-time deploy push, no more polling)
-- **Auto-reconciliation** on agent reconnect (master sends expected services, agent deploys missing ones)
-- **Hot route provisioning** — proxy routes + TLS certs are added immediately when a container deploys
-- **`orca deploy <service>`** — deploy a single service by name
-- **`orca redeploy <service>`** — force pull + restart
-- **Infra webhooks** — git push config changes, auto-pull + redeploy
-- **Smart reconciler** — compares config templates, not resolved values, so services aren't restarted unnecessarily
+- **Small files** — 250 line max, split into clear submodules
+- **Comprehensive tests** — 120+ unit and integration tests
+- **Architecture guide** — [CLAUDE.md](https://github.com/mighty840/orca/blob/main/CLAUDE.md) documents every crate, convention, and design decision
+- **Real issues** — every open issue comes from production usage, not hypotheticals
 
-## Contributing
+Good first issues:
 
-Orca is open source (AGPL-3.0) and actively seeking contributors. Areas where help is wanted:
-
-- **Log streaming** — pipe container logs from remote nodes to the TUI
-- **TUI polish** — webhook management, backup dashboard, secrets organizer
-- **ARM64 builds** — CI currently only builds x86_64
-- **Preview environments** — PR-based ephemeral deploys
-- **Nixpacks integration** — auto-detect builds without Dockerfiles
-
-The codebase is designed for contribution: small files, clear module boundaries, comprehensive tests, and a [CLAUDE.md](https://github.com/mighty840/orca/blob/main/CLAUDE.md) that serves as an architecture guide.
+1. **ARM64 CI build** — add a GitHub Actions matrix for aarch64
+2. **TUI log viewer** — stream container logs in a ratatui pane
+3. **Backup `--exclude`** — skip specific volumes from nightly backup
+4. **Service templates** — WordPress, Supabase, n8n one-click configs
 
 ```bash
 git clone https://github.com/mighty840/orca.git
 cd orca
-cargo test        # 120+ tests, all passing
-cargo build       # single binary output
+cargo test        # 120+ tests
+cargo build       # single binary
 ```
 
-**GitHub:** [github.com/mighty840/orca](https://github.com/mighty840/orca)
-**Docs:** [mighty840.github.io/orca](https://mighty840.github.io/orca)
-**crates.io:** [crates.io/crates/mallorca](https://crates.io/crates/mallorca)
+## Links
+
+- **GitHub:** [github.com/mighty840/orca](https://github.com/mighty840/orca)
+- **Docs:** [mighty840.github.io/orca](https://mighty840.github.io/orca)
+- **crates.io:** [crates.io/crates/mallorca](https://crates.io/crates/mallorca)
+- **Changelog:** [CHANGELOG.md](https://github.com/mighty840/orca/blob/main/CHANGELOG.md)
 
 ---
 
-*Orca is built by a small team running real production workloads on it. Every feature exists because we needed it, every bug fix comes from a real incident. If you're in the Coolify-to-K8s gap, give it a try.*
+*Orca is built by developers running real production workloads on it — trading bots, compliance platforms, YouTube automation, AI gateways. Every feature exists because we needed it, every bug fix comes from a real 3 AM incident. If you're stuck between Coolify and Kubernetes, give it a shot.*
+
+*Star the repo if this resonates. Open an issue if something's broken. PRs welcome.*
