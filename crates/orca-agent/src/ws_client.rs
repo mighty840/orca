@@ -24,11 +24,12 @@ pub async fn run_ws_loop(
     leader_url: &str,
     node_id: u64,
     token: &str,
+    local_address: &str,
     runtime: Arc<dyn Runtime>,
     agent: Arc<AgentClient>,
     domain_tx: mpsc::Sender<(String, String, u16)>,
 ) {
-    let ws_url = build_ws_url(leader_url, node_id, token);
+    let ws_url = build_ws_url(leader_url, node_id, token, local_address);
     let mut backoff = Duration::from_secs(2);
     let max_backoff = Duration::from_secs(30);
 
@@ -269,11 +270,12 @@ async fn build_heartbeat(
 }
 
 /// Convert HTTP leader URL to WS URL.
-fn build_ws_url(leader_url: &str, node_id: u64, token: &str) -> String {
+fn build_ws_url(leader_url: &str, node_id: u64, token: &str, address: &str) -> String {
     let base = leader_url
         .replace("https://", "wss://")
         .replace("http://", "ws://");
-    format!("{base}/api/v1/ws/agent?token={token}&node_id={node_id}")
+    let encoded_addr = address.replace(':', "%3A");
+    format!("{base}/api/v1/ws/agent?token={token}&node_id={node_id}&address={encoded_addr}")
 }
 
 #[cfg(test)]
@@ -282,19 +284,19 @@ mod tests {
 
     #[test]
     fn build_ws_url_http() {
-        let url = build_ws_url("http://46.225.100.82:6880", 123, "abc");
+        let url = build_ws_url("http://46.225.100.82:6880", 123, "abc", "10.0.0.5:6881");
         assert_eq!(
             url,
-            "ws://46.225.100.82:6880/api/v1/ws/agent?token=abc&node_id=123"
+            "ws://46.225.100.82:6880/api/v1/ws/agent?token=abc&node_id=123&address=10.0.0.5%3A6881"
         );
     }
 
     #[test]
     fn build_ws_url_https() {
-        let url = build_ws_url("https://orca.example.com", 42, "tok");
+        let url = build_ws_url("https://orca.example.com", 42, "tok", "192.168.1.5:6881");
         assert_eq!(
             url,
-            "wss://orca.example.com/api/v1/ws/agent?token=tok&node_id=42"
+            "wss://orca.example.com/api/v1/ws/agent?token=tok&node_id=42&address=192.168.1.5%3A6881"
         );
     }
 }

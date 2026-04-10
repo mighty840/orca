@@ -23,6 +23,9 @@ use crate::state::AppState;
 pub struct WsQuery {
     token: String,
     node_id: u64,
+    /// Agent's address (e.g. "10.0.0.5:6881") for node registration.
+    #[serde(default)]
+    address: Option<String>,
 }
 
 /// Per-node sender so the master can push messages to a connected agent.
@@ -50,14 +53,20 @@ pub async fn ws_agent_handler(
     }
 
     let node_id = query.node_id;
+    let address = query.address;
     info!("WebSocket upgrade accepted for node {node_id}");
 
-    ws.on_upgrade(move |socket| handle_agent_ws(socket, state, node_id))
+    ws.on_upgrade(move |socket| handle_agent_ws(socket, state, node_id, address))
         .into_response()
 }
 
 /// Main WebSocket loop for a connected agent.
-async fn handle_agent_ws(socket: WebSocket, state: Arc<AppState>, node_id: u64) {
+async fn handle_agent_ws(
+    socket: WebSocket,
+    state: Arc<AppState>,
+    node_id: u64,
+    agent_address: Option<String>,
+) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
     // Channel for master → agent messages (deploy commands, log requests, etc.)
@@ -70,6 +79,32 @@ async fn handle_agent_ws(socket: WebSocket, state: Arc<AppState>, node_id: u64) 
     }
 
     info!("Agent {node_id} connected via WebSocket");
+
+    // Register/update the node in registered_nodes so the reconciler's
+    // find_target_node() can match placement constraints to this agent.
+    {
+        let addr = agent_address.unwrap_or_else(|| format!("ws-agent-{node_id}"));
+        let mut nodes = state.registered_nodes.write().await;
+        let node = nodes
+            .entry(node_id)
+            .or_insert_with(|| crate::state::RegisteredNode {
+                node_id,
+                address: addr.clone(),
+                labels: std::collections::HashMap::new(),
+                last_heartbeat: chrono::Utc::now(),
+                drain: false,
+                cpu_percent: 0.0,
+                memory_bytes: 0,
+                memory_total: 0,
+                disk_used: 0,
+                disk_total: 0,
+                net_rx: 0,
+                net_tx: 0,
+            });
+        node.last_heartbeat = chrono::Utc::now();
+        node.address = addr;
+        info!("Node {node_id} registered at {}", node.address);
+    }
 
     // Send initial Ack
     let ack = MasterMessage::Ack { node_id };

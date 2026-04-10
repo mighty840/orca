@@ -184,6 +184,7 @@ pub async fn handle_join(
             &leader_url,
             node_id,
             &token,
+            &local_address,
             container_runtime.clone(),
             agent_arc.clone(),
             domain_tx,
