@@ -47,6 +47,8 @@ tonic-build = "0.13"
 http-body-util = "0.1"
 tower = { workspace = true, features = ["util"] }
 bollard = { workspace = true }
+tokio-tungstenite = "0.26"
+futures-util = "0.3"
 
 [dev-dependencies.tempfile]
 version = "3"
