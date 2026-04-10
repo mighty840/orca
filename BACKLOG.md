@@ -176,6 +176,8 @@ to start without re-research.
   commands only work from the orca working directory. Should walk up
   to find `cluster.toml` like git finds `.git/`, or fall back to
   `~/.orca/cluster.toml` for global config.
+- **Wire up `orca logs --summarize`.** Currently prints a stub. Should
+  fetch logs and send to the AI backend for analysis. (#23)
 - **Secrets resolution in `cluster.toml`.** Today `${secrets.X}` only
   works in service.toml env vars. AI api_key and other cluster config
   values should also resolve from the secrets store.
