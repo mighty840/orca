@@ -14,6 +14,7 @@ export default defineConfig({
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Guide', link: '/guide/getting-started' },
+      { text: 'Compare', link: '/comparison' },
       { text: 'API', link: '/reference/api' },
       { text: 'GitHub', link: 'https://github.com/mighty840/orca' },
     ],
@@ -23,6 +24,7 @@ export default defineConfig({
         text: 'Getting Started',
         items: [
           { text: 'Installation', link: '/guide/getting-started' },
+          { text: 'Why Orca?', link: '/comparison' },
           { text: 'Configuration', link: '/guide/configuration' },
           { text: 'Services', link: '/guide/services' },
           { text: 'DevOps Guide', link: '/guide/devops' },
