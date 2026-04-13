@@ -65,16 +65,36 @@ pub async fn handle_logs(
     api: String,
 ) -> anyhow::Result<()> {
     let client = OrcaClient::new(api);
-    if summarize {
-        println!("AI log summarization not yet connected.");
-        println!("Configure [ai] in cluster.toml to enable.");
-    } else {
-        match client.logs(&service, tail).await {
-            Ok(logs) => print!("{logs}"),
-            Err(e) => {
-                tracing::error!("Failed to get logs for '{service}': {e}");
-                std::process::exit(1);
+    match client.logs(&service, tail).await {
+        Ok(logs) => {
+            if summarize {
+                let ai_config = crate::handlers::ai_ops::load_ai_config();
+                match ai_config {
+                    Some(config) => {
+                        let prompt = format!(
+                            "Analyze and summarize these logs for the service '{service}'. \
+                             Highlight errors, warnings, and anomalies:\n\n{logs}"
+                        );
+                        match orca_ai::ops::ask(&config, &prompt, "", "").await {
+                            Ok(summary) => println!("{summary}"),
+                            Err(e) => {
+                                tracing::error!("AI summarization failed: {e}");
+                                print!("{logs}");
+                            }
+                        }
+                    }
+                    None => {
+                        println!("No AI configuration found. Configure [ai] in cluster.toml.");
+                        print!("{logs}");
+                    }
+                }
+            } else {
+                print!("{logs}");
             }
+        }
+        Err(e) => {
+            tracing::error!("Failed to get logs for '{service}': {e}");
+            std::process::exit(1);
         }
     }
     Ok(())

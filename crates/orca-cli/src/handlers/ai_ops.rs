@@ -49,11 +49,15 @@ pub async fn handle_generate(description: Vec<String>) -> anyhow::Result<()> {
 }
 
 /// Load the [ai] section from cluster.toml, searching common locations.
-fn load_ai_config() -> Option<orca_core::config::AiConfig> {
-    let candidates = [
+pub fn load_ai_config() -> Option<orca_core::config::AiConfig> {
+    let mut candidates = vec![
         std::path::PathBuf::from("cluster.toml"),
         std::path::PathBuf::from("/etc/orca/cluster.toml"),
     ];
+    // Also check the orca project directory (walk up from CWD)
+    if let Some(orca_dir) = crate::handlers::ops::find_orca_dir() {
+        candidates.insert(0, orca_dir.join("cluster.toml"));
+    }
     for path in &candidates {
         if path.exists()
             && let Ok(config) = orca_core::config::ClusterConfig::load(path)
