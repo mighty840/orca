@@ -1,4 +1,5 @@
 use clap::Subcommand;
+use clap_complete::Shell;
 
 pub use crate::subcommands::{
     AlertsAction, BackupAction, DbAction, ImportSource, SecretsAction, TokenAction, WebhookAction,
@@ -21,8 +22,8 @@ pub enum Command {
 
     /// Deploy services from config (file or directory)
     Deploy {
-        /// Service name to deploy (deploys all if omitted)
-        service: Option<String>,
+        /// Service name(s) to deploy (deploys all if omitted)
+        service: Vec<String>,
         /// Path to services dir or single .toml file
         #[arg(short, long, default_value = "services")]
         file: String,
@@ -66,16 +67,16 @@ pub enum Command {
         cmd: Vec<String>,
     },
 
-    /// Stop a service or all services
+    /// Stop one or more services (omit for all)
     Stop {
-        /// Service name (omit for all services)
-        service: Option<String>,
+        /// Service name(s)
+        service: Vec<String>,
     },
 
-    /// Force redeploy a service (pull image + recreate)
+    /// Force redeploy one or more services (pull image + recreate)
     Redeploy {
-        /// Service name
-        service: String,
+        /// Service name(s)
+        service: Vec<String>,
     },
 
     /// Rollback a service to previous version
@@ -197,6 +198,12 @@ pub enum Command {
         /// Cluster token (reads from ~/.orca/cluster.token if omitted)
         #[arg(long)]
         token: Option<String>,
+    },
+
+    /// Generate shell completion scripts
+    Completions {
+        /// Shell to generate for (bash, zsh, fish, powershell)
+        shell: Shell,
     },
 
     /// Build a Docker image from source for a service

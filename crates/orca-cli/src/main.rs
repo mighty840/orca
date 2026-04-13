@@ -67,7 +67,12 @@ async fn main() -> anyhow::Result<()> {
             handlers::server::handle_server(&config, proxy_port).await?;
         }
         Command::Deploy { service, file } => {
-            handlers::deploy::handle_deploy(&file, service, cli.api).await?;
+            let filter = if service.is_empty() {
+                None
+            } else {
+                Some(service)
+            };
+            handlers::deploy::handle_deploy(&file, filter, cli.api).await?;
         }
         Command::Status => {
             handlers::status::handle_status(cli.api).await?;
@@ -96,10 +101,18 @@ async fn main() -> anyhow::Result<()> {
             handlers::exec::handle_exec(&service, &cmd)?;
         }
         Command::Stop { service } => {
-            handlers::ops::handle_stop(service, cli.api).await?;
+            if service.is_empty() {
+                handlers::ops::handle_stop(None, cli.api).await?;
+            } else {
+                for s in service {
+                    handlers::ops::handle_stop(Some(s), cli.api.clone()).await?;
+                }
+            }
         }
         Command::Redeploy { service } => {
-            handlers::ops::handle_redeploy(service, cli.api).await?;
+            for s in service {
+                handlers::ops::handle_redeploy(s, cli.api.clone()).await?;
+            }
         }
         Command::Rollback { service } => {
             handlers::ops::handle_rollback(service, cli.api).await?;
@@ -142,6 +155,14 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::InstallService { leader, token } => {
             handlers::install_service::handle_install_service(leader, token)?;
+        }
+        Command::Completions { shell } => {
+            clap_complete::generate(
+                shell,
+                &mut <Cli as clap::CommandFactory>::command(),
+                "orca",
+                &mut std::io::stdout(),
+            );
         }
         Command::Build { service, file } => {
             handlers::build::handle_build(&file, service).await?;

@@ -1,5 +1,29 @@
+use std::path::PathBuf;
+
 use crate::client::OrcaClient;
 use crate::commands::{AlertsAction, SecretsAction, WebhookAction};
+
+/// Find the orca project directory by walking up from CWD looking for
+/// `cluster.toml` or `services/`. Falls back to `~/.orca/` then CWD.
+pub fn find_orca_dir() -> Option<PathBuf> {
+    // Walk up from CWD
+    if let Ok(mut dir) = std::env::current_dir() {
+        loop {
+            if dir.join("cluster.toml").exists() || dir.join("services").is_dir() {
+                return Some(dir);
+            }
+            if !dir.pop() {
+                break;
+            }
+        }
+    }
+    // Fall back to ~/.orca
+    let home_orca = dirs_next::home_dir()?.join("orca");
+    if home_orca.join("cluster.toml").exists() {
+        return Some(home_orca);
+    }
+    None
+}
 
 /// Resolve the API URL: on agent nodes, fall back to the saved leader URL
 /// if the default localhost:6880 isn't reachable.
