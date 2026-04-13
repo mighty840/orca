@@ -122,3 +122,7 @@ mod tests_parse;
 #[cfg(test)]
 #[path = "tests_load.rs"]
 mod tests_load;
+
+#[cfg(test)]
+#[path = "tests_secrets.rs"]
+mod tests_secrets;

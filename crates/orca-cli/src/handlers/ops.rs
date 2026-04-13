@@ -291,3 +291,55 @@ pub async fn handle_web(_port: u16) -> anyhow::Result<()> {
     println!("Use `orca tui` instead.");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn find_orca_dir_finds_cluster_toml() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("cluster.toml"),
+            "[cluster]\nname = \"test\"\n",
+        )
+        .unwrap();
+        let sub = dir.path().join("a").join("b");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        // Change CWD into the nested dir — find_orca_dir walks up.
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(&sub).unwrap();
+        let result = find_orca_dir();
+        std::env::set_current_dir(&prev).unwrap();
+
+        assert_eq!(result, Some(dir.path().to_path_buf()));
+    }
+
+    #[test]
+    fn find_orca_dir_finds_services_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("services")).unwrap();
+
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let result = find_orca_dir();
+        std::env::set_current_dir(&prev).unwrap();
+
+        assert_eq!(result, Some(dir.path().to_path_buf()));
+    }
+
+    #[test]
+    fn find_orca_dir_returns_none_when_nothing_found() {
+        let dir = tempfile::tempdir().unwrap();
+        // Empty dir — no cluster.toml, no services/
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir.path()).unwrap();
+        let result = find_orca_dir();
+        std::env::set_current_dir(&prev).unwrap();
+
+        // It might find ~/.orca/cluster.toml on the host, so we can only
+        // assert it does NOT equal the tempdir (which has neither marker).
+        assert_ne!(result, Some(dir.path().to_path_buf()));
+    }
+}

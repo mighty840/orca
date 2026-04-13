@@ -380,4 +380,57 @@ mod tests {
         // 128Gi = 128 * 1024^3 = 137438953472
         assert_eq!(parse_memory_string("128Gi"), Some(137_438_953_472));
     }
+
+    #[test]
+    fn gpu_nvidia_generates_device_request() {
+        use orca_core::types::GpuSpec;
+        let mut spec = minimal_spec();
+        spec.resources = Some(ResourceLimits {
+            memory: None,
+            cpu: None,
+            gpu: Some(GpuSpec {
+                count: 2,
+                vendor: Some("nvidia".to_string()),
+                vram_min: None,
+                model: None,
+            }),
+        });
+        let gpu = build_gpu_passthrough(&spec);
+        assert_eq!(gpu.device_requests.len(), 1);
+        assert_eq!(gpu.device_requests[0].count, Some(2));
+        assert_eq!(gpu.device_requests[0].driver.as_deref(), Some("nvidia"));
+        assert!(gpu.devices.is_empty());
+        assert!(gpu.group_add.is_empty());
+    }
+
+    #[test]
+    fn gpu_amd_generates_device_mappings() {
+        use orca_core::types::GpuSpec;
+        let mut spec = minimal_spec();
+        spec.resources = Some(ResourceLimits {
+            memory: None,
+            cpu: None,
+            gpu: Some(GpuSpec {
+                count: 1,
+                vendor: Some("amd".to_string()),
+                vram_min: None,
+                model: None,
+            }),
+        });
+        let gpu = build_gpu_passthrough(&spec);
+        assert!(gpu.device_requests.is_empty());
+        assert_eq!(gpu.devices.len(), 2);
+        assert_eq!(gpu.devices[0].path_on_host.as_deref(), Some("/dev/kfd"));
+        assert_eq!(gpu.devices[1].path_on_host.as_deref(), Some("/dev/dri"));
+        assert_eq!(gpu.group_add.len(), 2);
+    }
+
+    #[test]
+    fn no_gpu_returns_empty() {
+        let spec = minimal_spec();
+        let gpu = build_gpu_passthrough(&spec);
+        assert!(gpu.device_requests.is_empty());
+        assert!(gpu.devices.is_empty());
+        assert!(gpu.group_add.is_empty());
+    }
 }
