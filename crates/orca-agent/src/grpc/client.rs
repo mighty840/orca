@@ -371,15 +371,30 @@ impl AgentClient {
         }
     }
 
-    /// Collect workload status reports for heartbeat (used by WS client).
+    /// Collect workload status reports with per-container stats for heartbeat.
     pub async fn collect_workload_reports(
         &self,
-        _runtime: &dyn Runtime,
+        runtime: &dyn Runtime,
     ) -> Vec<orca_core::ws_types::WorkloadReport> {
         let workloads = self.workloads.read().await;
-        workloads
-            .iter()
-            .map(|(id, info)| orca_core::ws_types::WorkloadReport {
+        let mut reports = Vec::with_capacity(workloads.len());
+
+        for (id, info) in workloads.iter() {
+            let (cpu, mem) = if info.status == WorkloadStatus::Running {
+                let handle = orca_core::runtime::WorkloadHandle {
+                    runtime_id: id.clone(),
+                    name: format!("orca-{}", info.service_name),
+                    metadata: Default::default(),
+                };
+                match runtime.stats(&handle).await {
+                    Ok(rs) => (rs.cpu_percent, rs.memory_bytes),
+                    Err(_) => (0.0, 0),
+                }
+            } else {
+                (0.0, 0)
+            };
+
+            reports.push(orca_core::ws_types::WorkloadReport {
                 service_name: info.service_name.clone(),
                 status: match info.status {
                     WorkloadStatus::Running => "running",
@@ -390,8 +405,12 @@ impl AgentClient {
                 }
                 .into(),
                 container_id: Some(id.clone()),
-            })
-            .collect()
+                cpu_percent: cpu,
+                memory_bytes: mem,
+            });
+        }
+
+        reports
     }
 
     pub async fn update_workload_status(&self, id: &str, service: &str, status: WorkloadStatus) {

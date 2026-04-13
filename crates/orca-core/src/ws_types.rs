@@ -67,6 +67,12 @@ pub struct WorkloadReport {
     pub service_name: String,
     pub status: String,
     pub container_id: Option<String>,
+    /// Per-container CPU usage percentage.
+    #[serde(default)]
+    pub cpu_percent: f64,
+    /// Per-container memory usage in bytes.
+    #[serde(default)]
+    pub memory_bytes: u64,
 }
 
 /// Host-level stats reported by agent.
@@ -98,6 +104,8 @@ mod tests {
                 service_name: "web".into(),
                 status: "running".into(),
                 container_id: Some("abc123".into()),
+                cpu_percent: 15.5,
+                memory_bytes: 128 * 1024 * 1024,
             }],
             stats: HostStats {
                 cpu_percent: 42.0,

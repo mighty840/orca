@@ -240,9 +240,11 @@ async fn handle_ws_heartbeat(
     }
     drop(nodes);
 
-    // Update service statuses
+    // Update service statuses + per-container stats
     if !workloads.is_empty() {
         let mut services = state.services.write().await;
+        let mut stats_cache = state.container_stats.write().await;
+
         for report in workloads {
             if let Some(svc) = services.get_mut(&report.service_name) {
                 let status = match report.status.as_str() {
@@ -254,6 +256,17 @@ async fn handle_ws_heartbeat(
                 for instance in &mut svc.instances {
                     instance.status = status;
                 }
+            }
+
+            // Cache per-container stats from remote agents
+            if report.memory_bytes > 0 || report.cpu_percent > 0.0 {
+                stats_cache.insert(
+                    report.service_name.clone(),
+                    crate::stats::ContainerStats {
+                        memory_usage: crate::stats::format_bytes(report.memory_bytes),
+                        cpu_percent: report.cpu_percent,
+                    },
+                );
             }
         }
     }

@@ -99,7 +99,7 @@ async fn collect_all_stats(state: &AppState) {
 }
 
 /// Format bytes into a human-readable string (Ki/Mi/Gi).
-fn format_bytes(bytes: u64) -> String {
+pub fn format_bytes(bytes: u64) -> String {
     const GI: u64 = 1024 * 1024 * 1024;
     const MI: u64 = 1024 * 1024;
     const KI: u64 = 1024;
