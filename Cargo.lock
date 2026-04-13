@@ -2215,7 +2215,7 @@ dependencies = [
 
 [[package]]
 name = "mallorca"
-version = "0.2.3-rc.1"
+version = "0.2.3-rc.2"
 dependencies = [
  "anyhow",
  "bollard",
@@ -2547,7 +2547,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "orca-agent"
-version = "0.2.3-rc.1"
+version = "0.2.3-rc.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2574,7 +2574,7 @@ dependencies = [
 
 [[package]]
 name = "orca-ai"
-version = "0.2.3-rc.1"
+version = "0.2.3-rc.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2591,7 +2591,7 @@ dependencies = [
 
 [[package]]
 name = "orca-control"
-version = "0.2.3-rc.1"
+version = "0.2.3-rc.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2633,7 +2633,7 @@ dependencies = [
 
 [[package]]
 name = "orca-core"
-version = "0.2.3-rc.1"
+version = "0.2.3-rc.2"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -2653,7 +2653,7 @@ dependencies = [
 
 [[package]]
 name = "orca-proxy"
-version = "0.2.3-rc.1"
+version = "0.2.3-rc.2"
 dependencies = [
  "anyhow",
  "dirs 6.0.0",
@@ -2678,7 +2678,7 @@ dependencies = [
 
 [[package]]
 name = "orca-tui"
-version = "0.2.3-rc.1"
+version = "0.2.3-rc.2"
 dependencies = [
  "anyhow",
  "crossterm",
@@ -2692,7 +2692,7 @@ dependencies = [
 
 [[package]]
 name = "orca-web"
-version = "0.2.3-rc.1"
+version = "0.2.3-rc.2"
 dependencies = [
  "anyhow",
  "clap",
