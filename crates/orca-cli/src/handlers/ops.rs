@@ -185,6 +185,11 @@ pub fn handle_secrets(action: SecretsAction) {
     }
 }
 
+/// Generate a random 32-byte hex secret for webhook HMAC signing.
+fn generate_secret() -> String {
+    format!("{:x}{:x}", rand::random::<u128>(), rand::random::<u128>())
+}
+
 pub async fn handle_webhooks(action: WebhookAction, api: String) -> anyhow::Result<()> {
     let client = OrcaClient::new(api);
     match action {
@@ -192,9 +197,22 @@ pub async fn handle_webhooks(action: WebhookAction, api: String) -> anyhow::Resu
             repo,
             service,
             branch,
+            secret,
+            infra,
         } => {
-            client.add_webhook(&repo, &service, &branch).await?;
+            let (final_secret, generated) = match secret {
+                Some(s) => (s, false),
+                None => (generate_secret(), true),
+            };
+            client
+                .add_webhook(&repo, &service, &branch, &final_secret, infra)
+                .await?;
             println!("Webhook registered: {repo} -> {service} (branch: {branch})");
+            if generated {
+                println!();
+                println!("Generated secret (save this — it won't be shown again):");
+                println!("  {final_secret}");
+            }
         }
         WebhookAction::List => {
             let resp = client.list_webhooks().await?;

@@ -98,6 +98,7 @@ pub enum TokenAction {
 
 #[derive(Subcommand)]
 pub enum WebhookAction {
+    /// Register a webhook. If --secret is omitted, a random one is generated and printed.
     Add {
         #[arg(long)]
         repo: String,
@@ -105,6 +106,12 @@ pub enum WebhookAction {
         service: String,
         #[arg(long, default_value = "main")]
         branch: String,
+        /// HMAC secret for signature verification. Generated if omitted.
+        #[arg(long)]
+        secret: Option<String>,
+        /// Infra webhook: triggers git pull + deploy all instead of per-service redeploy.
+        #[arg(long)]
+        infra: bool,
     },
     List,
     Remove {

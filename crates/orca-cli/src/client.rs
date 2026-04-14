@@ -145,11 +145,15 @@ impl OrcaClient {
         repo: &str,
         service: &str,
         branch: &str,
+        secret: &str,
+        infra: bool,
     ) -> anyhow::Result<serde_json::Value> {
         let body = serde_json::json!({
             "repo": repo,
             "service_name": service,
             "branch": branch,
+            "secret": secret,
+            "infra": infra,
         });
         let resp = self
             .auth(self.client.post(self.url("/api/v1/webhooks")))

@@ -87,6 +87,11 @@ pub(crate) async fn forward_with_retry(
         for (key, value) in headers {
             let name = key.as_str().to_lowercase();
             if name == "host" {
+                // Skip the original Host header — reqwest sets it from URI.
+                // We preserve the original host via X-Forwarded-Host below,
+                // but also set Host to the original so backends (litellm,
+                // keycloak) that build redirect URLs from Host see the
+                // external domain, not the internal 127.0.0.1:port.
                 continue;
             }
             if name == "x-forwarded-for" {
@@ -98,6 +103,10 @@ pub(crate) async fn forward_with_retry(
             }
             forward_req = forward_req.header(key, value);
         }
+        // Override the Host header to the original external host so
+        // backends that build redirect URLs from Host (litellm /ui,
+        // keycloak OIDC) use the correct public-facing domain.
+        forward_req = forward_req.header("Host", host);
         // Inject X-Forwarded-* for upstream apps behind TLS termination
         let scheme = if is_tls { "https" } else { "http" };
         if !saw_proto {
