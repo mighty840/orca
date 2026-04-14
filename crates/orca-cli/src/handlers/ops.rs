@@ -144,6 +144,16 @@ pub fn handle_secrets(action: SecretsAction) {
             store.set(&key, &value).expect("failed to set secret");
             println!("Secret '{key}' set.");
         }
+        SecretsAction::Get { key } => {
+            let store = open_secrets();
+            match store.get(&key) {
+                Some(value) => println!("{value}"),
+                None => {
+                    eprintln!("Secret '{key}' not found.");
+                    std::process::exit(1);
+                }
+            }
+        }
         SecretsAction::Remove { key } => {
             let mut store = open_secrets();
             match store.remove(&key) {

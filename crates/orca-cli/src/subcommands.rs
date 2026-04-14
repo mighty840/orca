@@ -27,6 +27,10 @@ pub enum SecretsAction {
         key: String,
         value: String,
     },
+    /// Print a secret value to stdout.
+    Get {
+        key: String,
+    },
     Remove {
         key: String,
     },
