@@ -20,6 +20,7 @@ Orca scales from a single server to a 20-node cluster with no config rewrites.
 - **Raft consensus** via `openraft` with `redb` storage -- no etcd dependency
 - **Bin-packing scheduler** with GPU awareness and Wasm preference
 - **Bidirectional WebSocket streaming** between agents and master -- replaces HTTP heartbeat polling. Agents maintain a persistent WS connection for real-time state sync, command dispatch, and log streaming.
+- **Per-container CPU and memory stats for remote services** -- agents stream live resource usage over the WS heartbeat, so `orca status` and the TUI show the same metrics for containers on agent nodes as for those on the master.
 - Reads served by any node, writes go through the Raft leader
 
 ## Adding Nodes

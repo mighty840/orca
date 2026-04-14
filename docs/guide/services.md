@@ -87,7 +87,7 @@ Orca runs both containers and WebAssembly modules as first-class workloads:
 | **Backend** | Docker (bollard) | wasmtime (WASI P2) |
 | **Cold start** | ~3s | ~5ms |
 | **Memory** | 30MB+ | 1-5MB |
-| **GPU** | nvidia passthrough | N/A |
+| **GPU** | nvidia + amd (ROCm) passthrough | N/A |
 | **Use case** | Existing images, databases | Edge functions, API handlers |
 
 ### Wasm Triggers
@@ -117,9 +117,29 @@ cpu = 1.0
 
 [service.resources.gpu]
 count = 1
-vendor = "nvidia"
+vendor = "nvidia"           # "nvidia" | "amd"
 vram_min = 24000
 ```
+
+### AMD ROCm
+
+Set `vendor = "amd"` to passthrough an AMD GPU via ROCm. Orca mounts
+`/dev/kfd` and `/dev/dri` into the container and auto-detects the host's
+`video` and `render` group IDs so the container process can access the
+devices without manual `--group-add` flags:
+
+```toml
+[[service]]
+name = "inference"
+image = "myorg/inference-rocm:latest"
+
+[service.resources.gpu]
+count  = 1
+vendor = "amd"
+```
+
+The scheduler matches the service against any node that declared a GPU
+with the same `vendor` in `cluster.toml`.
 
 ## Placement Constraints
 

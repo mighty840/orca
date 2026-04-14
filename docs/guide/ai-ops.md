@@ -44,6 +44,20 @@ orca ask "should I scale the worker service?"
 
 The assistant has access to service status, logs, metrics, and configuration to provide informed answers.
 
+## Summarise Logs
+
+Pipe a service's recent log buffer through the AI backend for a concise digest
+of what's happening, likely root causes, and suggested next steps:
+
+```bash
+orca logs api --summarize
+orca logs api --summarize --tail 500
+```
+
+The default tail is enough context for most issues; bump `--tail` when you need
+a longer window. The same `[ai]` provider used for `orca ask` is used here, so
+no additional configuration is required.
+
 ## Generate Configs
 
 Let AI generate service configurations from natural language:

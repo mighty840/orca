@@ -14,7 +14,7 @@
   <a href="https://crates.io/crates/mallorca"><img src="https://img.shields.io/crates/v/mallorca.svg" alt="crates.io"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg" alt="License"></a>
   <img src="https://img.shields.io/badge/rust-2024_edition-orange.svg" alt="Rust">
-  <img src="https://img.shields.io/badge/tests-~120_passing-brightgreen.svg" alt="Tests">
+  <img src="https://img.shields.io/badge/tests-~130_passing-brightgreen.svg" alt="Tests">
 </p>
 
 <p align="center">
@@ -71,16 +71,18 @@ health = "/"
 orca deploy && orca status
 ```
 
-## What's New in v0.2.2
+## What's New in v0.2.3
 
-- **WebSocket streaming** -- agents connect to the master over a persistent bidirectional WebSocket, replacing HTTP heartbeat polling.
-- **Agent proxy hot-adds routes + TLS certs** on container deploy -- no proxy restart needed.
-- **Reconcile on reconnect** -- after a network partition, agents automatically converge to the desired state.
-- **Infra webhook** -- git push to your orca-infra repo triggers `git pull` + redeploy. Full GitOps.
-- **Single-service deploys** -- `orca deploy <service-name>` and `orca redeploy <service>` for force pull + restart.
-- **CLI auto-connects** -- on agent nodes, all commands work without `--api`.
-- **Smart reconciler** -- compares unresolved env templates so OAuth token refreshes don't cause unnecessary restarts.
-- **Webhook persistence** -- webhooks survive restarts (`~/.orca/webhooks.json`).
+- **Secrets in `cluster.toml`** -- `${secrets.X}` now resolves in `ai.api_key`, `ai.endpoint`, and `network.setup_key`, so cluster config is safe to commit (#22).
+- **Per-service stats for remote nodes** -- live CPU and memory for every container on every agent, streamed over the WS heartbeat (#13).
+- **`orca logs <svc> --summarize`** -- AI-summarised log digest with likely causes and next steps (#23).
+- **Multi-arg CLI** -- `orca deploy svc1 svc2 svc3`, `orca redeploy svc1 svc2`, `orca stop svc1 svc2`.
+- **Shell completions** -- `orca completions <bash|zsh|fish|powershell>`.
+- **Find-up config resolution** -- run `orca` from any subdirectory; it walks up to find `cluster.toml` and `services/`.
+- **AMD ROCm GPU passthrough** -- `vendor = "amd"` mounts `/dev/kfd` + `/dev/dri` with auto-detected `video`/`render` GIDs.
+- **Remote placement fix** -- `placement.node = "<agent>"` now resolves correctly over WS, so pinned services start without a master restart.
+- **Proxy preserves Host header** -- fixes apps that emit absolute URLs (e.g. LiteLLM `/ui` redirects).
+- **`orca webhooks add --secret --infra`** flags now wired through the CLI.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
@@ -135,7 +137,7 @@ TOML config that fits on one screen. TUI dashboard with k9s-style navigation. Gi
 └────────┘ └────────┘ └────────┘
 ```
 
-**8 Rust crates** | **~28k lines** | **~120 tests** | **all files under 250 lines**
+**8 Rust crates** | **~28k lines** | **~130 tests** | **all files under 250 lines**
 
 ## Documentation
 

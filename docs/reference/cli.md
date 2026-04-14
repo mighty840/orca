@@ -47,6 +47,8 @@ Deploy services from `services/*/service.toml`.
 
 ```bash
 orca deploy              # Deploy all discovered services
+orca deploy api          # Deploy a single service by name
+orca deploy api worker   # Deploy multiple services in one call
 ```
 
 ### `orca status`
@@ -63,7 +65,11 @@ Stream logs from a service.
 ```bash
 orca logs api
 orca logs api --tail 100
+orca logs api --summarize         # AI-summarized digest with likely causes
 ```
+
+`--summarize` requires an `[ai]` section in `cluster.toml`. See the
+[AI Ops guide](/guide/ai-ops) for setup.
 
 ### `orca scale`
 Scale a service to N replicas.
@@ -77,6 +83,15 @@ Stop a service (config is retained).
 
 ```bash
 orca stop api
+orca stop api worker          # Stop multiple services in one call
+```
+
+### `orca redeploy`
+Force-pull the image and restart one or more services, even when the spec hasn't changed.
+
+```bash
+orca redeploy api
+orca redeploy api worker billing   # Redeploy multiple services in one call
 ```
 
 ### `orca promote`
@@ -173,9 +188,41 @@ orca token list
 Manage git push deploy webhooks.
 
 ```bash
-orca webhooks                                      # List
-orca webhooks add --repo org/app --service app --branch main
+orca webhooks                                                # List
+orca webhooks add --repo myorg/app --service app --branch main
+
+# Provide a shared secret so the webhook handler can verify the signature:
+orca webhooks add --repo myorg/app --service app --branch main \
+    --secret "$(openssl rand -hex 32)"
+
+# Infra webhook -- triggers `git pull` + redeploy on the cluster
+# whenever your orca-infra repo receives a push (no --service needed):
+orca webhooks add --repo myorg/orca-infra --branch main --infra \
+    --secret "$(openssl rand -hex 32)"
 ```
+
+Flags:
+
+| Flag | Purpose |
+|------|---------|
+| `--repo <owner/name>` | Source repository |
+| `--service <name>` | Service to redeploy on push (omit with `--infra`) |
+| `--branch <name>` | Branch filter (default: `main`) |
+| `--secret <value>` | HMAC shared secret for signature verification |
+| `--infra` | Treat as an orca-infra webhook: `git pull` + redeploy the cluster on push |
+
+### `orca completions`
+Print a shell completion script for the chosen shell. Pipe it to a file or
+source it directly.
+
+```bash
+orca completions bash       > /etc/bash_completion.d/orca
+orca completions zsh        > "${fpath[1]}/_orca"
+orca completions fish       > ~/.config/fish/completions/orca.fish
+orca completions powershell > orca.ps1
+```
+
+Supported shells: `bash`, `zsh`, `fish`, `powershell`.
 
 ## AI
 

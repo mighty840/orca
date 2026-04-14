@@ -107,12 +107,35 @@ API_KEY = "${secrets.edge_key}"
 
 ## Secrets
 
-Secrets are encrypted and stored in the cluster state (redb). Reference them in config with `${secrets.KEY}`.
+Secrets are encrypted and stored in the cluster state (redb). Reference them in
+config with `${secrets.KEY}`.
 
 ```bash
 orca secrets set DB_PASS "s3cret"
 orca secrets list
 orca secrets import -f .env           # Bulk import
+```
+
+`${secrets.X}` is resolved both in `service.toml` (any string field, including
+`env` values) and in selected `cluster.toml` fields:
+
+| File | Resolved fields |
+|------|-----------------|
+| `service.toml` | All string fields, including `env`, `image`, `domain`, `aliases` |
+| `cluster.toml` | `ai.api_key`, `ai.endpoint`, `network.setup_key` |
+
+This means cluster-level config can be safely committed to git -- credentials
+live in the encrypted secret store, not in the TOML.
+
+```toml
+[ai]
+provider = "litellm"
+endpoint = "${secrets.ai_endpoint}"
+api_key  = "${secrets.ai_api_key}"
+
+[cluster.network]
+provider  = "netbird"
+setup_key = "${secrets.netbird_key}"
 ```
 
 ::: warning
