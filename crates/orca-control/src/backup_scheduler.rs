@@ -194,4 +194,78 @@ mod tests {
         };
         assert!(config.schedule.is_none());
     }
+
+    fn make_test_state() -> std::sync::Arc<crate::state::AppState> {
+        use orca_core::config::{ClusterConfig, ClusterMeta};
+        use orca_core::testing::MockRuntime;
+        use std::sync::Arc;
+        use tokio::sync::RwLock;
+
+        let runtime = Arc::new(MockRuntime::with_host_port(9000));
+        Arc::new(crate::state::AppState::new(
+            ClusterConfig {
+                cluster: ClusterMeta {
+                    name: "test".into(),
+                    api_port: 0,
+                    grpc_port: 0,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            runtime,
+            None,
+            Arc::new(RwLock::new(std::collections::HashMap::new())),
+            Arc::new(RwLock::new(Vec::new())),
+        ))
+    }
+
+    /// `dispatch_agent_backups` must send a `BackupRequest` to every connected
+    /// agent. We wire up two fake WS senders and verify both receive the message.
+    #[tokio::test]
+    async fn dispatch_agent_backups_sends_to_all_connected_agents() {
+        use orca_core::ws_types::MasterMessage;
+
+        let state = make_test_state();
+
+        // Register two fake agent senders.
+        let (tx1, mut rx1) = tokio::sync::mpsc::channel::<MasterMessage>(4);
+        let (tx2, mut rx2) = tokio::sync::mpsc::channel::<MasterMessage>(4);
+        {
+            let mut agents = state.ws_agents.write().await;
+            agents.insert(1, tx1);
+            agents.insert(2, tx2);
+        }
+
+        let config = BackupConfig {
+            schedule: Some("0 0 2 * * *".to_string()),
+            retention_days: 7,
+            targets: vec![],
+        };
+
+        dispatch_agent_backups(&state, &config).await;
+
+        // Both agents must have received the message.
+        let msg1 = rx1
+            .try_recv()
+            .expect("agent 1 should receive BackupRequest");
+        let msg2 = rx2
+            .try_recv()
+            .expect("agent 2 should receive BackupRequest");
+        assert!(matches!(msg1, MasterMessage::BackupRequest { .. }));
+        assert!(matches!(msg2, MasterMessage::BackupRequest { .. }));
+    }
+
+    /// `dispatch_agent_backups` with no connected agents must complete without
+    /// panicking or returning an error.
+    #[tokio::test]
+    async fn dispatch_agent_backups_noop_when_no_agents() {
+        let state = make_test_state();
+        let config = BackupConfig {
+            schedule: None,
+            retention_days: 30,
+            targets: vec![],
+        };
+        // Should complete without panic even when ws_agents is empty.
+        dispatch_agent_backups(&state, &config).await;
+    }
 }

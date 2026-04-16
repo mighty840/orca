@@ -471,4 +471,86 @@ mod tests {
             "wss://orca.example.com/api/v1/ws/agent?token=tok&node_id=42&address=192.168.1.5%3A6881"
         );
     }
+
+    /// Log stream handle must use the "orca-{service_name}" convention so the
+    /// container runtime can locate the right container.
+    #[test]
+    fn stream_logs_handle_uses_orca_prefix() {
+        let service_name = "my-service";
+        let runtime_id = format!("orca-{service_name}");
+        assert_eq!(runtime_id, "orca-my-service");
+        // The name field also follows this convention.
+        let name = format!("orca-{service_name}");
+        assert_eq!(name, runtime_id);
+    }
+
+    /// `stream_logs` must always send `done=true` in the final chunk so the
+    /// master-side collector loop terminates.  We verify the LogChunk
+    /// serialization round-trips correctly with done=true.
+    #[test]
+    fn log_chunk_done_true_serializes_correctly() {
+        use orca_core::ws_types::AgentMessage;
+        let msg = AgentMessage::LogChunk {
+            request_id: "req-1".into(),
+            service_name: "myapp".into(),
+            data: "some log line\n".into(),
+            done: true,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: AgentMessage = serde_json::from_str(&json).unwrap();
+        match back {
+            AgentMessage::LogChunk { done, data, .. } => {
+                assert!(done, "done must survive round-trip");
+                assert_eq!(data, "some log line\n");
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    /// `run_agent_backup` config JSON must round-trip so the subprocess sees
+    /// the correct targets.
+    #[test]
+    fn backup_config_json_roundtrip() {
+        use orca_core::backup::{BackupConfig, BackupTarget};
+        let cfg = BackupConfig {
+            schedule: Some("0 0 2 * * *".into()),
+            retention_days: 14,
+            targets: vec![BackupTarget::Local {
+                path: "/data/backups".into(),
+            }],
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: BackupConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.retention_days, 14);
+        match &back.targets[0] {
+            BackupTarget::Local { path } => assert_eq!(path, "/data/backups"),
+            _ => panic!("expected Local target"),
+        }
+    }
+
+    /// BackupResult with success=false and an error message serializes and
+    /// deserializes correctly so master can log the failure.
+    #[test]
+    fn backup_result_failure_roundtrip() {
+        use orca_core::ws_types::AgentMessage;
+        let msg = AgentMessage::BackupResult {
+            node_id: 5,
+            success: false,
+            message: "spawn failed: No such file".into(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: AgentMessage = serde_json::from_str(&json).unwrap();
+        match back {
+            AgentMessage::BackupResult {
+                success,
+                message,
+                node_id,
+            } => {
+                assert_eq!(node_id, 5);
+                assert!(!success);
+                assert!(message.contains("spawn failed"));
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
 }

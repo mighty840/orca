@@ -251,15 +251,25 @@ pub use crate::canary::promote;
 mod tests {
     use super::*;
 
+    /// Serialize all tests that call `set_current_dir` — that syscall is
+    /// process-wide, so concurrent tests would corrupt each other's CWD.
+    fn with_cwd<F: FnOnce()>(dir: &std::path::Path, f: F) {
+        use std::sync::Mutex;
+        static CWD_LOCK: Mutex<()> = Mutex::new(());
+        let _guard = CWD_LOCK.lock().unwrap();
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir).unwrap();
+        f();
+        std::env::set_current_dir(&prev).unwrap();
+    }
+
     #[test]
     fn load_fresh_config_returns_none_when_no_services_dir() {
-        // With no services/ dir in CWD, must return None without panicking.
         let tmp = tempfile::tempdir().unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
-        let result = load_fresh_config("does-not-exist");
-        std::env::set_current_dir(&prev).unwrap();
-        assert!(result.is_none());
+        with_cwd(tmp.path(), || {
+            let result = load_fresh_config("does-not-exist");
+            assert!(result.is_none());
+        });
     }
 
     #[test]
@@ -272,12 +282,11 @@ mod tests {
             "[[service]]\nname = \"myapp\"\nimage = \"myapp:latest\"\nport = 8080\n",
         )
         .unwrap();
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(tmp.path()).unwrap();
-        let result = load_fresh_config("myapp");
-        std::env::set_current_dir(&prev).unwrap();
-        assert!(result.is_some());
-        assert_eq!(result.unwrap().name, "myapp");
+        with_cwd(tmp.path(), || {
+            let result = load_fresh_config("myapp");
+            assert!(result.is_some());
+            assert_eq!(result.unwrap().name, "myapp");
+        });
     }
 
     #[test]
@@ -307,5 +316,77 @@ mod tests {
             GRACEFUL_TIMEOUT.as_secs() > 0,
             "graceful timeout must be positive"
         );
+    }
+
+    #[test]
+    fn load_fresh_config_loads_from_monolithic_services_toml() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("services.toml"),
+            "[[service]]\nname = \"myapp\"\nimage = \"myapp:latest\"\nport = 8080\n",
+        )
+        .unwrap();
+        with_cwd(tmp.path(), || {
+            let result = load_fresh_config("myapp");
+            assert!(result.is_some());
+            assert_eq!(result.unwrap().name, "myapp");
+        });
+    }
+
+    #[test]
+    fn load_fresh_config_per_service_takes_precedence_over_monolithic() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Monolithic has image v1, per-service has image v2.
+        std::fs::write(
+            tmp.path().join("services.toml"),
+            "[[service]]\nname = \"myapp\"\nimage = \"myapp:v1\"\nport = 8080\n",
+        )
+        .unwrap();
+        let svc_dir = tmp.path().join("services").join("myapp");
+        std::fs::create_dir_all(&svc_dir).unwrap();
+        std::fs::write(
+            svc_dir.join("service.toml"),
+            "[[service]]\nname = \"myapp\"\nimage = \"myapp:v2\"\nport = 8080\n",
+        )
+        .unwrap();
+        with_cwd(tmp.path(), || {
+            let result = load_fresh_config("myapp");
+            let cfg = result.expect("should find config");
+            assert_eq!(
+                cfg.image.as_deref(),
+                Some("myapp:v2"),
+                "per-service file must win over monolithic"
+            );
+        });
+    }
+
+    #[test]
+    fn load_fresh_config_service_not_in_file_returns_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("services.toml"),
+            "[[service]]\nname = \"other\"\nimage = \"other:latest\"\nport = 9090\n",
+        )
+        .unwrap();
+        with_cwd(tmp.path(), || {
+            let result = load_fresh_config("myapp");
+            assert!(
+                result.is_none(),
+                "should return None when service not in file"
+            );
+        });
+    }
+
+    #[test]
+    fn load_fresh_config_invalid_toml_returns_none() {
+        let tmp = tempfile::tempdir().unwrap();
+        let svc_dir = tmp.path().join("services").join("broken");
+        std::fs::create_dir_all(&svc_dir).unwrap();
+        std::fs::write(svc_dir.join("service.toml"), "this is not valid toml!!!").unwrap();
+        with_cwd(tmp.path(), || {
+            // Invalid TOML should fall through without panicking and return None.
+            let result = load_fresh_config("broken");
+            assert!(result.is_none());
+        });
     }
 }

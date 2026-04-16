@@ -223,4 +223,61 @@ mod tests {
     fn parse_invalid_filename_returns_none() {
         assert!(parse_backup_filename("nounderscorehere").is_none());
     }
+
+    #[test]
+    fn load_backup_config_reads_from_env_var() {
+        use orca_core::backup::BackupTarget;
+        let cfg = BackupConfig {
+            schedule: Some("0 0 2 * * *".to_string()),
+            retention_days: 14,
+            targets: vec![BackupTarget::S3 {
+                bucket: "my-bucket".to_string(),
+                region: "us-east-1".to_string(),
+                prefix: Some("backups/".to_string()),
+                endpoint: None,
+                access_key: Some("AKID".to_string()),
+                secret_key: Some("SECRET".to_string()),
+            }],
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        // SAFETY: single-threaded test; no other threads read this env var.
+        unsafe { std::env::set_var("ORCA_BACKUP_CONFIG_JSON", &json) };
+        let loaded = load_backup_config();
+        unsafe { std::env::remove_var("ORCA_BACKUP_CONFIG_JSON") };
+        assert_eq!(loaded.retention_days, 14);
+        assert_eq!(loaded.schedule.as_deref(), Some("0 0 2 * * *"));
+        match &loaded.targets[0] {
+            BackupTarget::S3 { bucket, .. } => assert_eq!(bucket, "my-bucket"),
+            _ => panic!("expected S3 target"),
+        }
+    }
+
+    #[test]
+    fn load_backup_config_malformed_env_var_falls_through_to_default() {
+        // Malformed JSON should not panic; fall through to default config.
+        // SAFETY: single-threaded test; no other threads read this env var.
+        unsafe { std::env::set_var("ORCA_BACKUP_CONFIG_JSON", "not-valid-json") };
+        let loaded = load_backup_config();
+        unsafe { std::env::remove_var("ORCA_BACKUP_CONFIG_JSON") };
+        // Default has 30-day retention and a local target.
+        assert_eq!(loaded.retention_days, 30);
+    }
+
+    /// The default config (used when neither env var nor cluster.toml is
+    /// present) must have sensible conservative values.
+    #[test]
+    fn default_backup_config_has_sensible_values() {
+        use orca_core::backup::BackupTarget;
+        let cfg = default_backup_config();
+        assert_eq!(
+            cfg.retention_days, 30,
+            "default retention should be 30 days"
+        );
+        assert!(cfg.schedule.is_none(), "default should have no schedule");
+        assert_eq!(cfg.targets.len(), 1, "default should have one local target");
+        match &cfg.targets[0] {
+            BackupTarget::Local { path } => assert!(!path.is_empty()),
+            _ => panic!("default target should be Local"),
+        }
+    }
 }
