@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Path, Query, State};
@@ -8,9 +9,13 @@ use tracing::error;
 
 use orca_core::api_types::{LogsQuery, ScaleRequest, ScaleResponse};
 use orca_core::types::WorkloadStatus;
+use orca_core::ws_types::MasterMessage;
 
 use crate::reconciler;
 use crate::state::AppState;
+
+/// Timeout waiting for log chunks from a remote agent.
+const REMOTE_LOG_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Stream or fetch logs from a service.
 pub(crate) async fn logs(
@@ -23,32 +28,81 @@ pub(crate) async fn logs(
         return (StatusCode::NOT_FOUND, format!("service '{name}' not found")).into_response();
     };
 
-    // Remote-scheduled services have a placeholder instance with no
-    // docker handle on the master. Until a secure-websocket log stream
-    // lands (see BACKLOG.md), return a stable 200 with a clear message
-    // instead of a 500 so the TUI doesn't paint the detail pane red.
-    if svc
-        .instances
-        .iter()
-        .any(|i| i.handle.runtime_id.starts_with("remote-"))
-    {
-        let node = svc
-            .config
-            .placement
-            .as_ref()
-            .and_then(|p| p.node.as_deref())
-            .unwrap_or("remote node");
-        return (
-            StatusCode::OK,
-            format!(
-                "Logs for '{name}' live on {node}.\n\
-                 Remote log streaming over the cluster API is not yet\n\
-                 implemented — ssh {node} and run:\n\n\
-                 \x20\x20docker logs orca-{name} --tail {} -f\n",
-                query.tail
-            ),
-        )
-            .into_response();
+    // Remote-scheduled services: stream logs via WebSocket from the agent.
+    let remote_node_id = svc.instances.iter().find_map(|i| {
+        i.handle
+            .runtime_id
+            .strip_prefix("remote-")
+            .and_then(|s| s.parse::<u64>().ok())
+    });
+
+    if let Some(node_id) = remote_node_id {
+        let request_id = uuid::Uuid::new_v4().to_string();
+        // Register a listener channel before sending the request.
+        let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel::<(String, bool)>(256);
+        {
+            let mut listeners = state.log_listeners.write().await;
+            listeners.insert(request_id.clone(), chunk_tx);
+        }
+
+        // Send LogRequest to the agent over WS.
+        let sent = {
+            let agents = state.ws_agents.read().await;
+            if let Some(agent_tx) = agents.get(&node_id) {
+                agent_tx
+                    .send(MasterMessage::LogRequest {
+                        request_id: request_id.clone(),
+                        service_name: name.clone(),
+                        tail: query.tail,
+                        follow: false,
+                    })
+                    .await
+                    .is_ok()
+            } else {
+                false
+            }
+        };
+        drop(services);
+
+        if !sent {
+            let mut listeners = state.log_listeners.write().await;
+            listeners.remove(&request_id);
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("agent for '{name}' is not connected"),
+            )
+                .into_response();
+        }
+
+        // Collect chunks until done=true or timeout.
+        let mut log_data = String::new();
+        let deadline = tokio::time::sleep(REMOTE_LOG_TIMEOUT);
+        tokio::pin!(deadline);
+        loop {
+            tokio::select! {
+                biased;
+                chunk = chunk_rx.recv() => {
+                    match chunk {
+                        Some((data, done)) => {
+                            log_data.push_str(&data);
+                            if done { break; }
+                        }
+                        None => break,
+                    }
+                }
+                _ = &mut deadline => {
+                    log_data.push_str("\n[log stream timed out after 30s]");
+                    break;
+                }
+            }
+        }
+
+        // Cleanup listener.
+        {
+            let mut listeners = state.log_listeners.write().await;
+            listeners.remove(&request_id);
+        }
+        return log_data.into_response();
     }
 
     // Get logs from the first running instance

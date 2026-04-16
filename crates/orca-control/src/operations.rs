@@ -43,16 +43,59 @@ pub async fn stop_all(state: &AppState) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Try to load a fresh `ServiceConfig` from the on-disk `services/` tree so
+/// that `redeploy` picks up any edits to `service.toml` since the last deploy.
+fn load_fresh_config(service_name: &str) -> Option<orca_core::config::ServiceConfig> {
+    // services/{name}/service.toml
+    let per_service = std::path::Path::new("services")
+        .join(service_name)
+        .join("service.toml");
+    if per_service.exists()
+        && let Ok(cfg) = orca_core::config::ServicesConfig::load(&per_service)
+        && let Some(svc) = cfg.service.into_iter().find(|s| s.name == service_name)
+    {
+        return Some(svc);
+    }
+    // Monolithic services.toml fallback
+    let mono = std::path::Path::new("services.toml");
+    if mono.exists()
+        && let Ok(cfg) = orca_core::config::ServicesConfig::load(mono)
+    {
+        return cfg.service.into_iter().find(|s| s.name == service_name);
+    }
+    None
+}
+
 /// Redeploy a service using a rolling update: start new instances before
 /// stopping old ones, with a 30-second graceful shutdown timeout.
+///
+/// Re-reads `service.toml` from disk if available so config edits take effect
+/// without needing a full `orca deploy`.
 pub async fn redeploy(state: &AppState, service_name: &str) -> anyhow::Result<()> {
-    let config = {
+    let cached_config = {
         let services = state.services.read().await;
         let svc = services
             .get(service_name)
             .ok_or_else(|| anyhow::anyhow!("service '{}' not found", service_name))?;
         svc.config.clone()
     };
+
+    // Reload from disk when possible so mount/env changes take effect.
+    let config = if let Some(fresh) = load_fresh_config(service_name) {
+        tracing::debug!("redeploy: reloaded config from disk for {service_name}");
+        fresh
+    } else {
+        cached_config
+    };
+
+    // Persist updated config in state immediately.
+    {
+        let mut services = state.services.write().await;
+        if let Some(svc) = services.get_mut(service_name) {
+            svc.config = config.clone();
+        }
+    }
+
     let runtime = get_runtime(state, config.runtime)?;
 
     // Collect old instance handles before creating new ones.
@@ -207,6 +250,35 @@ pub use crate::canary::promote;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn load_fresh_config_returns_none_when_no_services_dir() {
+        // With no services/ dir in CWD, must return None without panicking.
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+        let result = load_fresh_config("does-not-exist");
+        std::env::set_current_dir(&prev).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn load_fresh_config_loads_from_per_service_toml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let svc_dir = tmp.path().join("services").join("myapp");
+        std::fs::create_dir_all(&svc_dir).unwrap();
+        std::fs::write(
+            svc_dir.join("service.toml"),
+            "[[service]]\nname = \"myapp\"\nimage = \"myapp:latest\"\nport = 8080\n",
+        )
+        .unwrap();
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(tmp.path()).unwrap();
+        let result = load_fresh_config("myapp");
+        std::env::set_current_dir(&prev).unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().name, "myapp");
+    }
 
     #[test]
     fn graceful_timeout_is_5_seconds() {

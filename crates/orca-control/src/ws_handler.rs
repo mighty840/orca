@@ -215,6 +215,17 @@ async fn handle_agent_message(
                 let _ = listener_tx.send((data, done)).await;
             }
         }
+        AgentMessage::BackupResult {
+            node_id,
+            success,
+            message,
+        } => {
+            if success {
+                info!("Node {node_id}: backup complete — {message}");
+            } else {
+                error!("Node {node_id}: backup failed — {message}");
+            }
+        }
     }
 
     Ok(())

@@ -185,13 +185,6 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
         info!("ACME certificate renewal task spawned");
     }
 
-    // Spawn scheduled backup task if configured in cluster.toml.
-    if let Some(backup_cfg) = cluster_config.backup.clone()
-        && orca_control::backup_scheduler::spawn_backup_scheduler(backup_cfg).is_some()
-    {
-        info!("Backup scheduler started");
-    }
-
     // Run API server (blocks until shutdown)
     let cleanup_runtime = container_runtime.clone();
     orca_control::run_server_with_acme(

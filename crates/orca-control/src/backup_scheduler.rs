@@ -5,7 +5,10 @@ use std::sync::Arc;
 
 use cron::Schedule;
 use orca_core::backup::{BackupConfig, BackupManager};
+use orca_core::ws_types::MasterMessage;
 use tracing::{error, info};
+
+use crate::state::AppState;
 
 /// Compute the duration until the next occurrence of the cron schedule.
 pub fn duration_until_next(schedule: &Schedule) -> Option<std::time::Duration> {
@@ -18,7 +21,10 @@ pub fn duration_until_next(schedule: &Schedule) -> Option<std::time::Duration> {
 /// Spawn a background task that runs volume backups on the configured cron schedule.
 ///
 /// Returns `None` if no schedule is configured or the schedule is invalid.
-pub fn spawn_backup_scheduler(config: BackupConfig) -> Option<tokio::task::JoinHandle<()>> {
+pub fn spawn_backup_scheduler(
+    config: BackupConfig,
+    state: Arc<AppState>,
+) -> Option<tokio::task::JoinHandle<()>> {
     let schedule_str = config.schedule.as_ref()?;
     let schedule = match Schedule::from_str(schedule_str) {
         Ok(s) => s,
@@ -30,7 +36,7 @@ pub fn spawn_backup_scheduler(config: BackupConfig) -> Option<tokio::task::JoinH
 
     info!("Backup scheduler started with schedule: {schedule_str}");
     let handle = tokio::spawn(async move {
-        let mgr = Arc::new(BackupManager::new(config));
+        let mgr = Arc::new(BackupManager::new(config.clone()));
         loop {
             let sleep_dur = match duration_until_next(&schedule) {
                 Some(d) => d,
@@ -42,9 +48,30 @@ pub fn spawn_backup_scheduler(config: BackupConfig) -> Option<tokio::task::JoinH
             info!("Next backup in {}s", sleep_dur.as_secs());
             tokio::time::sleep(sleep_dur).await;
             run_scheduled_backup(&mgr).await;
+            dispatch_agent_backups(&state, &config).await;
         }
     });
     Some(handle)
+}
+
+/// Send a `BackupRequest` to every connected agent so they back up their
+/// local volumes to the same targets as the master.
+async fn dispatch_agent_backups(state: &AppState, config: &BackupConfig) {
+    let agents = state.ws_agents.read().await;
+    if agents.is_empty() {
+        return;
+    }
+    info!("Dispatching backup request to {} agent(s)", agents.len());
+    for (node_id, tx) in agents.iter() {
+        if let Err(e) = tx
+            .send(MasterMessage::BackupRequest {
+                config: config.clone(),
+            })
+            .await
+        {
+            error!("Failed to send BackupRequest to agent {node_id}: {e}");
+        }
+    }
 }
 
 /// Execute a backup run for all configured targets.

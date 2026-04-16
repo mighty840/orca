@@ -24,9 +24,9 @@ categories = ["command-line-utilities"]
 
 [workspace.dependencies]
 # Shared across crates
-orca-core = { path = "crates/orca-core", version = "0.2.3-rc.4" }
-orca-ai = { path = "crates/orca-ai", version = "0.2.3-rc.4" }
-orca-proxy = { path = "crates/orca-proxy", version = "0.2.3-rc.4" }
+orca-core = { path = "crates/orca-core", version = "0.2.4-dev" }
+orca-ai = { path = "crates/orca-ai", version = "0.2.4-dev" }
+orca-proxy = { path = "crates/orca-proxy", version = "0.2.4-dev" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
@@ -77,6 +77,6 @@ thiserror = "2"
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
-uuid = { version = "1", features = ["v7", "serde"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"

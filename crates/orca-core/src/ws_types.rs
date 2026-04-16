@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::backup::BackupConfig;
 use crate::types::WorkloadSpec;
 
 /// Messages sent from agent to master.
@@ -36,6 +37,12 @@ pub enum AgentMessage {
         data: String,
         done: bool,
     },
+    /// Result of a backup run triggered by master.
+    BackupResult {
+        node_id: u64,
+        success: bool,
+        message: String,
+    },
 }
 
 /// Messages sent from master to agent.
@@ -52,6 +59,11 @@ pub enum MasterMessage {
         service_name: String,
         tail: u64,
         follow: bool,
+    },
+    /// Trigger a backup run on this agent node.
+    BackupRequest {
+        /// Full backup config with resolved credentials.
+        config: BackupConfig,
     },
     /// Acknowledge registration / heartbeat.
     Ack { node_id: u64 },
