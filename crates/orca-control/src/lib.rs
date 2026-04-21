@@ -119,6 +119,13 @@ pub async fn run_server_with_acme(
     health::spawn_health_checker(state.clone());
     stats::spawn_stats_collector(state.clone());
 
+    // Spawn scheduled backup task if configured (needs state for agent dispatch).
+    if let Some(backup_cfg) = cluster_config.backup.clone()
+        && backup_scheduler::spawn_backup_scheduler(backup_cfg, state.clone()).is_some()
+    {
+        info!("Backup scheduler started");
+    }
+
     let app = api::router(state.clone());
 
     let addr = format!("0.0.0.0:{}", cluster_config.cluster.api_port);

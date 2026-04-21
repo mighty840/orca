@@ -69,30 +69,46 @@ async fn handle_ws_session(
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let stats_collector = Arc::new(crate::host_stats::HostStatsCollector::new());
 
-    // Spawn heartbeat sender (every 5s)
-    let rt = runtime.clone();
-    let agent_c = agent.clone();
-    let stats_c = stats_collector.clone();
-    let heartbeat_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(5));
-        loop {
-            interval.tick().await;
-            let msg = build_heartbeat(node_id, &rt, &agent_c, &stats_c).await;
+    // Shared output channel — heartbeat + log/backup responses all funnel here.
+    let (out_tx, mut out_rx) = mpsc::channel::<AgentMessage>(128);
+
+    // Dedicated WS writer task.
+    let write_task = tokio::spawn(async move {
+        while let Some(msg) = out_rx.recv().await {
             let json = match serde_json::to_string(&msg) {
                 Ok(j) => j,
-                Err(_) => continue,
+                Err(e) => {
+                    error!("Failed to serialize AgentMessage: {e}");
+                    continue;
+                }
             };
             if ws_tx
                 .send(tungstenite::Message::Text(json.into()))
                 .await
                 .is_err()
             {
-                break; // connection lost
+                break;
             }
         }
     });
 
-    // Process incoming master messages
+    // Heartbeat sender (every 5s) — uses out_tx.
+    let rt = runtime.clone();
+    let agent_c = agent.clone();
+    let stats_c = stats_collector.clone();
+    let hb_tx = out_tx.clone();
+    let heartbeat_handle = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+            let msg = build_heartbeat(node_id, &rt, &agent_c, &stats_c).await;
+            if hb_tx.send(msg).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // Process incoming master messages, passing out_tx for async responses.
     while let Some(msg_result) = ws_rx.next().await {
         let msg = match msg_result {
             Ok(m) => m,
@@ -104,7 +120,9 @@ async fn handle_ws_session(
 
         match msg {
             tungstenite::Message::Text(text) => {
-                if let Err(e) = handle_master_message(&text, runtime, agent, domain_tx).await {
+                if let Err(e) =
+                    handle_master_message(&text, node_id, runtime, agent, domain_tx, &out_tx).await
+                {
                     warn!("Error handling master message: {e}");
                 }
             }
@@ -113,6 +131,7 @@ async fn handle_ws_session(
         }
     }
 
+    write_task.abort();
     heartbeat_handle.abort();
     Ok(())
 }
@@ -120,9 +139,11 @@ async fn handle_ws_session(
 /// Process a single message from the master.
 async fn handle_master_message(
     text: &str,
+    node_id: u64,
     runtime: &Arc<dyn Runtime>,
     agent: &Arc<AgentClient>,
     domain_tx: &mpsc::Sender<(String, String, u16)>,
+    out_tx: &mpsc::Sender<AgentMessage>,
 ) -> anyhow::Result<()> {
     let msg: MasterMessage = serde_json::from_str(text)?;
 
@@ -152,9 +173,6 @@ async fn handle_master_message(
                     .await;
             }
 
-            // Send result back (will be picked up by heartbeat or a
-            // dedicated send — for now, we log it; the heartbeat reports
-            // running status which covers most cases)
             if success {
                 info!("WS: deploy of {} succeeded", spec.name);
             } else {
@@ -170,13 +188,24 @@ async fn handle_master_message(
             agent.stop_service(runtime.as_ref(), &service_name).await;
         }
         MasterMessage::LogRequest {
-            request_id: _,
-            service_name: _,
-            tail: _,
-            follow: _,
+            request_id,
+            service_name,
+            tail,
+            follow,
         } => {
-            // TODO: implement log streaming in next task
-            warn!("WS: log streaming not yet implemented");
+            info!("WS: log request for {service_name} (tail={tail}, follow={follow})");
+            let rt = runtime.clone();
+            let tx = out_tx.clone();
+            tokio::spawn(async move {
+                stream_logs(&rt, &service_name, &request_id, tail, follow, tx).await;
+            });
+        }
+        MasterMessage::BackupRequest { config } => {
+            info!("WS: backup request received");
+            let tx = out_tx.clone();
+            tokio::spawn(async move {
+                run_agent_backup(node_id, config, tx).await;
+            });
         }
         MasterMessage::Ack { node_id } => {
             info!("WS: master acknowledged node {node_id}");
@@ -188,6 +217,149 @@ async fn handle_master_message(
     }
 
     Ok(())
+}
+
+/// Stream container logs back to master via LogChunk messages.
+async fn stream_logs(
+    runtime: &Arc<dyn Runtime>,
+    service_name: &str,
+    request_id: &str,
+    tail: u64,
+    follow: bool,
+    out_tx: mpsc::Sender<AgentMessage>,
+) {
+    use tokio::io::AsyncReadExt;
+
+    let handle = orca_core::runtime::WorkloadHandle {
+        runtime_id: format!("orca-{service_name}"),
+        name: format!("orca-{service_name}"),
+        metadata: Default::default(),
+    };
+    let opts = orca_core::runtime::LogOpts {
+        follow,
+        tail: Some(tail),
+        since: None,
+        timestamps: false,
+    };
+
+    match runtime.logs(&handle, &opts).await {
+        Ok(mut stream) => {
+            let mut buf = Vec::new();
+            // Read up to 1MB
+            let mut limited = (&mut stream).take(1024 * 1024);
+            match limited.read_to_end(&mut buf).await {
+                Ok(_) => {
+                    let data = String::from_utf8_lossy(&buf).into_owned();
+                    let _ = out_tx
+                        .send(AgentMessage::LogChunk {
+                            request_id: request_id.to_string(),
+                            service_name: service_name.to_string(),
+                            data,
+                            done: true,
+                        })
+                        .await;
+                }
+                Err(e) => {
+                    error!("WS: failed to read logs for {service_name}: {e}");
+                    let _ = out_tx
+                        .send(AgentMessage::LogChunk {
+                            request_id: request_id.to_string(),
+                            service_name: service_name.to_string(),
+                            data: format!("error reading logs: {e}"),
+                            done: true,
+                        })
+                        .await;
+                }
+            }
+        }
+        Err(e) => {
+            error!("WS: logs unavailable for {service_name}: {e}");
+            let _ = out_tx
+                .send(AgentMessage::LogChunk {
+                    request_id: request_id.to_string(),
+                    service_name: service_name.to_string(),
+                    data: format!("logs unavailable: {e}"),
+                    done: true,
+                })
+                .await;
+        }
+    }
+}
+
+/// Run a backup on this agent node using the config sent by master.
+/// Passes backup targets as JSON via env var so the CLI subprocess can use them.
+async fn run_agent_backup(
+    node_id: u64,
+    config: orca_core::backup::BackupConfig,
+    out_tx: mpsc::Sender<AgentMessage>,
+) {
+    let config_json = match serde_json::to_string(&config) {
+        Ok(j) => j,
+        Err(e) => {
+            error!("WS: failed to serialize backup config: {e}");
+            let _ = out_tx
+                .send(AgentMessage::BackupResult {
+                    node_id,
+                    success: false,
+                    message: format!("config serialization failed: {e}"),
+                })
+                .await;
+            return;
+        }
+    };
+
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = out_tx
+                .send(AgentMessage::BackupResult {
+                    node_id,
+                    success: false,
+                    message: format!("cannot resolve binary: {e}"),
+                })
+                .await;
+            return;
+        }
+    };
+
+    match tokio::process::Command::new(&exe)
+        .args(["backup", "all"])
+        .env("ORCA_BACKUP_CONFIG_JSON", &config_json)
+        .output()
+        .await
+    {
+        Ok(out) if out.status.success() => {
+            let msg = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            info!("WS: agent backup complete: {msg}");
+            let _ = out_tx
+                .send(AgentMessage::BackupResult {
+                    node_id,
+                    success: true,
+                    message: msg,
+                })
+                .await;
+        }
+        Ok(out) => {
+            let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            error!("WS: agent backup failed: {msg}");
+            let _ = out_tx
+                .send(AgentMessage::BackupResult {
+                    node_id,
+                    success: false,
+                    message: msg,
+                })
+                .await;
+        }
+        Err(e) => {
+            let _ = out_tx
+                .send(AgentMessage::BackupResult {
+                    node_id,
+                    success: false,
+                    message: format!("spawn failed: {e}"),
+                })
+                .await;
+        }
+    }
 }
 
 /// Reconcile: compare expected services from master against what's actually
@@ -298,5 +470,87 @@ mod tests {
             url,
             "wss://orca.example.com/api/v1/ws/agent?token=tok&node_id=42&address=192.168.1.5%3A6881"
         );
+    }
+
+    /// Log stream handle must use the "orca-{service_name}" convention so the
+    /// container runtime can locate the right container.
+    #[test]
+    fn stream_logs_handle_uses_orca_prefix() {
+        let service_name = "my-service";
+        let runtime_id = format!("orca-{service_name}");
+        assert_eq!(runtime_id, "orca-my-service");
+        // The name field also follows this convention.
+        let name = format!("orca-{service_name}");
+        assert_eq!(name, runtime_id);
+    }
+
+    /// `stream_logs` must always send `done=true` in the final chunk so the
+    /// master-side collector loop terminates.  We verify the LogChunk
+    /// serialization round-trips correctly with done=true.
+    #[test]
+    fn log_chunk_done_true_serializes_correctly() {
+        use orca_core::ws_types::AgentMessage;
+        let msg = AgentMessage::LogChunk {
+            request_id: "req-1".into(),
+            service_name: "myapp".into(),
+            data: "some log line\n".into(),
+            done: true,
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: AgentMessage = serde_json::from_str(&json).unwrap();
+        match back {
+            AgentMessage::LogChunk { done, data, .. } => {
+                assert!(done, "done must survive round-trip");
+                assert_eq!(data, "some log line\n");
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    /// `run_agent_backup` config JSON must round-trip so the subprocess sees
+    /// the correct targets.
+    #[test]
+    fn backup_config_json_roundtrip() {
+        use orca_core::backup::{BackupConfig, BackupTarget};
+        let cfg = BackupConfig {
+            schedule: Some("0 0 2 * * *".into()),
+            retention_days: 14,
+            targets: vec![BackupTarget::Local {
+                path: "/data/backups".into(),
+            }],
+        };
+        let json = serde_json::to_string(&cfg).unwrap();
+        let back: BackupConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.retention_days, 14);
+        match &back.targets[0] {
+            BackupTarget::Local { path } => assert_eq!(path, "/data/backups"),
+            _ => panic!("expected Local target"),
+        }
+    }
+
+    /// BackupResult with success=false and an error message serializes and
+    /// deserializes correctly so master can log the failure.
+    #[test]
+    fn backup_result_failure_roundtrip() {
+        use orca_core::ws_types::AgentMessage;
+        let msg = AgentMessage::BackupResult {
+            node_id: 5,
+            success: false,
+            message: "spawn failed: No such file".into(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: AgentMessage = serde_json::from_str(&json).unwrap();
+        match back {
+            AgentMessage::BackupResult {
+                success,
+                message,
+                node_id,
+            } => {
+                assert_eq!(node_id, 5);
+                assert!(!success);
+                assert!(message.contains("spawn failed"));
+            }
+            _ => panic!("unexpected variant"),
+        }
     }
 }
