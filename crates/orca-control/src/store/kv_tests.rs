@@ -61,6 +61,7 @@ fn set_and_get_service() {
         extra_ports: vec![],
         strip_prefix: None,
         pull_policy: Default::default(),
+        backup: None,
     };
     store
         .apply(&RaftEntry::SetService(Box::new(config)))
@@ -148,6 +149,7 @@ fn snapshot_captures_all_state() {
             extra_ports: vec![],
             strip_prefix: None,
             pull_policy: Default::default(),
+            backup: None,
         })))
         .unwrap();
 

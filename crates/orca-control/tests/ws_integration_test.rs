@@ -278,6 +278,7 @@ async fn ws_domain_discovered_updates_service_config() {
             extra_ports: vec![],
             strip_prefix: None,
             pull_policy: Default::default(),
+            backup: None,
         };
         services.insert(
             "dashboard".into(),

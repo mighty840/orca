@@ -61,17 +61,31 @@ async fn dispatch_agent_backups(state: &AppState, config: &BackupConfig) {
     if agents.is_empty() {
         return;
     }
+    let service_hooks = collect_service_hooks(state).await;
     info!("Dispatching backup request to {} agent(s)", agents.len());
     for (node_id, tx) in agents.iter() {
         if let Err(e) = tx
             .send(MasterMessage::BackupRequest {
                 config: config.clone(),
+                service_hooks: service_hooks.clone(),
             })
             .await
         {
             error!("Failed to send BackupRequest to agent {node_id}: {e}");
         }
     }
+}
+
+/// Collect pre-hook commands from all services that have backup config.
+async fn collect_service_hooks(state: &AppState) -> std::collections::HashMap<String, String> {
+    let services = state.services.read().await;
+    services
+        .values()
+        .filter_map(|svc| {
+            let hook = svc.config.backup.as_ref()?.pre_hook.as_ref()?;
+            Some((svc.config.name.clone(), hook.clone()))
+        })
+        .collect()
 }
 
 /// Execute a backup run for all configured targets.

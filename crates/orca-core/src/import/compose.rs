@@ -115,6 +115,7 @@ fn convert_service(name: &str, svc: &ComposeService, network: &str) -> ServiceCo
         extra_ports: vec![],
         strip_prefix: None,
         pull_policy: Default::default(),
+        backup: None,
     }
 }
 
@@ -263,6 +264,7 @@ services:
                 extra_ports: vec![],
                 strip_prefix: None,
                 pull_policy: Default::default(),
+                backup: None,
             }],
         };
         let toml_str = services_to_toml(&config).unwrap();

@@ -169,7 +169,33 @@ fn restore_backup(mgr: &BackupManager, config: &BackupConfig, id: &str) {
                 return;
             }
             BackupTarget::S3 { .. } => {
-                println!("S3 restore not yet supported.");
+                let objects = match orca_core::backup::s3::list_objects(target) {
+                    Ok(o) => o,
+                    Err(e) => {
+                        tracing::error!("Failed to list S3 objects: {e}");
+                        continue;
+                    }
+                };
+                let matched: Vec<_> = objects.iter().filter(|n| n.contains(id)).collect();
+                if matched.is_empty() {
+                    println!("No S3 backups matching '{id}'");
+                    continue;
+                }
+                if matched.len() > 1 {
+                    println!("Multiple S3 matches for '{id}':");
+                    for m in &matched {
+                        println!("  {m}");
+                    }
+                    println!("Please specify a more precise id.");
+                    return;
+                }
+                let name = matched[0];
+                let dest = std::path::Path::new(name);
+                match orca_core::backup::s3::download(target, name, dest) {
+                    Ok(()) => println!("Downloaded S3 backup → {name}"),
+                    Err(e) => tracing::error!("S3 download failed: {e}"),
+                }
+                return;
             }
         }
     }

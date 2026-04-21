@@ -316,6 +316,7 @@ mod tests {
             extra_ports: vec![],
             strip_prefix: None,
             pull_policy: Default::default(),
+            backup: None,
         }
     }
 

@@ -119,17 +119,17 @@ fn run_container_shell(
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
 
-    let container = format!("orca-{service}");
-    let mut child = if let Some(host) = node {
-        // `-t` forces a pty on the remote side so interactive programs
-        // (vim, less, /bin/sh with a real prompt) behave correctly.
-        let mut c = std::process::Command::new("ssh");
-        c.args(["-t", host, "docker", "exec", "-it", &container]);
+    // Remote services: delegate to `orca exec` which connects via the master WS exec channel.
+    // Local services: direct docker exec.
+    let mut child = if node.is_some() {
+        let mut c = std::process::Command::new("orca");
+        c.arg("exec").arg(service);
         for a in cmd {
             c.arg(a);
         }
         c
     } else {
+        let container = format!("orca-{service}");
         let mut c = std::process::Command::new("docker");
         c.args(["exec", "-it", &container]);
         for a in cmd {

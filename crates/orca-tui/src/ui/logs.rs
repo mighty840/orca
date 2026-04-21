@@ -32,8 +32,8 @@ pub fn draw_logs(f: &mut Frame, area: Rect, state: &AppState, service: &str) {
         0
     };
 
-    // Auto-scroll: show the last `inner_h` lines.
-    let start = total.saturating_sub(inner_h);
+    // Scroll offset: 0 = bottom (auto-scroll), N = N lines up from bottom.
+    let start = total.saturating_sub(inner_h + state.service_scroll);
     let line_num_width = format!("{total}").len();
 
     let lines: Vec<Line> = log_lines[start..]

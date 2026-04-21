@@ -39,6 +39,7 @@ fn make_service(name: &str, depends_on: Vec<&str>) -> ServiceConfig {
         extra_ports: vec![],
         strip_prefix: None,
         pull_policy: Default::default(),
+        backup: None,
         depends_on: depends_on.into_iter().map(String::from).collect(),
     }
 }

@@ -44,6 +44,7 @@ fn nginx_config() -> orca_core::config::ServiceConfig {
         extra_ports: vec![],
         strip_prefix: None,
         pull_policy: Default::default(),
+        backup: None,
     }
 }
 

@@ -226,6 +226,27 @@ async fn handle_agent_message(
                 error!("Node {node_id}: backup failed — {message}");
             }
         }
+        AgentMessage::ExecOutput { session_id, data } => {
+            use base64::Engine as _;
+            let bytes = match base64::engine::general_purpose::STANDARD.decode(&data) {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!("exec: bad base64 output for session {session_id}: {e}");
+                    return Ok(());
+                }
+            };
+            let sessions = state.exec_sessions.read().await;
+            if let Some(tx) = sessions.get(&session_id) {
+                let _ = tx.send(bytes).await;
+            }
+        }
+        AgentMessage::ExecDone {
+            session_id,
+            exit_code,
+        } => {
+            info!("Node {node_id}: exec session {session_id} done (exit {exit_code})");
+            state.exec_sessions.write().await.remove(&session_id);
+        }
     }
 
     Ok(())

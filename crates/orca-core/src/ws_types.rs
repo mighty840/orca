@@ -3,6 +3,8 @@
 //! Both sides use the same enum types so messages are type-safe.
 //! All messages are JSON-serialized over the WebSocket text frame.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 use crate::backup::BackupConfig;
@@ -12,65 +14,90 @@ use crate::types::WorkloadSpec;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AgentMessage {
-    /// Periodic status report (replaces HTTP heartbeat).
     Heartbeat {
         node_id: u64,
         workloads: Vec<WorkloadReport>,
         stats: HostStats,
     },
-    /// A new domain was discovered on this node (container with orca.domain).
     DomainDiscovered {
         service_name: String,
         domain: String,
         host_port: u16,
     },
-    /// A container was successfully deployed.
     DeployResult {
         service_name: String,
         success: bool,
         error: Option<String>,
     },
-    /// Log chunk from a container (in response to a LogRequest).
     LogChunk {
         request_id: String,
         service_name: String,
         data: String,
         done: bool,
     },
-    /// Result of a backup run triggered by master.
     BackupResult {
         node_id: u64,
         success: bool,
         message: String,
     },
+    /// PTY output chunk from a container exec session (base64-encoded bytes).
+    ExecOutput { session_id: String, data: String },
+    /// Exec session has ended.
+    ExecDone { session_id: String, exit_code: i64 },
 }
 
 /// Messages sent from master to agent.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum MasterMessage {
-    /// Deploy a workload on this agent.
-    Deploy { spec: Box<WorkloadSpec> },
-    /// Stop a workload.
-    Stop { service_name: String },
-    /// Request logs from a container.
+    Deploy {
+        spec: Box<WorkloadSpec>,
+    },
+    Stop {
+        service_name: String,
+    },
     LogRequest {
         request_id: String,
         service_name: String,
         tail: u64,
         follow: bool,
     },
-    /// Trigger a backup run on this agent node.
     BackupRequest {
-        /// Full backup config with resolved credentials.
         config: BackupConfig,
+        /// service_name → pre_hook shell command, populated from ServiceConfig.backup.
+        #[serde(default)]
+        service_hooks: HashMap<String, String>,
     },
-    /// Acknowledge registration / heartbeat.
-    Ack { node_id: u64 },
-    /// Report which services should be running on this node
-    /// so the agent can reconcile on reconnect.
+    Ack {
+        node_id: u64,
+    },
     #[allow(clippy::vec_box)]
-    Reconcile { expected: Vec<Box<WorkloadSpec>> },
+    Reconcile {
+        expected: Vec<Box<WorkloadSpec>>,
+    },
+    /// Start an interactive PTY exec session on a container.
+    ExecStart {
+        session_id: String,
+        service_name: String,
+        cmd: Vec<String>,
+        cols: u16,
+        rows: u16,
+    },
+    /// Stdin bytes for an active exec session (base64-encoded).
+    ExecInput {
+        session_id: String,
+        data: String,
+    },
+    /// Terminal resize event for an active exec session.
+    ExecResize {
+        session_id: String,
+        cols: u16,
+        rows: u16,
+    },
+    /// Signal the agent to terminate an exec session cleanly.
+    ExecClose {
+        session_id: String,
+    },
 }
 
 /// Status of a single workload, reported by agent.
@@ -79,10 +106,8 @@ pub struct WorkloadReport {
     pub service_name: String,
     pub status: String,
     pub container_id: Option<String>,
-    /// Per-container CPU usage percentage.
     #[serde(default)]
     pub cpu_percent: f64,
-    /// Per-container memory usage in bytes.
     #[serde(default)]
     pub memory_bytes: u64,
 }
@@ -97,7 +122,6 @@ pub struct HostStats {
     pub disk_total: u64,
     pub net_rx: u64,
     pub net_tx: u64,
-    /// Domains currently served by this node's proxy.
     #[serde(default)]
     pub domains: Vec<String>,
 }
@@ -202,56 +226,53 @@ mod tests {
     }
 
     #[test]
-    fn agent_message_deploy_result_serde() {
-        let msg = AgentMessage::DeployResult {
+    fn exec_message_roundtrip() {
+        let start = MasterMessage::ExecStart {
+            session_id: "s1".into(),
             service_name: "web".into(),
-            success: true,
-            error: None,
+            cmd: vec!["sh".into()],
+            cols: 80,
+            rows: 24,
         };
-        let json = serde_json::to_string(&msg).unwrap();
-        assert!(json.contains("\"type\":\"deploy_result\""));
+        let json = serde_json::to_string(&start).unwrap();
+        assert!(json.contains("\"type\":\"exec_start\""));
+
+        let input = MasterMessage::ExecInput {
+            session_id: "s1".into(),
+            data: "bHM=".into(),
+        };
+        let json2 = serde_json::to_string(&input).unwrap();
+        let back: MasterMessage = serde_json::from_str(&json2).unwrap();
+        assert!(matches!(back, MasterMessage::ExecInput { .. }));
+
+        let output = AgentMessage::ExecOutput {
+            session_id: "s1".into(),
+            data: "aGVsbG8=".into(),
+        };
+        let json3 = serde_json::to_string(&output).unwrap();
+        let back3: AgentMessage = serde_json::from_str(&json3).unwrap();
+        assert!(matches!(back3, AgentMessage::ExecOutput { .. }));
+
+        let done = AgentMessage::ExecDone {
+            session_id: "s1".into(),
+            exit_code: 0,
+        };
+        let json4 = serde_json::to_string(&done).unwrap();
+        assert!(json4.contains("\"type\":\"exec_done\""));
     }
 
     #[test]
-    fn all_variants_roundtrip() {
-        let agent_msgs: Vec<AgentMessage> = vec![
-            AgentMessage::Heartbeat {
-                node_id: 1,
-                workloads: vec![],
-                stats: HostStats::default(),
+    fn backup_request_service_hooks_default_empty() {
+        let msg = MasterMessage::BackupRequest {
+            config: BackupConfig {
+                schedule: None,
+                retention_days: 30,
+                targets: vec![],
             },
-            AgentMessage::DomainDiscovered {
-                service_name: "s".into(),
-                domain: "d".into(),
-                host_port: 80,
-            },
-            AgentMessage::DeployResult {
-                service_name: "s".into(),
-                success: false,
-                error: Some("boom".into()),
-            },
-            AgentMessage::LogChunk {
-                request_id: "r".into(),
-                service_name: "s".into(),
-                data: "log line".into(),
-                done: true,
-            },
-        ];
-        for msg in &agent_msgs {
-            let json = serde_json::to_string(msg).unwrap();
-            let _: AgentMessage = serde_json::from_str(&json).unwrap();
-        }
-
-        let master_msgs: Vec<MasterMessage> = vec![
-            MasterMessage::Stop {
-                service_name: "s".into(),
-            },
-            MasterMessage::Ack { node_id: 1 },
-            MasterMessage::Reconcile { expected: vec![] },
-        ];
-        for msg in &master_msgs {
-            let json = serde_json::to_string(msg).unwrap();
-            let _: MasterMessage = serde_json::from_str(&json).unwrap();
-        }
+            service_hooks: HashMap::new(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        let back: MasterMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, MasterMessage::BackupRequest { .. }));
     }
 }

@@ -100,6 +100,7 @@ async fn handle_create(
         extra_ports: vec![],
         strip_prefix: None,
         pull_policy: Default::default(),
+        backup: None,
     };
 
     // Store password as a secret
