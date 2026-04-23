@@ -91,6 +91,7 @@ async fn e2e_depends_on_db_before_app() {
             extra_ports: vec![],
             strip_prefix: None,
             pull_policy: Default::default(),
+            backup: None,
             depends_on: vec!["e2e-dep-db".into()],
         },
         orca_core::config::ServiceConfig {
@@ -125,6 +126,7 @@ async fn e2e_depends_on_db_before_app() {
             extra_ports: vec![],
             strip_prefix: None,
             pull_policy: Default::default(),
+            backup: None,
             depends_on: vec![],
         },
     ];

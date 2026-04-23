@@ -33,11 +33,22 @@ pub async fn backup_all_volumes() {
         return;
     }
 
+    let hooks = load_service_hooks();
+
     println!("Backing up {} volume(s) to {}", volumes.len(), backup_dir);
     let mut count = 0u32;
 
     for vol in &volumes {
         print!("  {vol} ... ");
+        // Volume name is "orca-{service_name}" — derive service name for hook lookup.
+        let service_name = vol.strip_prefix("orca-").unwrap_or(vol.as_str());
+        if let Some(hook) = hooks.get(service_name) {
+            let container = format!("orca-{service_name}");
+            if let Err(e) = run_pre_hook(&docker, &container, hook).await {
+                println!("FAILED (pre-hook): {e}");
+                continue;
+            }
+        }
         match run_backup_container(&docker, vol, &backup_dir).await {
             Ok(()) => {
                 println!("done");
@@ -48,6 +59,41 @@ pub async fn backup_all_volumes() {
     }
 
     println!("Volume backup complete: {count}/{} volumes.", volumes.len());
+}
+
+fn load_service_hooks() -> std::collections::HashMap<String, String> {
+    std::env::var("ORCA_SERVICE_HOOKS_JSON")
+        .ok()
+        .and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or_default()
+}
+
+async fn run_pre_hook(docker: &Docker, container: &str, hook: &str) -> anyhow::Result<()> {
+    use bollard::exec::{CreateExecOptions, StartExecResults};
+    use futures_util::StreamExt;
+
+    tracing::info!("Running pre-hook in {container}: {hook}");
+    let exec = docker
+        .create_exec(
+            container,
+            CreateExecOptions {
+                cmd: Some(vec!["sh".to_string(), "-c".to_string(), hook.to_string()]),
+                attach_stdout: Some(true),
+                attach_stderr: Some(true),
+                ..Default::default()
+            },
+        )
+        .await?;
+
+    if let StartExecResults::Attached { mut output, .. } = docker.start_exec(&exec.id, None).await?
+    {
+        while output.next().await.is_some() {}
+    }
+
+    let inspect = docker.inspect_exec(&exec.id).await?;
+    let code = inspect.exit_code.unwrap_or(-1);
+    anyhow::ensure!(code == 0, "pre-hook exited with code {code}");
+    Ok(())
 }
 
 /// Restore a Docker volume from the latest backup directory.

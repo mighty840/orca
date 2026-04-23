@@ -98,7 +98,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Gpus => handlers::ops::handle_gpus(),
         Command::Reload => handlers::reload::handle_reload().await?,
         Command::Exec { service, cmd } => {
-            handlers::exec::handle_exec(&service, &cmd)?;
+            handlers::exec::handle_exec(&service, &cmd, cli.api).await?;
         }
         Command::Stop { service } => {
             if service.is_empty() {

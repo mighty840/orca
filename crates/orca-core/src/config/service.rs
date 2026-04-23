@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::backup::ServiceBackupConfig;
 use crate::types::{
     DeployStrategy, PlacementConstraint, PullPolicy, Replicas, ResourceLimits, RuntimeKind,
     VolumeSpec,
@@ -156,6 +157,9 @@ pub struct ServiceConfig {
     /// Image pull policy: auto (default), always, never, if-not-present.
     #[serde(default)]
     pub pull_policy: PullPolicy,
+    /// Per-service backup settings (pre-hook command, enable/disable).
+    #[serde(default)]
+    pub backup: Option<ServiceBackupConfig>,
 }
 
 impl ServiceConfig {
@@ -222,6 +226,7 @@ mod tests {
             extra_ports: vec!["8080:80".into()],
             strip_prefix: Some("/api".into()),
             pull_policy: Default::default(),
+            backup: None,
         }
     }
 

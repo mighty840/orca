@@ -135,6 +135,19 @@ async fn handle_agent_ws(
         }
     });
 
+    // Periodic status sync: master pings agent every 30 s for a fresh heartbeat.
+    let ping_tx = tx.clone();
+    let ping_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        interval.tick().await; // skip first tick (agent just connected and sent initial state)
+        loop {
+            interval.tick().await;
+            if ping_tx.send(MasterMessage::StatusPing).await.is_err() {
+                break;
+            }
+        }
+    });
+
     // Process incoming agent messages.
     while let Some(Ok(msg)) = ws_rx.next().await {
         match msg {
@@ -150,6 +163,7 @@ async fn handle_agent_ws(
 
     // Cleanup on disconnect
     send_task.abort();
+    ping_task.abort();
     {
         let mut senders = state.ws_agents.write().await;
         senders.remove(&node_id);
@@ -202,6 +216,14 @@ async fn handle_agent_message(
                     error.as_deref().unwrap_or("unknown")
                 );
             }
+            let result = if success {
+                Ok(())
+            } else {
+                Err(error.unwrap_or_else(|| "deploy failed".to_string()))
+            };
+            if let Some(tx) = state.pending_deploys.write().await.remove(&service_name) {
+                let _ = tx.send(result);
+            }
         }
         AgentMessage::LogChunk {
             request_id,
@@ -225,6 +247,27 @@ async fn handle_agent_message(
             } else {
                 error!("Node {node_id}: backup failed — {message}");
             }
+        }
+        AgentMessage::ExecOutput { session_id, data } => {
+            use base64::Engine as _;
+            let bytes = match base64::engine::general_purpose::STANDARD.decode(&data) {
+                Ok(b) => b,
+                Err(e) => {
+                    tracing::warn!("exec: bad base64 output for session {session_id}: {e}");
+                    return Ok(());
+                }
+            };
+            let sessions = state.exec_sessions.read().await;
+            if let Some(tx) = sessions.get(&session_id) {
+                let _ = tx.send(bytes).await;
+            }
+        }
+        AgentMessage::ExecDone {
+            session_id,
+            exit_code,
+        } => {
+            info!("Node {node_id}: exec session {session_id} done (exit {exit_code})");
+            state.exec_sessions.write().await.remove(&session_id);
         }
     }
 

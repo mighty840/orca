@@ -93,7 +93,7 @@ pub(crate) async fn reconcile_service(
 
     // Check if placement targets a specific remote node
     if let Some(target_node_id) = find_target_node(state, config).await {
-        queue_remote_deploy(state, target_node_id, &spec).await;
+        queue_remote_deploy(state, target_node_id, &spec).await?;
         // Record the service + a placeholder instance on the master so
         // `orca status` shows remote-scheduled workloads alongside local
         // ones. Heartbeats from the target node will update the status
@@ -325,36 +325,50 @@ async fn find_target_node(state: &AppState, config: &ServiceConfig) -> Option<u6
     None
 }
 
-/// Send a deploy command to a remote agent node.
+/// Send a deploy command to a remote agent node and await the result.
 ///
-/// If the agent is connected via WebSocket, send immediately.
-/// Otherwise, queue for the next HTTP heartbeat.
-async fn queue_remote_deploy(state: &AppState, node_id: u64, spec: &WorkloadSpec) {
-    // Try WS first (instant delivery)
-    let ws_sent = {
+/// Returns an error if the agent is not connected via WebSocket, if the WS
+/// channel is closed, or if the agent reports a deploy failure within 30 s.
+async fn queue_remote_deploy(
+    state: &AppState,
+    node_id: u64,
+    spec: &WorkloadSpec,
+) -> anyhow::Result<()> {
+    let tx = {
         let agents = state.ws_agents.read().await;
-        if let Some(tx) = agents.get(&node_id) {
-            tx.send(orca_core::ws_types::MasterMessage::Deploy {
-                spec: Box::new(spec.clone()),
-            })
-            .await
-            .is_ok()
-        } else {
-            false
-        }
+        agents
+            .get(&node_id)
+            .ok_or_else(|| anyhow::anyhow!("agent {node_id} not connected via WebSocket"))?
+            .clone()
     };
 
-    if ws_sent {
-        info!("Sent deploy via WS to node {node_id}: {}", spec.name);
-        return;
+    let (result_tx, result_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    state
+        .pending_deploys
+        .write()
+        .await
+        .insert(spec.name.clone(), result_tx);
+
+    if let Err(e) = tx
+        .send(orca_core::ws_types::MasterMessage::Deploy {
+            spec: Box::new(spec.clone()),
+        })
+        .await
+    {
+        state.pending_deploys.write().await.remove(&spec.name);
+        return Err(anyhow::anyhow!("agent {node_id} channel closed: {e}"));
     }
 
-    // Fallback: queue for HTTP heartbeat
-    let cmd = serde_json::json!({
-        "action": "deploy",
-        "spec": spec,
-    });
-    let mut pending = state.pending_commands.write().await;
-    pending.entry(node_id).or_default().push(cmd);
+    info!("Sent deploy via WS to node {node_id}: {}", spec.name);
+
+    match tokio::time::timeout(std::time::Duration::from_secs(30), result_rx).await {
+        Ok(Ok(Ok(()))) => Ok(()),
+        Ok(Ok(Err(msg))) => anyhow::bail!("deploy failed on agent {node_id}: {msg}"),
+        Ok(Err(_)) => anyhow::bail!("deploy result channel dropped for agent {node_id}"),
+        Err(_) => {
+            state.pending_deploys.write().await.remove(&spec.name);
+            anyhow::bail!("deploy timed out after 30 s waiting for agent {node_id}")
+        }
+    }
 }
 pub use crate::operations::{promote, redeploy, rollback, scale, stop, stop_all};

@@ -11,6 +11,7 @@ use orca_core::api_types::{DeployRequest, DeployResponse, ServiceStatus, StatusR
 use crate::reconciler;
 use crate::state::AppState;
 
+pub(crate) mod exec;
 mod ops;
 pub(crate) mod secrets;
 

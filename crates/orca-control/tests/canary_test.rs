@@ -73,6 +73,7 @@ fn canary_config(name: &str, image: &str) -> ServiceConfig {
         extra_ports: vec![],
         strip_prefix: None,
         pull_policy: Default::default(),
+        backup: None,
     }
 }
 

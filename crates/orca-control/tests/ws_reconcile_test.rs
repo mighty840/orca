@@ -110,6 +110,7 @@ async fn ws_sends_reconcile_on_connect() {
             extra_ports: vec![],
             strip_prefix: None,
             pull_policy: Default::default(),
+            backup: None,
         };
         services.insert(
             "remote-web".into(),

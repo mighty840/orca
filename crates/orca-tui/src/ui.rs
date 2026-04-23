@@ -244,7 +244,7 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
         // collides with paging in list scrolling).
         View::Services => "1-3:views ↵:detail /filter s:scale x:stop p:project c:collapse ?:help",
         View::Nodes => "Esc:back :drain/:undrain ?:help",
-        View::Logs { .. } => "Esc:back w:wrap ?:help",
+        View::Logs { .. } => "Esc:back w:wrap PgUp/PgDn:scroll ?:help",
         View::Detail { .. } => "Esc:back s:scale x:stop l:logs ?:help",
         View::Help => "Esc:back",
         View::Secrets => "Esc:back :set/:rm ?:help",

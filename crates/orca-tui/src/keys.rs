@@ -165,6 +165,20 @@ pub async fn handle_normal_key(
                 state.flash(format!("Word wrap {mode}"));
             }
         }
+        KeyCode::PageUp => {
+            if matches!(state.view, View::Logs { .. }) {
+                state.service_scroll = state.service_scroll.saturating_add(20);
+                state.auto_refresh_logs = false;
+            }
+        }
+        KeyCode::PageDown => {
+            if matches!(state.view, View::Logs { .. }) {
+                state.service_scroll = state.service_scroll.saturating_sub(20);
+                if state.service_scroll == 0 {
+                    state.auto_refresh_logs = true;
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -196,6 +210,8 @@ async fn handle_logs(state: &mut AppState, client: &ApiClient) {
     let svc_name = super::current_service_name(state);
     if let Some(name) = svc_name {
         super::refresh_logs_named(client, state, &name).await;
+        state.service_scroll = 0;
+        state.auto_refresh_logs = true;
         state.push_view(View::Logs { service: name });
     }
 }

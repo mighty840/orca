@@ -57,6 +57,51 @@ pub fn upload(data_path: &Path, target: &BackupTarget, name: &str) -> Result<()>
     }
 }
 
+/// Download a single file from S3 to a local path.
+pub fn download(target: &BackupTarget, name: &str, dest_path: &Path) -> Result<()> {
+    let (bucket, region, prefix, endpoint) = match target {
+        BackupTarget::S3 {
+            bucket,
+            region,
+            prefix,
+            endpoint,
+            ..
+        } => (bucket, region, prefix.as_deref().unwrap_or(""), endpoint),
+        _ => anyhow::bail!("download called with non-S3 target"),
+    };
+
+    let s3_path = if prefix.is_empty() {
+        format!("s3://{bucket}/{name}")
+    } else {
+        format!("s3://{bucket}/{prefix}/{name}")
+    };
+
+    info!("Downloading {s3_path} → {}", dest_path.display());
+
+    let mut cmd = Command::new("aws");
+    cmd.args(["s3", "cp", &s3_path])
+        .arg(dest_path)
+        .arg("--region")
+        .arg(region);
+
+    if let Some(ep) = endpoint {
+        cmd.arg("--endpoint-url").arg(ep);
+    }
+
+    let output = cmd
+        .output()
+        .context("failed to run `aws s3 cp` — is AWS CLI installed?")?;
+
+    if output.status.success() {
+        info!("Downloaded {s3_path}");
+        Ok(())
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        error!("S3 download failed: {stderr}");
+        anyhow::bail!("S3 download failed: {stderr}")
+    }
+}
+
 /// List backups in an S3 prefix.
 pub fn list_objects(target: &BackupTarget) -> Result<Vec<String>> {
     let (bucket, region, prefix, endpoint) = match target {

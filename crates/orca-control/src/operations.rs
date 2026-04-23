@@ -6,6 +6,7 @@ use tracing::info;
 
 use orca_core::runtime::Runtime;
 use orca_core::types::Replicas;
+use orca_core::ws_types::MasterMessage;
 
 use crate::reconciler::{get_runtime, reconcile_service};
 use crate::state::AppState;
@@ -96,9 +97,7 @@ pub async fn redeploy(state: &AppState, service_name: &str) -> anyhow::Result<()
         }
     }
 
-    let runtime = get_runtime(state, config.runtime)?;
-
-    // Collect old instance handles before creating new ones.
+    // Collect old instance handles and detect remote placement.
     let old_handles: Vec<_> = {
         let services = state.services.read().await;
         services
@@ -106,6 +105,36 @@ pub async fn redeploy(state: &AppState, service_name: &str) -> anyhow::Result<()
             .map(|svc| svc.instances.iter().map(|i| i.handle.clone()).collect())
             .unwrap_or_default()
     };
+
+    // If any instance is on a remote agent, dispatch there via WS.
+    let remote_node = old_handles.iter().find_map(|h| {
+        h.runtime_id
+            .strip_prefix("remote-")
+            .and_then(|s| s.parse::<u64>().ok())
+    });
+
+    if let Some(node_id) = remote_node {
+        let spec = crate::routes::service_config_to_spec(&config)?;
+        let agents = state.ws_agents.read().await;
+        if let Some(tx) = agents.get(&node_id) {
+            let _ = tx
+                .send(MasterMessage::Stop {
+                    service_name: service_name.to_string(),
+                })
+                .await;
+            tx.send(MasterMessage::Deploy {
+                spec: Box::new(spec),
+            })
+            .await
+            .map_err(|_| anyhow::anyhow!("agent {node_id} channel closed"))?;
+        } else {
+            anyhow::bail!("agent {node_id} not connected");
+        }
+        info!("Redeployed service {service_name} via agent {node_id}");
+        return Ok(());
+    }
+
+    let runtime = get_runtime(state, config.runtime)?;
 
     // Clear instance list so reconcile creates fresh replicas.
     {

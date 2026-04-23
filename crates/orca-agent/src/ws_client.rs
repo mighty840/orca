@@ -14,6 +14,8 @@ use tracing::{error, info, warn};
 use orca_core::runtime::Runtime;
 use orca_core::ws_types::{AgentMessage, HostStats, MasterMessage};
 
+use crate::ws_exec::ExecSessions;
+
 use crate::grpc::AgentClient;
 
 /// Run the WS connection loop with automatic reconnection.
@@ -68,6 +70,8 @@ async fn handle_ws_session(
 ) -> anyhow::Result<()> {
     let (mut ws_tx, mut ws_rx) = ws_stream.split();
     let stats_collector = Arc::new(crate::host_stats::HostStatsCollector::new());
+    let exec_sessions: ExecSessions =
+        Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
 
     // Shared output channel — heartbeat + log/backup responses all funnel here.
     let (out_tx, mut out_rx) = mpsc::channel::<AgentMessage>(128);
@@ -120,8 +124,16 @@ async fn handle_ws_session(
 
         match msg {
             tungstenite::Message::Text(text) => {
-                if let Err(e) =
-                    handle_master_message(&text, node_id, runtime, agent, domain_tx, &out_tx).await
+                if let Err(e) = handle_master_message(
+                    &text,
+                    node_id,
+                    runtime,
+                    agent,
+                    domain_tx,
+                    &out_tx,
+                    &exec_sessions,
+                )
+                .await
                 {
                     warn!("Error handling master message: {e}");
                 }
@@ -144,6 +156,7 @@ async fn handle_master_message(
     agent: &Arc<AgentClient>,
     domain_tx: &mpsc::Sender<(String, String, u16)>,
     out_tx: &mpsc::Sender<AgentMessage>,
+    exec_sessions: &ExecSessions,
 ) -> anyhow::Result<()> {
     let msg: MasterMessage = serde_json::from_str(text)?;
 
@@ -182,6 +195,13 @@ async fn handle_master_message(
                     error.as_deref().unwrap_or("unknown")
                 );
             }
+            let _ = out_tx
+                .send(AgentMessage::DeployResult {
+                    service_name: spec.name.clone(),
+                    success,
+                    error,
+                })
+                .await;
         }
         MasterMessage::Stop { service_name } => {
             info!("WS: stopping {service_name}");
@@ -200,11 +220,14 @@ async fn handle_master_message(
                 stream_logs(&rt, &service_name, &request_id, tail, follow, tx).await;
             });
         }
-        MasterMessage::BackupRequest { config } => {
+        MasterMessage::BackupRequest {
+            config,
+            service_hooks,
+        } => {
             info!("WS: backup request received");
             let tx = out_tx.clone();
             tokio::spawn(async move {
-                run_agent_backup(node_id, config, tx).await;
+                run_agent_backup(node_id, config, service_hooks, tx).await;
             });
         }
         MasterMessage::Ack { node_id } => {
@@ -213,6 +236,44 @@ async fn handle_master_message(
         MasterMessage::Reconcile { expected } => {
             info!("WS: reconciling {} expected services", expected.len());
             reconcile_services(expected, runtime, agent, domain_tx).await;
+        }
+        MasterMessage::ExecStart {
+            session_id,
+            service_name,
+            cmd,
+            cols,
+            rows,
+        } => {
+            info!("WS: exec start session={session_id} service={service_name}");
+            let sessions = exec_sessions.clone();
+            let tx = out_tx.clone();
+            tokio::spawn(async move {
+                crate::ws_exec::start_exec(session_id, service_name, cmd, cols, rows, sessions, tx)
+                    .await;
+            });
+        }
+        MasterMessage::ExecInput { session_id, data } => {
+            crate::ws_exec::send_input(&session_id, &data, exec_sessions).await;
+        }
+        MasterMessage::ExecResize {
+            session_id,
+            cols,
+            rows,
+        } => {
+            crate::ws_exec::resize(&session_id, cols, rows).await;
+        }
+        MasterMessage::ExecClose { session_id } => {
+            crate::ws_exec::close(&session_id, exec_sessions).await;
+        }
+        MasterMessage::StatusPing => {
+            let workloads = agent.collect_workload_reports(runtime.as_ref()).await;
+            let _ = out_tx
+                .send(AgentMessage::Heartbeat {
+                    node_id,
+                    workloads,
+                    stats: HostStats::default(),
+                })
+                .await;
         }
     }
 
@@ -291,6 +352,7 @@ async fn stream_logs(
 async fn run_agent_backup(
     node_id: u64,
     config: orca_core::backup::BackupConfig,
+    service_hooks: std::collections::HashMap<String, String>,
     out_tx: mpsc::Sender<AgentMessage>,
 ) {
     let config_json = match serde_json::to_string(&config) {
@@ -322,9 +384,11 @@ async fn run_agent_backup(
         }
     };
 
+    let hooks_json = serde_json::to_string(&service_hooks).unwrap_or_default();
     match tokio::process::Command::new(&exe)
         .args(["backup", "all"])
         .env("ORCA_BACKUP_CONFIG_JSON", &config_json)
+        .env("ORCA_SERVICE_HOOKS_JSON", &hooks_json)
         .output()
         .await
     {
