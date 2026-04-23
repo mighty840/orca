@@ -1,12 +1,12 @@
 //! WebSocket upgrade proxy support.
 //!
 //! Detects WebSocket upgrade requests and tunnels them via raw TCP
-//! to the backend, using `hyper::upgrade` on the client side and
-//! `tokio::io::copy_bidirectional` for bidirectional piping.
+//! to the backend using hyper's upgrade mechanism + bidirectional copy.
 
 use hyper::body::Incoming;
 use hyper::{Request, Response, StatusCode};
-use tokio::io::AsyncWriteExt;
+use hyper_util::rt::TokioIo;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tracing::{debug, error};
 
@@ -20,34 +20,30 @@ pub(crate) fn is_websocket_upgrade(req: &Request<Incoming>) -> bool {
 
 /// Handle a WebSocket upgrade by tunneling to the backend.
 ///
-/// 1. Opens a TCP connection to the backend
-/// 2. Forwards the raw HTTP upgrade request
-/// 3. Returns a 101 Switching Protocols response
-/// 4. Spawns a task to pipe bytes bidirectionally
+/// Grabs the hyper upgrade future before consuming the request, spawns a
+/// task that (1) awaits the client upgrade, (2) connects to the backend,
+/// (3) forwards the raw HTTP handshake, (4) discards the 101 response, then
+/// (5) pipes bytes bidirectionally until either side closes.
+///
+/// The serve loop MUST call `.with_upgrades()` on the hyper connection for
+/// `hyper::upgrade::on` to work.
 pub(crate) async fn handle_websocket_proxy(
-    req: Request<Incoming>,
+    mut req: Request<Incoming>,
     backend_addr: &str,
 ) -> Response<http_body_util::Full<hyper::body::Bytes>> {
-    // Connect to the backend
-    let mut backend = match TcpStream::connect(backend_addr).await {
-        Ok(stream) => stream,
-        Err(e) => {
-            error!("WebSocket backend connect failed ({backend_addr}): {e}");
-            return super::handler::error_response(
-                StatusCode::BAD_GATEWAY,
-                &format!("websocket backend error: {e}"),
-            );
-        }
-    };
+    // Capture the upgrade future before consuming the request.
+    let upgrade_fut = hyper::upgrade::on(&mut req);
+    let backend_addr = backend_addr.to_string();
 
-    // Build the raw HTTP upgrade request to send to the backend
     let (parts, _body) = req.into_parts();
     let path = parts
         .uri
         .path_and_query()
         .map(|pq| pq.as_str())
-        .unwrap_or("/");
+        .unwrap_or("/")
+        .to_string();
 
+    // Build the raw HTTP upgrade request to send to the backend.
     let mut raw_req = format!("{} {} HTTP/1.1\r\n", parts.method, path);
     for (name, value) in &parts.headers {
         if let Ok(val) = value.to_str() {
@@ -56,20 +52,56 @@ pub(crate) async fn handle_websocket_proxy(
     }
     raw_req.push_str("\r\n");
 
-    // Send the upgrade request to the backend
-    if let Err(e) = backend.write_all(raw_req.as_bytes()).await {
-        error!("Failed to send WebSocket upgrade to backend: {e}");
-        return super::handler::error_response(
-            StatusCode::BAD_GATEWAY,
-            &format!("websocket write error: {e}"),
-        );
-    }
+    tokio::spawn(async move {
+        // Wait for hyper to complete the client-side upgrade.
+        let upgraded = match upgrade_fut.await {
+            Ok(u) => u,
+            Err(e) => {
+                error!("WebSocket client upgrade failed: {e}");
+                return;
+            }
+        };
 
-    debug!("WebSocket upgrade forwarded to {backend_addr}");
+        // Connect to the backend.
+        let mut backend = match TcpStream::connect(&backend_addr).await {
+            Ok(s) => s,
+            Err(e) => {
+                error!("WebSocket backend connect failed ({backend_addr}): {e}");
+                return;
+            }
+        };
 
-    // Return 101 to the client; the actual bidirectional piping happens
-    // after hyper yields the upgraded connection. The caller (serve_loop)
-    // must enable `with_upgrades()` on the connection for this to work.
+        // Forward the upgrade request.
+        if let Err(e) = backend.write_all(raw_req.as_bytes()).await {
+            error!("WebSocket write to backend failed: {e}");
+            return;
+        }
+
+        // Read the backend's HTTP 101 response and discard it (stop at \r\n\r\n).
+        let mut hdr = Vec::with_capacity(512);
+        let mut byte = [0u8; 1];
+        loop {
+            if backend.read_exact(&mut byte).await.is_err() {
+                error!("WebSocket backend closed before 101");
+                return;
+            }
+            hdr.push(byte[0]);
+            if hdr.len() >= 4 && hdr[hdr.len() - 4..] == *b"\r\n\r\n" {
+                break;
+            }
+            if hdr.len() > 8192 {
+                error!("WebSocket backend response header too large");
+                return;
+            }
+        }
+
+        debug!("WebSocket tunnel established to {backend_addr}");
+        let mut client_io = TokioIo::new(upgraded);
+        let _ = tokio::io::copy_bidirectional(&mut client_io, &mut backend).await;
+    });
+
+    // Return 101 to the client. Hyper sends this and then yields the raw
+    // connection to the upgrade future we spawned above.
     let mut resp = Response::new(http_body_util::Full::new(hyper::body::Bytes::new()));
     *resp.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
     resp.headers_mut()
@@ -83,11 +115,7 @@ pub(crate) async fn handle_websocket_proxy(
 mod tests {
     #[test]
     fn test_websocket_upgrade_detected() {
-        // Test the detection logic directly since we can't easily construct
-        // a Request<Incoming> in tests. The function checks for the "upgrade"
-        // header with value "websocket" (case-insensitive).
         let check = |val: &str| -> bool { val.eq_ignore_ascii_case("websocket") };
-
         assert!(check("websocket"));
         assert!(check("WebSocket"));
         assert!(check("WEBSOCKET"));
@@ -97,7 +125,6 @@ mod tests {
 
     #[test]
     fn test_non_websocket_not_detected() {
-        // Verify that arbitrary upgrade values are not treated as websocket
         let check = |val: &str| -> bool { val.eq_ignore_ascii_case("websocket") };
         assert!(!check("h2c"));
         assert!(!check("TLS/1.0"));

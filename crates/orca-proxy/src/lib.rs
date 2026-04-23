@@ -389,7 +389,11 @@ pub(crate) async fn serve_loop_with_fallback(
                 match acceptor.accept(stream).await {
                     Ok(tls_stream) => {
                         let io = TokioIo::new(tls_stream);
-                        if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
+                        if let Err(e) = http1::Builder::new()
+                            .serve_connection(io, service)
+                            .with_upgrades()
+                            .await
+                        {
                             debug!("TLS proxy error from {peer}: {e}");
                         }
                     }
@@ -397,7 +401,11 @@ pub(crate) async fn serve_loop_with_fallback(
                 }
             } else {
                 let io = TokioIo::new(stream);
-                if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
+                if let Err(e) = http1::Builder::new()
+                    .serve_connection(io, service)
+                    .with_upgrades()
+                    .await
+                {
                     debug!("Proxy connection error from {peer}: {e}");
                 }
             }
