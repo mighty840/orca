@@ -12,6 +12,7 @@ use tokio::sync::RwLock;
 use orca_control::state::{AppState, RegisteredNode};
 use orca_core::config::ClusterConfig;
 use orca_core::testing::MockRuntime;
+use orca_core::ws_types::MasterMessage;
 
 fn mock_state() -> Arc<AppState> {
     let runtime = Arc::new(MockRuntime::new());
@@ -24,15 +25,11 @@ fn mock_state() -> Arc<AppState> {
     ))
 }
 
-async fn register_node_with_labels(
-    state: &AppState,
-    node_id: u64,
-    labels: HashMap<String, String>,
-) {
+async fn register_node(state: &AppState, node_id: u64) {
     let node = RegisteredNode {
         node_id,
         address: format!("10.0.0.{node_id}:6880"),
-        labels,
+        labels: HashMap::new(),
         last_heartbeat: chrono::Utc::now(),
         drain: false,
         cpu_percent: 0.0,
@@ -43,128 +40,107 @@ async fn register_node_with_labels(
         net_rx: 0,
         net_tx: 0,
     };
-    let mut nodes = state.registered_nodes.write().await;
-    nodes.insert(node_id, node);
+    state.registered_nodes.write().await.insert(node_id, node);
+}
+
+fn services_json(name: &str, node: u64) -> Vec<orca_core::config::ServiceConfig> {
+    serde_json::from_value(serde_json::json!([{
+        "name": name,
+        "image": "nginx:latest",
+        "replicas": 1,
+        "port": 80,
+        "placement": { "node": node.to_string() }
+    }]))
+    .unwrap()
 }
 
 #[tokio::test]
 async fn e2e_drain_prevents_remote_dispatch() {
     let state = mock_state();
+    register_node(&state, 7).await;
 
-    // Register a node
-    register_node_with_labels(&state, 7, HashMap::new()).await;
+    // Wire up a WS sender for node 7 so placement can succeed, then drain it.
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<MasterMessage>(8);
+    state.ws_agents.write().await.insert(7, tx);
+    state
+        .registered_nodes
+        .write()
+        .await
+        .get_mut(&7)
+        .unwrap()
+        .drain = true;
 
-    // Drain the node via the state directly (simulating API call)
-    {
-        let mut nodes = state.registered_nodes.write().await;
-        nodes.get_mut(&7).unwrap().drain = true;
-    }
+    let services = services_json("e2e-drain-svc", 7);
+    orca_control::reconciler::reconcile(&state, &services).await;
 
-    // Deploy a service targeting the drained node by node_id
-    let services: Vec<orca_core::config::ServiceConfig> =
-        serde_json::from_value(serde_json::json!([{
-            "name": "e2e-drain-svc",
-            "image": "nginx:latest",
-            "replicas": 1,
-            "port": 80,
-            "placement": { "node": "7" }
-        }]))
-        .unwrap();
-
-    let (_deployed, _errors) = orca_control::reconciler::reconcile(&state, &services).await;
-
-    // Verify: no commands were queued for the drained node
-    let pending = state.pending_commands.read().await;
+    // Drained node should receive no Deploy message.
     assert!(
-        !pending.contains_key(&7),
-        "no commands should be queued for drained node 7"
+        rx.try_recv().is_err(),
+        "no deploy should be dispatched to drained node 7"
     );
 }
 
 #[tokio::test]
 async fn e2e_undrained_node_receives_dispatch() {
     let state = mock_state();
+    register_node(&state, 8).await;
 
-    // Register a node (not drained)
-    register_node_with_labels(&state, 8, HashMap::new()).await;
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<MasterMessage>(8);
+    state.ws_agents.write().await.insert(8, tx);
 
-    // Deploy a service targeting the healthy node
-    let services: Vec<orca_core::config::ServiceConfig> =
-        serde_json::from_value(serde_json::json!([{
-            "name": "e2e-active-svc",
-            "image": "nginx:latest",
-            "replicas": 1,
-            "port": 80,
-            "placement": { "node": "8" }
-        }]))
-        .unwrap();
+    let services = services_json("e2e-active-svc", 8);
+    orca_control::reconciler::reconcile(&state, &services).await;
 
-    let (_deployed, _errors) = orca_control::reconciler::reconcile(&state, &services).await;
-
-    // Verify: commands WERE queued for the healthy node
-    let pending = state.pending_commands.read().await;
-    let cmds = pending.get(&8).cloned().unwrap_or_default();
-    assert_eq!(
-        cmds.len(),
-        1,
-        "exactly one deploy command should be queued for node 8"
-    );
-    assert_eq!(cmds[0]["action"], "deploy");
+    match rx.try_recv() {
+        Ok(MasterMessage::Deploy { spec }) => {
+            assert_eq!(spec.name, "e2e-active-svc");
+        }
+        other => panic!("expected Deploy message, got {other:?}"),
+    }
 }
 
 #[tokio::test]
 async fn e2e_drain_then_undrain_allows_dispatch() {
     let state = mock_state();
+    register_node(&state, 9).await;
 
-    register_node_with_labels(&state, 9, HashMap::new()).await;
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<MasterMessage>(8);
+    state.ws_agents.write().await.insert(9, tx);
 
-    // Drain the node
-    {
-        let mut nodes = state.registered_nodes.write().await;
-        nodes.get_mut(&9).unwrap().drain = true;
-    }
-
-    // Deploy while drained — should NOT queue
-    let services: Vec<orca_core::config::ServiceConfig> =
-        serde_json::from_value(serde_json::json!([{
-            "name": "e2e-toggle-svc",
-            "image": "nginx:latest",
-            "replicas": 1,
-            "port": 80,
-            "placement": { "node": "9" }
-        }]))
-        .unwrap();
-
+    // Drain — deploy should be skipped.
+    state
+        .registered_nodes
+        .write()
+        .await
+        .get_mut(&9)
+        .unwrap()
+        .drain = true;
+    let services = services_json("e2e-toggle-svc", 9);
     orca_control::reconciler::reconcile(&state, &services).await;
-
-    {
-        let pending = state.pending_commands.read().await;
-        assert!(
-            !pending.contains_key(&9),
-            "drained node should have no commands"
-        );
-    }
-
-    // Undrain
-    {
-        let mut nodes = state.registered_nodes.write().await;
-        nodes.get_mut(&9).unwrap().drain = false;
-    }
-
-    // Clear the service state so reconcile doesn't skip as "already deployed"
-    {
-        let mut svcs = state.services.write().await;
-        svcs.remove("e2e-toggle-svc");
-    }
-
-    // Deploy again — should queue this time
-    orca_control::reconciler::reconcile(&state, &services).await;
-
-    let pending = state.pending_commands.read().await;
-    let cmds = pending.get(&9).cloned().unwrap_or_default();
-    assert_eq!(
-        cmds.len(),
-        1,
-        "undrained node should receive deploy command"
+    assert!(
+        rx.try_recv().is_err(),
+        "drained node should have no commands"
     );
+
+    // Undrain and clear service state so reconcile re-deploys.
+    state
+        .registered_nodes
+        .write()
+        .await
+        .get_mut(&9)
+        .unwrap()
+        .drain = false;
+    state.services.write().await.remove("e2e-toggle-svc");
+
+    orca_control::reconciler::reconcile(&state, &services).await;
+
+    match rx.try_recv() {
+        Ok(MasterMessage::Deploy { spec }) => {
+            assert_eq!(
+                spec.name, "e2e-toggle-svc",
+                "undrained node should receive deploy"
+            );
+        }
+        other => panic!("expected Deploy after undrain, got {other:?}"),
+    }
 }
