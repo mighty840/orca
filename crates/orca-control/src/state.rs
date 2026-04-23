@@ -56,6 +56,9 @@ pub struct AppState {
     pub log_listeners: RwLock<HashMap<String, tokio::sync::mpsc::Sender<(String, bool)>>>,
     /// Active exec sessions: session_id → output bytes sender (agent → CLI WS).
     pub exec_sessions: RwLock<HashMap<String, tokio::sync::mpsc::Sender<Vec<u8>>>>,
+    /// Pending deploy result waiters: service_name → oneshot sender.
+    /// Inserted by queue_remote_deploy, resolved by ws_handler on DeployResult.
+    pub pending_deploys: RwLock<HashMap<String, tokio::sync::oneshot::Sender<Result<(), String>>>>,
 }
 
 /// A node registered in the cluster.
@@ -150,6 +153,7 @@ impl AppState {
             ws_agents: RwLock::new(HashMap::new()),
             log_listeners: RwLock::new(HashMap::new()),
             exec_sessions: RwLock::new(HashMap::new()),
+            pending_deploys: RwLock::new(HashMap::new()),
         }
     }
 

@@ -135,6 +135,19 @@ async fn handle_agent_ws(
         }
     });
 
+    // Periodic status sync: master pings agent every 30 s for a fresh heartbeat.
+    let ping_tx = tx.clone();
+    let ping_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        interval.tick().await; // skip first tick (agent just connected and sent initial state)
+        loop {
+            interval.tick().await;
+            if ping_tx.send(MasterMessage::StatusPing).await.is_err() {
+                break;
+            }
+        }
+    });
+
     // Process incoming agent messages.
     while let Some(Ok(msg)) = ws_rx.next().await {
         match msg {
@@ -150,6 +163,7 @@ async fn handle_agent_ws(
 
     // Cleanup on disconnect
     send_task.abort();
+    ping_task.abort();
     {
         let mut senders = state.ws_agents.write().await;
         senders.remove(&node_id);
@@ -201,6 +215,14 @@ async fn handle_agent_message(
                     "Node {node_id}: deploy of {service_name} failed: {}",
                     error.as_deref().unwrap_or("unknown")
                 );
+            }
+            let result = if success {
+                Ok(())
+            } else {
+                Err(error.unwrap_or_else(|| "deploy failed".to_string()))
+            };
+            if let Some(tx) = state.pending_deploys.write().await.remove(&service_name) {
+                let _ = tx.send(result);
             }
         }
         AgentMessage::LogChunk {

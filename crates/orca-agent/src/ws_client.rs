@@ -195,6 +195,13 @@ async fn handle_master_message(
                     error.as_deref().unwrap_or("unknown")
                 );
             }
+            let _ = out_tx
+                .send(AgentMessage::DeployResult {
+                    service_name: spec.name.clone(),
+                    success,
+                    error,
+                })
+                .await;
         }
         MasterMessage::Stop { service_name } => {
             info!("WS: stopping {service_name}");
@@ -257,6 +264,16 @@ async fn handle_master_message(
         }
         MasterMessage::ExecClose { session_id } => {
             crate::ws_exec::close(&session_id, exec_sessions).await;
+        }
+        MasterMessage::StatusPing => {
+            let workloads = agent.collect_workload_reports(runtime.as_ref()).await;
+            let _ = out_tx
+                .send(AgentMessage::Heartbeat {
+                    node_id,
+                    workloads,
+                    stats: HostStats::default(),
+                })
+                .await;
         }
     }
 

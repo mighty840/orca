@@ -98,6 +98,8 @@ pub enum MasterMessage {
     ExecClose {
         session_id: String,
     },
+    /// Request a fresh status report from the agent. Agent responds with Heartbeat.
+    StatusPing,
 }
 
 /// Status of a single workload, reported by agent.
