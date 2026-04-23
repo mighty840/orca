@@ -69,7 +69,7 @@ export default defineConfig({
     },
 
     footer: {
-      message: 'Released under the AGPL-3.0 License.',
+      message: 'Released under the AGPL-3.0 License. <a href="/orca/legal/privacy-policy">Privacy Policy</a> · <a href="/orca/legal/impressum">Impressum</a>',
       copyright: 'Copyright 2025-present Orca Contributors',
     },
   },
