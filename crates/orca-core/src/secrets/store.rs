@@ -236,10 +236,7 @@ impl SecretStore {
     fn resolve_value(&self, value: &str) -> String {
         let mut result = value.to_string();
         let mut search_from = 0;
-        loop {
-            let Some(start) = result[search_from..].find("${secrets.") else {
-                break;
-            };
+        while let Some(start) = result[search_from..].find("${secrets.") {
             let abs_start = search_from + start;
             let after_prefix = abs_start + "${secrets.".len();
             let Some(end) = result[after_prefix..].find('}') else {
