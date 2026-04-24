@@ -108,7 +108,7 @@ fn restore_setcap(exe: &std::path::Path) {
 /// Find the newest release, including prereleases if the current version is a prerelease.
 async fn find_newest_release(client: &reqwest::Client) -> Result<GithubRelease> {
     let current = current_version();
-    let is_prerelease = current.contains("rc");
+    let is_prerelease = current.contains("rc") || current.contains("dev");
 
     // Always try stable latest first
     if let Ok(resp) = client.get(RELEASES_URL).send().await
