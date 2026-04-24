@@ -136,20 +136,18 @@ pub async fn handle_normal_key(
             state.view_stack.clear();
             state.view = View::Services;
         }
-        KeyCode::Char('2') | KeyCode::Char('n') => {
-            if !matches!(state.view, View::Nodes) {
-                state.push_view(View::Nodes);
-            }
+        KeyCode::Char('2') | KeyCode::Char('n') if !matches!(state.view, View::Nodes) => {
+            state.push_view(View::Nodes);
         }
-        KeyCode::Char('3') => {
-            if !matches!(state.view, View::Secrets) {
-                if let Ok(keys) = client.list_secrets().await {
-                    state.secret_keys = keys;
-                    state.selected_secret = 0;
-                }
-                state.push_view(View::Secrets);
+        KeyCode::Char('2') | KeyCode::Char('n') => {}
+        KeyCode::Char('3') if !matches!(state.view, View::Secrets) => {
+            if let Ok(keys) = client.list_secrets().await {
+                state.secret_keys = keys;
+                state.selected_secret = 0;
             }
+            state.push_view(View::Secrets);
         }
+        KeyCode::Char('3') => {}
 
         // Actions
         KeyCode::Char('d') => {
