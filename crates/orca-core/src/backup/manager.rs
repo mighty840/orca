@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use chrono::Utc;
-use tracing::info;
+use tracing::{info, warn};
 
 use super::config::{BackupConfig, BackupTarget};
 use super::s3 as s3_backend;
@@ -107,11 +107,39 @@ impl BackupManager {
                 std::fs::copy(data_path, &dest)
                     .with_context(|| format!("copy to {}", dest.display()))?;
                 info!(dest = %dest.display(), "Stored backup locally");
+                self.prune_local(dest_dir);
                 Ok(format!("local:{path}"))
             }
             t @ BackupTarget::S3 { bucket, .. } => {
                 s3_backend::upload(data_path, t, name)?;
                 Ok(format!("s3://{bucket}"))
+            }
+        }
+    }
+
+    /// Delete local backup files older than `retention_days`.
+    fn prune_local(&self, dir: &Path) {
+        let cutoff = Utc::now() - chrono::Duration::days(i64::from(self.config.retention_days));
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let mtime = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .and_then(|d| chrono::DateTime::from_timestamp(d.as_secs() as i64, 0));
+            if mtime.is_some_and(|t| t < cutoff) {
+                if let Err(e) = std::fs::remove_file(&path) {
+                    warn!(path = %path.display(), "Failed to prune old backup: {e}");
+                } else {
+                    info!(path = %path.display(), "Pruned old backup");
+                }
             }
         }
     }
