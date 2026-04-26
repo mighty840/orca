@@ -10,7 +10,7 @@ use std::time::Duration;
 use tracing::{error, info, warn};
 
 use orca_core::config::ProbeConfig;
-use orca_core::runtime::Runtime;
+use orca_core::runtime::{Runtime, WorkloadHandle};
 use orca_core::types::{HealthState, RuntimeKind, WorkloadStatus};
 
 use crate::routes::{service_config_to_spec, update_container_routes};
@@ -66,14 +66,14 @@ impl HealthChecker {
                 .values()
                 .filter_map(|svc| {
                     // Use liveness probe path, fall back to health path.
+                    // Services with neither get runtime-only checks (no HTTP probe).
                     let (health_path, probe) = if let Some(lp) = &svc.config.liveness {
-                        (lp.path.clone(), Some(lp.clone()))
+                        (Some(lp.path.clone()), Some(lp.clone()))
+                    } else if let Some(path) = svc.config.health.as_deref() {
+                        (Some(path.to_string()), None)
                     } else {
-                        let path = svc.config.health.as_deref()?;
-                        (path.to_string(), None)
+                        (None, None)
                     };
-                    // Respect initial_delay_secs — skip checks until the
-                    // container has been running long enough to become ready.
                     let initial_delay = probe
                         .as_ref()
                         .map(|p| Duration::from_secs(p.initial_delay_secs))
@@ -84,13 +84,11 @@ impl HealthChecker {
                         .enumerate()
                         .filter(|(_, inst)| inst.status == WorkloadStatus::Running)
                         .filter(|(_, inst)| inst.started_at.elapsed() >= initial_delay)
-                        .filter_map(|(idx, inst)| {
-                            let port = inst.host_port?;
-                            Some(InstanceTarget {
-                                index: idx,
-                                runtime_id: inst.handle.runtime_id.clone(),
-                                host_port: port,
-                            })
+                        .map(|(idx, inst)| InstanceTarget {
+                            index: idx,
+                            runtime_id: inst.handle.runtime_id.clone(),
+                            handle: inst.handle.clone(),
+                            host_port: inst.host_port,
                         })
                         .collect();
                     if targets.is_empty() {
@@ -117,10 +115,34 @@ impl HealthChecker {
                 .as_ref()
                 .map_or(DEFAULT_TIMEOUT, |p| Duration::from_secs(p.timeout_secs));
 
+            let runtime: &dyn Runtime = match target.runtime_kind {
+                RuntimeKind::Container => self.state.container_runtime.as_ref(),
+                RuntimeKind::Wasm => match &self.state.wasm_runtime {
+                    Some(r) => r.as_ref(),
+                    None => continue,
+                },
+            };
+
             for inst in &target.targets {
-                let healthy = self
-                    .probe_with_timeout(inst.host_port, &target.health_path, timeout)
-                    .await;
+                let healthy = if let Some(path) = &target.health_path {
+                    if let Some(port) = inst.host_port {
+                        self.probe_with_timeout(port, path, timeout).await
+                    } else {
+                        runtime
+                            .status(&inst.handle)
+                            .await
+                            .unwrap_or(WorkloadStatus::Failed)
+                            == WorkloadStatus::Running
+                    }
+                } else {
+                    // No HTTP endpoint — runtime status is the health signal.
+                    // Catches databases stuck after events like disk-full.
+                    runtime
+                        .status(&inst.handle)
+                        .await
+                        .unwrap_or(WorkloadStatus::Failed)
+                        == WorkloadStatus::Running
+                };
                 let count = failure_counts.entry(inst.runtime_id.clone()).or_insert(0);
 
                 if healthy {
@@ -291,7 +313,7 @@ impl HealthChecker {
 /// Internal struct for collecting check targets without holding locks.
 struct CheckTarget {
     service_name: String,
-    health_path: String,
+    health_path: Option<String>,
     probe_config: Option<ProbeConfig>,
     runtime_kind: RuntimeKind,
     targets: Vec<InstanceTarget>,
@@ -301,5 +323,6 @@ struct CheckTarget {
 struct InstanceTarget {
     index: usize,
     runtime_id: String,
-    host_port: u16,
+    handle: WorkloadHandle,
+    host_port: Option<u16>,
 }
