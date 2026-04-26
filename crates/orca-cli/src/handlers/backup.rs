@@ -30,7 +30,7 @@ pub async fn handle_backup(action: BackupAction) {
     }
 }
 
-fn load_backup_config() -> BackupConfig {
+pub(crate) fn load_backup_config() -> BackupConfig {
     // When dispatched from an agent BackupRequest, master passes the resolved
     // config as JSON so the agent subprocess picks up S3 credentials directly.
     if let Ok(json) = std::env::var("ORCA_BACKUP_CONFIG_JSON")

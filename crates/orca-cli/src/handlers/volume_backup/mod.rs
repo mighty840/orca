@@ -4,8 +4,8 @@ mod helpers;
 
 use bollard::Docker;
 use helpers::{
-    create_backup_dir, find_latest_backup_dir, list_orca_volumes, run_backup_container,
-    run_restore_container,
+    create_backup_dir, find_latest_backup_dir, list_orca_volumes, prune_old_backup_dirs,
+    run_backup_container, run_restore_container,
 };
 
 /// Backup all orca-prefixed Docker volumes to `~/.orca/backups/{timestamp}/`.
@@ -59,6 +59,9 @@ pub async fn backup_all_volumes() {
     }
 
     println!("Volume backup complete: {count}/{} volumes.", volumes.len());
+
+    let retention_days = crate::handlers::backup::load_backup_config().retention_days;
+    prune_old_backup_dirs(retention_days);
 }
 
 fn load_service_hooks() -> std::collections::HashMap<String, String> {

@@ -100,6 +100,40 @@ pub(crate) async fn run_restore_container(
     .await
 }
 
+/// Remove timestamped backup subdirs older than `retention_days`.
+pub(crate) fn prune_old_backup_dirs(retention_days: u32) {
+    let Some(home) = dirs_next::home_dir() else {
+        return;
+    };
+    let base = home.join(".orca/backups");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let cutoff = now.saturating_sub(u64::from(retention_days) * 86400);
+    let Ok(entries) = std::fs::read_dir(&base) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let epoch: u64 = entry
+            .file_name()
+            .to_str()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(u64::MAX);
+        if epoch < cutoff {
+            if let Err(e) = std::fs::remove_dir_all(&path) {
+                tracing::warn!(path = %path.display(), "Failed to prune backup dir: {e}");
+            } else {
+                tracing::info!(path = %path.display(), "Pruned old backup dir");
+            }
+        }
+    }
+}
+
 /// Build the backup directory path from a home dir and timestamp.
 /// Extracted for testability (the public `create_backup_dir` uses real home dir).
 pub(crate) fn backup_dir_path(home: &std::path::Path, epoch_secs: u64) -> String {
