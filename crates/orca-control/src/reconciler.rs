@@ -265,6 +265,14 @@ pub(crate) async fn reconcile_service(
             "Scaling down {} ({:?}): {} -> {} (-{})",
             config.name, config.runtime, current, desired, to_remove
         );
+        // Sort so failed/stopped instances are removed first, canary last.
+        svc_state
+            .instances
+            .sort_unstable_by_key(|i| match i.status {
+                WorkloadStatus::Failed | WorkloadStatus::Stopped => 2u8,
+                _ if !i.is_canary => 1,
+                _ => 0,
+            });
         let mut handles = Vec::new();
         for _ in 0..to_remove {
             if let Some(inst) = svc_state.instances.pop() {

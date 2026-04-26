@@ -456,8 +456,12 @@ async fn reconcile_services(
     domain_tx: &mpsc::Sender<(String, String, u16)>,
 ) {
     let running = agent.collect_workload_reports(runtime.as_ref()).await;
-    let running_names: std::collections::HashSet<String> =
-        running.iter().map(|r| r.service_name.clone()).collect();
+    // Only containers in "running" state count — exited/dead containers must be redeployed.
+    let running_names: std::collections::HashSet<String> = running
+        .iter()
+        .filter(|r| r.status == "running")
+        .map(|r| r.service_name.clone())
+        .collect();
 
     let mut deployed = 0u32;
     let mut skipped = 0u32;

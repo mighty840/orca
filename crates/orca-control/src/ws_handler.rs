@@ -307,8 +307,18 @@ async fn handle_ws_heartbeat(
                     "failed" => orca_core::types::WorkloadStatus::Failed,
                     _ => orca_core::types::WorkloadStatus::Stopped,
                 };
-                for instance in &mut svc.instances {
-                    instance.status = status;
+                // Update only the placeholder instance for this node, or the single
+                // instance if there is only one. Blanket-overwriting all instances
+                // masks individual replica failures on multi-replica services.
+                let placeholder_id = format!("remote-{node_id}");
+                if let Some(inst) = svc
+                    .instances
+                    .iter_mut()
+                    .find(|i| i.handle.runtime_id == placeholder_id)
+                {
+                    inst.status = status;
+                } else if svc.instances.len() == 1 {
+                    svc.instances[0].status = status;
                 }
             }
 

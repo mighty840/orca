@@ -81,11 +81,9 @@ impl HealthChecker {
                     let targets: Vec<InstanceTarget> = svc
                         .instances
                         .iter()
-                        .enumerate()
-                        .filter(|(_, inst)| inst.status == WorkloadStatus::Running)
-                        .filter(|(_, inst)| inst.started_at.elapsed() >= initial_delay)
-                        .map(|(idx, inst)| InstanceTarget {
-                            index: idx,
+                        .filter(|inst| inst.status == WorkloadStatus::Running)
+                        .filter(|inst| inst.started_at.elapsed() >= initial_delay)
+                        .map(|inst| InstanceTarget {
                             runtime_id: inst.handle.runtime_id.clone(),
                             handle: inst.handle.clone(),
                             host_port: inst.host_port,
@@ -155,7 +153,7 @@ impl HealthChecker {
                         );
                     }
                     *count = 0;
-                    self.set_health(&target.service_name, inst.index, HealthState::Healthy)
+                    self.set_health(&target.service_name, &inst.runtime_id, HealthState::Healthy)
                         .await;
                     // Refresh routes when an instance becomes healthy.
                     self.refresh_routes(&target.service_name).await;
@@ -167,8 +165,12 @@ impl HealthChecker {
                         consecutive_failures = *count,
                         "Health check failed"
                     );
-                    self.set_health(&target.service_name, inst.index, HealthState::Unhealthy)
-                        .await;
+                    self.set_health(
+                        &target.service_name,
+                        &inst.runtime_id,
+                        HealthState::Unhealthy,
+                    )
+                    .await;
                     // Refresh routes so unhealthy backend is removed from rotation.
                     self.refresh_routes(&target.service_name).await;
 
@@ -181,7 +183,7 @@ impl HealthChecker {
                         );
                         self.restart_instance(
                             &target.service_name,
-                            inst.index,
+                            &inst.runtime_id,
                             target.runtime_kind,
                         )
                         .await;
@@ -206,18 +208,26 @@ impl HealthChecker {
         }
     }
 
-    /// Update the health state of a specific instance.
-    async fn set_health(&self, service_name: &str, index: usize, health: HealthState) {
+    /// Update the health state of a specific instance, looked up by runtime_id.
+    async fn set_health(&self, service_name: &str, runtime_id: &str, health: HealthState) {
         let mut services = self.state.services.write().await;
         if let Some(svc) = services.get_mut(service_name)
-            && let Some(inst) = svc.instances.get_mut(index)
+            && let Some(inst) = svc
+                .instances
+                .iter_mut()
+                .find(|i| i.handle.runtime_id == runtime_id)
         {
             inst.health = health;
         }
     }
 
     /// Restart a failed instance by stopping/removing the old one and creating a new one.
-    async fn restart_instance(&self, service_name: &str, index: usize, runtime_kind: RuntimeKind) {
+    async fn restart_instance(
+        &self,
+        service_name: &str,
+        runtime_id: &str,
+        runtime_kind: RuntimeKind,
+    ) {
         let runtime: &dyn Runtime = match runtime_kind {
             RuntimeKind::Container => self.state.container_runtime.as_ref(),
             RuntimeKind::Wasm => match &self.state.wasm_runtime {
@@ -229,13 +239,17 @@ impl HealthChecker {
             },
         };
 
-        // Extract the old handle and config under a write lock, then drop it.
+        // Extract the old handle and config under a read lock, then drop it.
         let (old_handle, spec, port) = {
             let services = self.state.services.read().await;
             let Some(svc) = services.get(service_name) else {
                 return;
             };
-            let Some(inst) = svc.instances.get(index) else {
+            let Some(inst) = svc
+                .instances
+                .iter()
+                .find(|i| i.handle.runtime_id == runtime_id)
+            else {
                 return;
             };
             let spec = match service_config_to_spec(&svc.config) {
@@ -275,15 +289,19 @@ impl HealthChecker {
 
                 {
                     let mut services = self.state.services.write().await;
-                    if let Some(svc) = services.get_mut(service_name)
-                        && let Some(inst) = svc.instances.get_mut(index)
-                    {
-                        inst.handle = new_handle;
-                        inst.status = WorkloadStatus::Running;
-                        inst.host_port = host_port;
-                        inst.started_at = std::time::Instant::now();
-                        // Mark Healthy optimistically — next probe will correct.
-                        inst.health = HealthState::Healthy;
+                    if let Some(svc) = services.get_mut(service_name) {
+                        // Look up by old runtime_id — index is unreliable after watchdog pruning.
+                        if let Some(inst) = svc
+                            .instances
+                            .iter_mut()
+                            .find(|i| i.handle.runtime_id == old_handle.runtime_id)
+                        {
+                            inst.handle = new_handle;
+                            inst.status = WorkloadStatus::Running;
+                            inst.host_port = host_port;
+                            inst.started_at = std::time::Instant::now();
+                            inst.health = HealthState::Healthy;
+                        }
                     }
                 }
                 // Refresh routes with the new host_port.
@@ -321,7 +339,6 @@ struct CheckTarget {
 
 /// Internal struct for a single instance to probe.
 struct InstanceTarget {
-    index: usize,
     runtime_id: String,
     handle: WorkloadHandle,
     host_port: Option<u16>,
