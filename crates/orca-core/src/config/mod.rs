@@ -12,8 +12,8 @@ pub use crate::backup::{BackupConfig, BackupTarget};
 pub use ai::{AiAlertConfig, AiConfig, AlertDeliveryChannels, AutoRemediateConfig};
 pub use cluster::NetworkConfig;
 pub use cluster::{
-    AlertChannelConfig, ApiToken, ClusterConfig, ClusterMeta, FallbackConfig, NodeConfig,
-    NodeGpuConfig, ObservabilityConfig, Role,
+    AlertChannelConfig, ApiToken, CleanupConfig, ClusterConfig, ClusterMeta, FallbackConfig,
+    NodeConfig, NodeGpuConfig, ObservabilityConfig, Role,
 };
 pub use service::{BuildConfig, ProbeConfig, ServiceConfig, ServicesConfig};
 

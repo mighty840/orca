@@ -17,6 +17,8 @@ pub struct ClusterConfig {
     pub ai: Option<AiConfig>,
     #[serde(default)]
     pub backup: Option<BackupConfig>,
+    #[serde(default)]
+    pub cleanup: Option<CleanupConfig>,
     /// API bearer tokens for authentication. Empty = allow all requests.
     /// Deprecated: use `[[token]]` entries with roles instead.
     #[serde(default)]
@@ -182,4 +184,25 @@ pub struct ObservabilityConfig {
 pub struct AlertChannelConfig {
     pub webhook: Option<String>,
     pub email: Option<String>,
+}
+
+/// Scheduled cleanup configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CleanupConfig {
+    /// 6-field cron expression for cleanup runs (e.g. "0 0 3 * * *" = 3am daily).
+    pub schedule: Option<String>,
+    /// Number of most-recent tags to keep per registry repository (default 5).
+    #[serde(default = "default_registry_keep_tags")]
+    pub registry_keep_tags: u32,
+    /// Registry container name (default "orca-registry").
+    #[serde(default = "default_registry_container")]
+    pub registry_container: String,
+}
+
+fn default_registry_keep_tags() -> u32 {
+    5
+}
+
+fn default_registry_container() -> String {
+    "orca-registry".into()
 }

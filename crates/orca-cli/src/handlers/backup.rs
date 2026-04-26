@@ -250,9 +250,13 @@ mod tests {
         assert!(parse_backup_filename("nounderscorehere").is_none());
     }
 
+    // Serialize tests that mutate ORCA_BACKUP_CONFIG_JSON to prevent races.
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn load_backup_config_reads_from_env_var() {
         use orca_core::backup::BackupTarget;
+        let _guard = ENV_MUTEX.lock().unwrap();
         let cfg = BackupConfig {
             schedule: Some("0 0 2 * * *".to_string()),
             retention_days: 14,
@@ -266,7 +270,6 @@ mod tests {
             }],
         };
         let json = serde_json::to_string(&cfg).unwrap();
-        // SAFETY: single-threaded test; no other threads read this env var.
         unsafe { std::env::set_var("ORCA_BACKUP_CONFIG_JSON", &json) };
         let loaded = load_backup_config();
         unsafe { std::env::remove_var("ORCA_BACKUP_CONFIG_JSON") };
@@ -280,12 +283,10 @@ mod tests {
 
     #[test]
     fn load_backup_config_malformed_env_var_falls_through_to_default() {
-        // Malformed JSON should not panic; fall through to default config.
-        // SAFETY: single-threaded test; no other threads read this env var.
+        let _guard = ENV_MUTEX.lock().unwrap();
         unsafe { std::env::set_var("ORCA_BACKUP_CONFIG_JSON", "not-valid-json") };
         let loaded = load_backup_config();
         unsafe { std::env::remove_var("ORCA_BACKUP_CONFIG_JSON") };
-        // Default has 30-day retention and a local target.
         assert_eq!(loaded.retention_days, 30);
     }
 

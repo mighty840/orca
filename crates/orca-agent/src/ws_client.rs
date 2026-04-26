@@ -275,6 +275,26 @@ async fn handle_master_message(
                 })
                 .await;
         }
+        MasterMessage::PruneSystem => {
+            info!("WS: prune system requested by master");
+            tokio::spawn(async move {
+                match tokio::process::Command::new("docker")
+                    .args(["system", "prune", "-f"])
+                    .output()
+                    .await
+                {
+                    Ok(out) if out.status.success() => info!(
+                        "docker system prune: {}",
+                        String::from_utf8_lossy(&out.stdout).trim()
+                    ),
+                    Ok(out) => error!(
+                        "docker system prune failed: {}",
+                        String::from_utf8_lossy(&out.stderr).trim()
+                    ),
+                    Err(e) => error!("failed to spawn docker prune: {e}"),
+                }
+            });
+        }
     }
 
     Ok(())

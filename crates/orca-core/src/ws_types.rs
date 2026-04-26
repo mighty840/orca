@@ -100,6 +100,8 @@ pub enum MasterMessage {
     },
     /// Request a fresh status report from the agent. Agent responds with Heartbeat.
     StatusPing,
+    /// Signal the agent to run `docker system prune -f`.
+    PruneSystem,
 }
 
 /// Status of a single workload, reported by agent.

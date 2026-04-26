@@ -2,6 +2,7 @@ pub mod api;
 pub mod auth;
 pub mod backup_scheduler;
 pub(crate) mod canary;
+pub mod cleanup_scheduler;
 pub mod cluster_api;
 pub(crate) mod cluster_handlers;
 pub mod cluster_state;
@@ -124,6 +125,12 @@ pub async fn run_server_with_acme(
         && backup_scheduler::spawn_backup_scheduler(backup_cfg, state.clone()).is_some()
     {
         info!("Backup scheduler started");
+    }
+
+    if let Some(cleanup_cfg) = cluster_config.cleanup.clone()
+        && cleanup_scheduler::spawn_cleanup_scheduler(cleanup_cfg, state.clone()).is_some()
+    {
+        info!("Cleanup scheduler started");
     }
 
     let app = api::router(state.clone());
