@@ -153,7 +153,31 @@ async fn restore_or_reconcile(
     state: &AppState,
     config: &orca_core::config::ServiceConfig,
 ) -> anyhow::Result<()> {
-    // Try to downcast to ContainerRuntime for find_existing
+    // Remote services run on an agent node whose WS connection isn't open yet
+    // at startup. Register a placeholder so send_reconcile includes this service
+    // when the agent connects — the agent will skip deployment if the container
+    // is already running.
+    if config
+        .placement
+        .as_ref()
+        .and_then(|p| p.node.as_ref())
+        .is_some()
+    {
+        let desired = match &config.replicas {
+            orca_core::types::Replicas::Fixed(n) => *n,
+            orca_core::types::Replicas::Auto => 1,
+        };
+        let mut services = state.services.write().await;
+        let svc_state = services
+            .entry(config.name.clone())
+            .or_insert_with(|| state::ServiceState::from_config(config.clone()));
+        svc_state.config = config.clone();
+        svc_state.desired_replicas = desired;
+        info!(service = %config.name, "Registered remote service placeholder");
+        return Ok(());
+    }
+
+    // Local service: try to re-attach existing containers first.
     let cr = state
         .container_runtime
         .as_any()

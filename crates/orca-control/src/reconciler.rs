@@ -254,11 +254,34 @@ pub(crate) async fn reconcile_service(
         if failures > 0 {
             tracing::warn!("{failures}/{to_create} replicas failed for {}", config.name);
         }
-        let mut services = state.services.write().await;
-        if let Some(svc_state) = services.get_mut(&config.name) {
-            svc_state.instances.extend(new_instances);
+        // Re-acquire write lock and guard against concurrent deploy overshoot:
+        // another reconcile may have created instances while the lock was dropped.
+        let excess_handles = {
+            let mut services = state.services.write().await;
+            let mut excess = Vec::new();
+            if let Some(svc_state) = services.get_mut(&config.name) {
+                let already = svc_state
+                    .instances
+                    .iter()
+                    .filter(|i| i.status == WorkloadStatus::Running)
+                    .count() as u32;
+                let cap = svc_state.desired_replicas.saturating_sub(already) as usize;
+                let mut to_add = new_instances;
+                if to_add.len() > cap {
+                    excess = to_add
+                        .split_off(cap)
+                        .into_iter()
+                        .map(|i| i.handle)
+                        .collect();
+                }
+                svc_state.instances.extend(to_add);
+            }
+            excess
+        };
+        for handle in excess_handles {
+            let _ = runtime.stop(&handle, Duration::from_secs(10)).await;
+            let _ = runtime.remove(&handle).await;
         }
-        drop(services);
     } else if current > desired {
         let to_remove = current - desired;
         info!(
