@@ -122,6 +122,9 @@ impl HealthChecker {
             };
 
             for inst in &target.targets {
+                if inst.runtime_id.starts_with("remote-") {
+                    continue;
+                }
                 let healthy = if let Some(path) = &target.health_path {
                     if let Some(port) = inst.host_port {
                         self.probe_with_timeout(port, path, timeout).await
