@@ -97,7 +97,7 @@ pub async fn redeploy(state: &AppState, service_name: &str) -> anyhow::Result<()
         }
     }
 
-    // Collect old instance handles and detect remote placement.
+    // Collect old instance handles.
     let old_handles: Vec<_> = {
         let services = state.services.read().await;
         services
@@ -106,12 +106,29 @@ pub async fn redeploy(state: &AppState, service_name: &str) -> anyhow::Result<()
             .unwrap_or_default()
     };
 
-    // If any instance is on a remote agent, dispatch there via WS.
-    let remote_node = old_handles.iter().find_map(|h| {
-        h.runtime_id
-            .strip_prefix("remote-")
-            .and_then(|s| s.parse::<u64>().ok())
-    });
+    // Detect remote placement. Config takes precedence over instance runtime_ids
+    // so redeploy works even when the service has no running instances on master
+    // (e.g. stopped or newly registered placeholder).
+    let remote_node: Option<u64> = 'remote: {
+        if let Some(node_name) = config.placement.as_ref().and_then(|p| p.node.as_deref()) {
+            let nodes = state.registered_nodes.read().await;
+            let found = nodes.iter().find_map(|(id, n)| {
+                n.address
+                    .split(':')
+                    .next()
+                    .filter(|h| *h == node_name)
+                    .map(|_| *id)
+            });
+            if found.is_some() {
+                break 'remote found;
+            }
+        }
+        old_handles.iter().find_map(|h| {
+            h.runtime_id
+                .strip_prefix("remote-")
+                .and_then(|s| s.parse::<u64>().ok())
+        })
+    };
 
     if let Some(node_id) = remote_node {
         let spec = crate::routes::service_config_to_spec(&config)?;
