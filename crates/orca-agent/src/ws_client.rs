@@ -237,7 +237,7 @@ async fn handle_master_message(
         }
         MasterMessage::Reconcile { expected } => {
             info!("WS: reconciling {} expected services", expected.len());
-            reconcile_services(expected, runtime, agent, domain_tx).await;
+            reconcile_services(expected, runtime, agent, domain_tx, out_tx).await;
         }
         MasterMessage::ExecStart {
             session_id,
@@ -466,6 +466,7 @@ async fn reconcile_services(
     runtime: &Arc<dyn Runtime>,
     agent: &Arc<AgentClient>,
     domain_tx: &mpsc::Sender<(String, String, u16)>,
+    out_tx: &mpsc::Sender<AgentMessage>,
 ) {
     let running = agent.collect_workload_reports(runtime.as_ref()).await;
     // Only containers in "running" state count — exited/dead containers must be redeployed.
@@ -513,6 +514,13 @@ async fn reconcile_services(
         match agent.deploy_spec(runtime.as_ref(), spec).await {
             Ok(()) => {
                 deployed += 1;
+                let _ = out_tx
+                    .send(AgentMessage::DeployResult {
+                        service_name: spec.name.clone(),
+                        success: true,
+                        error: None,
+                    })
+                    .await;
                 // Notify domain discovery
                 if let Some(domain) = &spec.domain
                     && let Ok(Some(port)) = runtime
@@ -533,6 +541,13 @@ async fn reconcile_services(
             }
             Err(e) => {
                 error!("Reconcile: failed to deploy {}: {e}", spec.name);
+                let _ = out_tx
+                    .send(AgentMessage::DeployResult {
+                        service_name: spec.name.clone(),
+                        success: false,
+                        error: Some(e.to_string()),
+                    })
+                    .await;
             }
         }
     }

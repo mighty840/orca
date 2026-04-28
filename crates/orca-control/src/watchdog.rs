@@ -166,6 +166,20 @@ async fn check_and_prune(state: &AppState, service_name: &str, runtime_kind: Run
         );
     }
 
+    // Remote-placed services are reconciled by send_reconcile when the agent
+    // connects. The watchdog must not trigger local reconcile for them —
+    // instances.len() is 0 until the agent's first heartbeat, so without
+    // this guard every watchdog cycle would send a duplicate Deploy.
+    if svc
+        .config
+        .placement
+        .as_ref()
+        .and_then(|p| p.node.as_ref())
+        .is_some()
+    {
+        return false;
+    }
+
     let current = svc.instances.len() as u32;
     let desired = svc.desired_replicas;
 

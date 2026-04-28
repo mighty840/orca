@@ -17,7 +17,7 @@ use orca_control::watchdog::run_watchdog_cycle;
 use orca_core::config::{ClusterConfig, ServiceConfig};
 use orca_core::runtime::WorkloadHandle;
 use orca_core::testing::MockRuntime;
-use orca_core::types::{HealthState, Replicas, RuntimeKind, WorkloadStatus};
+use orca_core::types::{HealthState, PlacementConstraint, Replicas, RuntimeKind, WorkloadStatus};
 use orca_core::ws_types::AgentMessage;
 
 fn make_state(token: &str) -> Arc<AppState> {
@@ -211,5 +211,35 @@ async fn health_checker_skips_remote_instance() {
     assert!(
         !failure_counts.contains_key("remote-55"),
         "health checker must not record failures for remote instances"
+    );
+}
+
+/// A service with placement.node set and zero instances (master startup state)
+/// must not trigger local reconciliation — the placement guard in check_and_prune
+/// must return false before the current < desired comparison.
+#[tokio::test]
+async fn watchdog_placement_guard_prevents_reconcile_with_zero_instances() {
+    let state = make_state("tok");
+    {
+        let mut services = state.services.write().await;
+        let mut config = make_config("placed-svc");
+        config.placement = Some(PlacementConstraint {
+            node: Some("node-99".into()),
+            labels: None,
+            requires_gpu: None,
+        });
+        let svc = ServiceState::from_config(config);
+        // Intentionally NO instances — mirrors restore_or_reconcile startup state.
+        services.insert("placed-svc".into(), svc);
+    }
+
+    run_watchdog_cycle(&state).await;
+
+    let services = state.services.read().await;
+    let svc = services.get("placed-svc").unwrap();
+    assert_eq!(
+        svc.instances.len(),
+        0,
+        "placement guard must prevent local reconcile even with zero instances"
     );
 }
