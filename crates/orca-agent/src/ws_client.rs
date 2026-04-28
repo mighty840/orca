@@ -132,6 +132,7 @@ async fn handle_ws_session(
                     domain_tx,
                     &out_tx,
                     &exec_sessions,
+                    &stats_collector,
                 )
                 .await
                 {
@@ -148,7 +149,7 @@ async fn handle_ws_session(
     Ok(())
 }
 
-/// Process a single message from the master.
+#[allow(clippy::too_many_arguments)]
 async fn handle_master_message(
     text: &str,
     node_id: u64,
@@ -157,6 +158,7 @@ async fn handle_master_message(
     domain_tx: &mpsc::Sender<(String, String, u16)>,
     out_tx: &mpsc::Sender<AgentMessage>,
     exec_sessions: &ExecSessions,
+    stats_collector: &crate::host_stats::HostStatsCollector,
 ) -> anyhow::Result<()> {
     let msg: MasterMessage = serde_json::from_str(text)?;
 
@@ -267,11 +269,21 @@ async fn handle_master_message(
         }
         MasterMessage::StatusPing => {
             let workloads = agent.collect_workload_reports(runtime.as_ref()).await;
+            let sample = stats_collector.sample();
             let _ = out_tx
                 .send(AgentMessage::Heartbeat {
                     node_id,
                     workloads,
-                    stats: HostStats::default(),
+                    stats: HostStats {
+                        cpu_percent: sample.cpu_percent,
+                        memory_bytes: sample.memory_bytes,
+                        memory_total: sample.memory_total,
+                        disk_used: sample.disk_used,
+                        disk_total: sample.disk_total,
+                        net_rx: sample.net_rx,
+                        net_tx: sample.net_tx,
+                        domains: vec![],
+                    },
                 })
                 .await;
         }
@@ -456,8 +468,12 @@ async fn reconcile_services(
     domain_tx: &mpsc::Sender<(String, String, u16)>,
 ) {
     let running = agent.collect_workload_reports(runtime.as_ref()).await;
-    let running_names: std::collections::HashSet<String> =
-        running.iter().map(|r| r.service_name.clone()).collect();
+    // Only containers in "running" state count — exited/dead containers must be redeployed.
+    let running_names: std::collections::HashSet<String> = running
+        .iter()
+        .filter(|r| r.status == "running")
+        .map(|r| r.service_name.clone())
+        .collect();
 
     let mut deployed = 0u32;
     let mut skipped = 0u32;
@@ -465,6 +481,31 @@ async fn reconcile_services(
     for spec in &expected {
         if running_names.contains(&spec.name) {
             skipped += 1;
+            continue;
+        }
+
+        // In-memory state is empty after an agent restart. Check Docker
+        // directly so we don't force-remove a running container.
+        let probe_handle = orca_core::runtime::WorkloadHandle {
+            runtime_id: format!("orca-{}", spec.name),
+            name: format!("orca-{}", spec.name),
+            metadata: Default::default(),
+        };
+        if runtime
+            .status(&probe_handle)
+            .await
+            .unwrap_or(orca_core::types::WorkloadStatus::Stopped)
+            == orca_core::types::WorkloadStatus::Running
+        {
+            agent
+                .update_workload_status(
+                    &probe_handle.runtime_id,
+                    &spec.name,
+                    orca_core::types::WorkloadStatus::Running,
+                )
+                .await;
+            skipped += 1;
+            info!("Reconcile: {} already running, adopted", spec.name);
             continue;
         }
 

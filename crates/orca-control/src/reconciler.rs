@@ -224,20 +224,29 @@ pub(crate) async fn reconcile_service(
             "Scaling up {} ({:?}): {} -> {} (+{})",
             config.name, config.runtime, current, desired, to_create
         );
-
-        let mut failures = 0u32;
-        for i in current..desired {
-            let mut replica_spec = spec.clone();
-            if desired > 1 {
-                replica_spec.name = format!("{}-{i}", spec.name);
-            }
-
-            match create_and_start_instance(runtime, &replica_spec).await {
-                Ok(instance) => {
-                    svc_state.instances.push(instance);
+        let specs: Vec<_> = (current..desired)
+            .map(|i| {
+                let mut r = spec.clone();
+                if desired > 1 {
+                    r.name = format!("{}-{i}", spec.name);
                 }
+                r
+            })
+            .collect();
+        // Drop the write lock before async I/O so heartbeat processing is not blocked.
+        drop(services);
+
+        let mut new_instances = Vec::new();
+        let mut failures = 0u32;
+        for (idx, replica_spec) in specs.into_iter().enumerate() {
+            match create_and_start_instance(runtime, &replica_spec).await {
+                Ok(inst) => new_instances.push(inst),
                 Err(e) => {
-                    error!("Failed to create instance {}-{i}: {e}", config.name);
+                    error!(
+                        "Failed to create instance {}-{}: {e}",
+                        config.name,
+                        current + idx as u32
+                    );
                     failures += 1;
                 }
             }
@@ -245,31 +254,63 @@ pub(crate) async fn reconcile_service(
         if failures > 0 {
             tracing::warn!("{failures}/{to_create} replicas failed for {}", config.name);
         }
+        // Re-acquire write lock and guard against concurrent deploy overshoot:
+        // another reconcile may have created instances while the lock was dropped.
+        let excess_handles = {
+            let mut services = state.services.write().await;
+            let mut excess = Vec::new();
+            if let Some(svc_state) = services.get_mut(&config.name) {
+                let already = svc_state
+                    .instances
+                    .iter()
+                    .filter(|i| i.status == WorkloadStatus::Running)
+                    .count() as u32;
+                let cap = svc_state.desired_replicas.saturating_sub(already) as usize;
+                let mut to_add = new_instances;
+                if to_add.len() > cap {
+                    excess = to_add
+                        .split_off(cap)
+                        .into_iter()
+                        .map(|i| i.handle)
+                        .collect();
+                }
+                svc_state.instances.extend(to_add);
+            }
+            excess
+        };
+        for handle in excess_handles {
+            let _ = runtime.stop(&handle, Duration::from_secs(10)).await;
+            let _ = runtime.remove(&handle).await;
+        }
     } else if current > desired {
         let to_remove = current - desired;
         info!(
             "Scaling down {} ({:?}): {} -> {} (-{})",
             config.name, config.runtime, current, desired, to_remove
         );
-
+        // Sort so failed/stopped instances are removed first, canary last.
+        svc_state
+            .instances
+            .sort_unstable_by_key(|i| match i.status {
+                WorkloadStatus::Failed | WorkloadStatus::Stopped => 2u8,
+                _ if !i.is_canary => 1,
+                _ => 0,
+            });
+        let mut handles = Vec::new();
         for _ in 0..to_remove {
-            if let Some(instance) = svc_state.instances.pop() {
-                let _ = runtime
-                    .stop(&instance.handle, Duration::from_secs(10))
-                    .await;
-                let _ = runtime.remove(&instance.handle).await;
+            if let Some(inst) = svc_state.instances.pop() {
+                handles.push(inst.handle);
             }
         }
-    }
-
-    // Refresh status of all instances
-    for instance in &mut svc_state.instances {
-        if let Ok(status) = runtime.status(&instance.handle).await {
-            instance.status = status;
+        // Drop the write lock before async I/O.
+        drop(services);
+        for handle in handles {
+            let _ = runtime.stop(&handle, Duration::from_secs(10)).await;
+            let _ = runtime.remove(&handle).await;
         }
+    } else {
+        drop(services);
     }
-
-    drop(services);
 
     // Update routing based on runtime type
     match config.runtime {

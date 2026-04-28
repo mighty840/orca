@@ -101,23 +101,50 @@ async fn check_and_prune(state: &AppState, service_name: &str, runtime_kind: Run
         Err(_) => return false,
     };
 
+    // Collect handles under a read lock before any async calls.
+    let handles: Vec<(usize, orca_core::runtime::WorkloadHandle)> = {
+        let services = state.services.read().await;
+        let Some(svc) = services.get(service_name) else {
+            return false;
+        };
+        svc.instances
+            .iter()
+            .enumerate()
+            .map(|(i, inst)| (i, inst.handle.clone()))
+            .collect()
+    };
+
+    // Refresh live status from the runtime for every instance. This catches
+    // containers that are stuck in a restart-loop but still report "Running"
+    // in the cached status (e.g. after a disk-full recovery).
+    let mut live: Vec<(usize, WorkloadStatus)> = Vec::with_capacity(handles.len());
+    for (idx, handle) in &handles {
+        let status = runtime
+            .status(handle)
+            .await
+            .unwrap_or(WorkloadStatus::Failed);
+        live.push((*idx, status));
+    }
+
+    // Write back live statuses and prune dead instances.
     let mut services = state.services.write().await;
     let Some(svc) = services.get_mut(service_name) else {
         return false;
     };
 
-    let mut removed = 0u32;
-    svc.instances.retain_mut(|inst| {
-        // We cannot await inside retain, so check status synchronously
-        // by looking at the cached status. The health checker and
-        // reconciler keep this updated.
-        match inst.status {
-            WorkloadStatus::Stopped | WorkloadStatus::Failed => {
-                removed += 1;
-                false
-            }
-            _ => true,
+    for (idx, status) in &live {
+        if let Some(inst) = svc.instances.get_mut(*idx) {
+            inst.status = *status;
         }
+    }
+
+    let mut removed = 0u32;
+    svc.instances.retain(|inst| match inst.status {
+        WorkloadStatus::Stopped | WorkloadStatus::Failed => {
+            removed += 1;
+            false
+        }
+        _ => true,
     });
 
     if removed > 0 {
@@ -139,13 +166,6 @@ async fn check_and_prune(state: &AppState, service_name: &str, runtime_kind: Run
             desired,
             "Service degraded, needs reconciliation"
         );
-        // Also check live status from runtime for remaining instances
-        // (update cached status so next prune catches them).
-        for inst in &mut svc.instances {
-            if let Ok(status) = runtime.status(&inst.handle).await {
-                inst.status = status;
-            }
-        }
         true
     } else {
         false
