@@ -117,8 +117,13 @@ async fn check_and_prune(state: &AppState, service_name: &str, runtime_kind: Run
     // Refresh live status from the runtime for every instance. This catches
     // containers that are stuck in a restart-loop but still report "Running"
     // in the cached status (e.g. after a disk-full recovery).
+    // Remote placeholders are owned by the heartbeat handler — querying them
+    // via the local Docker runtime always returns Failed and would prune them.
     let mut live: Vec<(usize, WorkloadStatus)> = Vec::with_capacity(handles.len());
     for (idx, handle) in &handles {
+        if handle.runtime_id.starts_with("remote-") {
+            continue;
+        }
         let status = runtime
             .status(handle)
             .await
@@ -139,12 +144,17 @@ async fn check_and_prune(state: &AppState, service_name: &str, runtime_kind: Run
     }
 
     let mut removed = 0u32;
-    svc.instances.retain(|inst| match inst.status {
-        WorkloadStatus::Stopped | WorkloadStatus::Failed => {
-            removed += 1;
-            false
+    svc.instances.retain(|inst| {
+        if inst.handle.runtime_id.starts_with("remote-") {
+            return true;
         }
-        _ => true,
+        match inst.status {
+            WorkloadStatus::Stopped | WorkloadStatus::Failed => {
+                removed += 1;
+                false
+            }
+            _ => true,
+        }
     });
 
     if removed > 0 {

@@ -210,6 +210,17 @@ async fn handle_agent_message(
         } => {
             if success {
                 info!("Node {node_id}: deploy of {service_name} succeeded");
+                let mut services = state.services.write().await;
+                if let Some(svc) = services.get_mut(&service_name) {
+                    let placeholder_id = format!("remote-{node_id}");
+                    if let Some(inst) = svc
+                        .instances
+                        .iter_mut()
+                        .find(|i| i.handle.runtime_id == placeholder_id)
+                    {
+                        inst.status = orca_core::types::WorkloadStatus::Running;
+                    }
+                }
             } else {
                 error!(
                     "Node {node_id}: deploy of {service_name} failed: {}",
