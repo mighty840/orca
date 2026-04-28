@@ -83,12 +83,22 @@ The first node to run `orca server` becomes the leader.
 
 When an agent loses its WebSocket connection (network blip, master restart,
 etc.), it reconnects automatically with exponential backoff. On reconnect,
-the master replays the full desired state for that agent. The agent's
-reconciler then converges: it starts missing containers, stops unknown ones,
-and updates any whose spec has drifted.
+the master:
+
+1. Creates a `remote-{node_id}` placeholder instance for every service placed on that node.
+2. Sends a `Reconcile` message with all expected services.
+3. The agent starts any missing containers and sends `DeployResult` for each, which the master uses to update the service status from `Stopped` to `Running`.
+
+The watchdog never triggers local reconciliation for services with a `placement.node` constraint — those are exclusively managed through the agent WS channel.
 
 This means you can restart the master, upgrade it, or recover from a network
 partition -- agents will self-heal without manual intervention.
+
+### Webhook behaviour when an agent is offline
+
+If a git push webhook fires while the target agent is disconnected, the API
+returns `503 Service Unavailable` (not 500). Retry once the agent reconnects,
+or use `orca redeploy <service>` manually.
 
 ## Placement Constraints
 

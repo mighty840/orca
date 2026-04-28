@@ -144,3 +144,4 @@ All errors return JSON:
 | `403` | Insufficient role permissions |
 | `404` | Service or resource not found |
 | `500` | Internal server error |
+| `503` | Target agent node is offline (webhook redeploy to disconnected node) |

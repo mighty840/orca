@@ -4,6 +4,14 @@ use std::time::Duration;
 
 use tracing::info;
 
+/// Returned when a redeploy targets a remote node that is not currently connected.
+/// Callers can downcast to distinguish this from internal errors (e.g. map to 503).
+#[derive(Debug, thiserror::Error)]
+#[error("agent {node_id} not connected — try again once the node reconnects")]
+pub struct AgentOfflineError {
+    pub node_id: u64,
+}
+
 use orca_core::runtime::Runtime;
 use orca_core::types::Replicas;
 use orca_core::ws_types::MasterMessage;
@@ -145,7 +153,7 @@ pub async fn redeploy(state: &AppState, service_name: &str) -> anyhow::Result<()
             .await
             .map_err(|_| anyhow::anyhow!("agent {node_id} channel closed"))?;
         } else {
-            anyhow::bail!("agent {node_id} not connected");
+            return Err(anyhow::Error::new(AgentOfflineError { node_id }));
         }
         info!("Redeployed service {service_name} via agent {node_id}");
         return Ok(());

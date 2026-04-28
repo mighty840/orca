@@ -11,6 +11,7 @@ Orca automatically detects and recovers from common failure scenarios without ma
 | Stale proxy route | Watchdog | Remove dead route | ~30s |
 | Agent disconnect | Heartbeat | Exponential backoff retry | 5-60s |
 | Duplicate deploy | Reconciler | Skip (idempotent) | Instant |
+| Remote service at startup | Agent WS connect | Placeholder upsert + Reconcile | On reconnect |
 
 ## Watchdog
 

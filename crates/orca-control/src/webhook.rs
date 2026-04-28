@@ -16,6 +16,7 @@ use sha2::Sha256;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
+use crate::operations::AgentOfflineError;
 use crate::reconciler;
 use crate::state::AppState;
 
@@ -199,6 +200,7 @@ pub async fn handle_push(
     let mut deployed = Vec::new();
     let mut errors = Vec::new();
     let mut sig_failures = 0u32;
+    let mut agent_offline = false;
 
     for wh in &matching {
         // Validate secret if configured
@@ -228,6 +230,9 @@ pub async fn handle_push(
         match reconciler::redeploy(&state, &wh.service_name).await {
             Ok(()) => deployed.push(wh.service_name.clone()),
             Err(e) => {
+                if e.downcast_ref::<AgentOfflineError>().is_some() {
+                    agent_offline = true;
+                }
                 error!("Webhook: redeploy of {} failed: {e}", wh.service_name);
                 errors.push(format!("{}: {e}", wh.service_name));
             }
@@ -241,6 +246,8 @@ pub async fn handle_push(
 
     let status = if errors.is_empty() {
         StatusCode::OK
+    } else if deployed.is_empty() && agent_offline {
+        StatusCode::SERVICE_UNAVAILABLE
     } else if deployed.is_empty() {
         StatusCode::INTERNAL_SERVER_ERROR
     } else {
