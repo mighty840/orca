@@ -4,6 +4,10 @@
 //! After the upgrade, messages flow bidirectionally using [`AgentMessage`] and
 //! [`MasterMessage`] JSON frames.
 
+mod heartbeat;
+mod placeholders;
+mod reconcile;
+
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
@@ -14,11 +18,13 @@ use serde::Deserialize;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
-use orca_core::runtime::WorkloadHandle;
-use orca_core::types::{HealthState, WorkloadStatus};
 use orca_core::ws_types::{AgentMessage, MasterMessage};
 
-use crate::state::{AppState, InstanceState};
+use crate::state::AppState;
+
+use heartbeat::handle_ws_heartbeat;
+use placeholders::{remove_remote_placeholders, upsert_remote_placeholders};
+use reconcile::{drain_pending_commands, send_reconcile};
 
 /// Query params for the WS upgrade request.
 #[derive(Deserialize)]
@@ -291,211 +297,6 @@ async fn handle_agent_message(
     }
 
     Ok(())
-}
-
-/// Process a heartbeat received over WebSocket (same logic as HTTP handler).
-async fn handle_ws_heartbeat(
-    state: &AppState,
-    node_id: u64,
-    workloads: &[orca_core::ws_types::WorkloadReport],
-    stats: &orca_core::ws_types::HostStats,
-) {
-    let mut nodes = state.registered_nodes.write().await;
-    if let Some(node) = nodes.get_mut(&node_id) {
-        node.last_heartbeat = chrono::Utc::now();
-        node.cpu_percent = stats.cpu_percent;
-        node.memory_bytes = stats.memory_bytes;
-        node.memory_total = stats.memory_total;
-        node.disk_used = stats.disk_used;
-        node.disk_total = stats.disk_total;
-        node.net_rx = stats.net_rx;
-        node.net_tx = stats.net_tx;
-    }
-    drop(nodes);
-
-    // Update service statuses + per-container stats
-    if !workloads.is_empty() {
-        let mut services = state.services.write().await;
-        let mut stats_cache = state.container_stats.write().await;
-
-        for report in workloads {
-            if let Some(svc) = services.get_mut(&report.service_name) {
-                let status = match report.status.as_str() {
-                    "running" => orca_core::types::WorkloadStatus::Running,
-                    "stopped" => orca_core::types::WorkloadStatus::Stopped,
-                    "failed" => orca_core::types::WorkloadStatus::Failed,
-                    _ => orca_core::types::WorkloadStatus::Stopped,
-                };
-                // Update only the placeholder instance for this node, or the single
-                // instance if there is only one. Blanket-overwriting all instances
-                // masks individual replica failures on multi-replica services.
-                let placeholder_id = format!("remote-{node_id}");
-                if let Some(inst) = svc
-                    .instances
-                    .iter_mut()
-                    .find(|i| i.handle.runtime_id == placeholder_id)
-                {
-                    inst.status = status;
-                } else if svc.instances.len() == 1 {
-                    svc.instances[0].status = status;
-                }
-            }
-
-            // Cache per-container stats from remote agents
-            if report.memory_bytes > 0 || report.cpu_percent > 0.0 {
-                stats_cache.insert(
-                    report.service_name.clone(),
-                    crate::stats::ContainerStats {
-                        memory_usage: crate::stats::format_bytes(report.memory_bytes),
-                        cpu_percent: report.cpu_percent,
-                    },
-                );
-            }
-        }
-    }
-}
-
-/// Drain pending commands from the HTTP queue and send them over WS.
-async fn drain_pending_commands(state: &AppState, node_id: u64, tx: &mpsc::Sender<MasterMessage>) {
-    let commands = {
-        let mut pending = state.pending_commands.write().await;
-        pending.remove(&node_id).unwrap_or_default()
-    };
-    for cmd in commands {
-        if let Some(action) = cmd.get("action").and_then(|a| a.as_str()) {
-            match action {
-                "deploy" => {
-                    if let Some(spec) = cmd.get("spec")
-                        && let Ok(spec) = serde_json::from_value(spec.clone())
-                    {
-                        let _ = tx
-                            .send(MasterMessage::Deploy {
-                                spec: Box::new(spec),
-                            })
-                            .await;
-                    }
-                }
-                "stop" => {
-                    if let Some(name) = cmd.get("service_name").and_then(|n| n.as_str()) {
-                        let _ = tx
-                            .send(MasterMessage::Stop {
-                                service_name: name.to_string(),
-                            })
-                            .await;
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-}
-
-/// Ensure a `remote-{node_id}` placeholder `InstanceState` exists for every
-/// service placed on this node. Called on WS connect so the heartbeat and
-/// DeployResult handlers always have a slot to update.
-async fn upsert_remote_placeholders(state: &AppState, node_id: u64) {
-    let node_addr = {
-        let nodes = state.registered_nodes.read().await;
-        nodes.get(&node_id).map(|n| n.address.clone())
-    };
-    let Some(node_addr) = node_addr else { return };
-    let placeholder_id = format!("remote-{node_id}");
-    let mut services = state.services.write().await;
-    for svc in services.values_mut() {
-        if !svc
-            .config
-            .placement
-            .as_ref()
-            .and_then(|p| p.node.as_ref())
-            .is_some_and(|t| node_addr.contains(t.as_str()) || t == &node_id.to_string())
-        {
-            continue;
-        }
-        if svc
-            .instances
-            .iter()
-            .any(|i| i.handle.runtime_id == placeholder_id)
-        {
-            continue;
-        }
-        svc.instances.push(InstanceState {
-            handle: WorkloadHandle {
-                runtime_id: placeholder_id.clone(),
-                name: placeholder_id.clone(),
-                metadata: Default::default(),
-            },
-            status: WorkloadStatus::Stopped,
-            host_port: None,
-            container_address: None,
-            health: HealthState::Unknown,
-            is_canary: false,
-            started_at: std::time::Instant::now(),
-        });
-        info!(service = %svc.config.name, node_id, "registered remote placeholder");
-    }
-}
-
-/// Remove all `remote-{node_id}` placeholder instances on WS disconnect.
-async fn remove_remote_placeholders(state: &AppState, node_id: u64) {
-    let placeholder_id = format!("remote-{node_id}");
-    let mut services = state.services.write().await;
-    for svc in services.values_mut() {
-        svc.instances
-            .retain(|i| i.handle.runtime_id != placeholder_id);
-    }
-}
-
-/// Send the list of services expected on this agent node so it can
-/// reconcile (redeploy missing containers, stop unexpected ones).
-async fn send_reconcile(state: &AppState, node_id: u64, tx: &mpsc::Sender<MasterMessage>) {
-    // Find the node's address/hostname for placement matching
-    let node_address = {
-        let nodes = state.registered_nodes.read().await;
-        nodes.get(&node_id).map(|n| n.address.clone())
-    };
-    let Some(node_addr) = node_address else {
-        return;
-    };
-
-    // Collect all services whose placement targets this node
-    let services = state.services.read().await;
-    let expected: Vec<Box<orca_core::types::WorkloadSpec>> = services
-        .values()
-        .filter(|svc| {
-            svc.config
-                .placement
-                .as_ref()
-                .and_then(|p| p.node.as_ref())
-                .is_some_and(|target| {
-                    node_addr.contains(target.as_str()) || target == &node_id.to_string() || {
-                        let nodes_guard =
-                            futures_util::FutureExt::now_or_never(state.registered_nodes.read());
-                        nodes_guard
-                            .and_then(|nodes| {
-                                nodes
-                                    .get(&node_id)
-                                    .and_then(|n| n.labels.get("hostname").map(|h| h == target))
-                            })
-                            .unwrap_or(false)
-                    }
-                })
-        })
-        .filter_map(|svc| {
-            crate::routes::service_config_to_spec(&svc.config)
-                .ok()
-                .map(Box::new)
-        })
-        .collect();
-
-    if expected.is_empty() {
-        return;
-    }
-
-    info!(
-        "Sending Reconcile to node {node_id} with {} expected services",
-        expected.len()
-    );
-    let _ = tx.send(MasterMessage::Reconcile { expected }).await;
 }
 
 #[cfg(test)]
