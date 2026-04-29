@@ -8,3 +8,10 @@
 orca-linux-x86_64
 migration/
 crates/orca-control/secrets.json
+docs/node_modules/
+docs/dist/
+docs/docs-dist/
+docs/.astro/
+docs/package-lock.json
+docs-dist/
+docs-mockups/

@@ -1,0 +1,758 @@
+---
+import { nav, prevNext } from '../lib/nav';
+
+interface Props {
+  title: string;
+  description?: string;
+  currentSlug?: string;
+}
+
+const { title, description = '', currentSlug = '' } = Astro.props;
+const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+const pathname = Astro.url.pathname;
+const { prev, next } = prevNext(pathname);
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{title} — Orca Docs</title>
+  {description && <meta name="description" content={description} />}
+  <link rel="icon" href={`${base}/logo.svg`} />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <canvas id="ocean-canvas"></canvas>
+
+  <div class="layout">
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <a class="logo" href={`${base}/`}>
+        <img class="logo-icon" src={`${base}/logo.svg`} alt="Orca" />
+        <span class="logo-wordmark">orca<span class="logo-accent">.</span>dev</span>
+      </a>
+
+      <ul class="topbar-nav">
+        <li><a href={`${base}/guide/getting-started`} class={pathname.includes('/guide/') || pathname.includes('/comparison') ? 'active' : ''}>Guide</a></li>
+        <li><a href={`${base}/reference/api`} class={pathname.includes('/reference/') ? 'active' : ''}>Reference</a></li>
+        <li><a href={`${base}/architecture`} class={pathname.includes('/architecture') ? 'active' : ''}>Architecture</a></li>
+        <li><a href="https://github.com/mighty840/orca" target="_blank" rel="noopener">GitHub ↗</a></li>
+      </ul>
+
+      <div class="topbar-search" id="search-trigger" role="button" tabindex="0">
+        <span class="search-icon">⌕</span>
+        <span class="search-placeholder">Search docs...</span>
+        <kbd class="search-kbd">⌘K</kbd>
+      </div>
+
+      <a class="btn-version" href="https://github.com/mighty840/orca/releases" target="_blank" rel="noopener">v0.2.4</a>
+    </header>
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      {nav.map(section => (
+        <div class="sidebar-section">
+          <div class="sidebar-label">{section.label}</div>
+          {section.items.map(item => {
+            const href = `${base}${item.link}`;
+            const isActive = pathname === href || pathname === href + '/';
+            return (
+              <a href={href} class={`sidebar-link${isActive ? ' active' : ''}`}>
+                <span class="sidebar-dot"></span>
+                {item.text}
+              </a>
+            );
+          })}
+        </div>
+      ))}
+    </aside>
+
+    <!-- MAIN -->
+    <main class="main">
+      <div class="content">
+        <slot />
+
+        {(prev || next) && (
+          <nav class="page-nav" aria-label="Page navigation">
+            <div>
+              {prev && (
+                <a href={`${base}${prev.link}`} class="page-nav-card">
+                  <div class="page-nav-dir">← previous</div>
+                  <div class="page-nav-title">{prev.text}</div>
+                </a>
+              )}
+            </div>
+            <div>
+              {next && (
+                <a href={`${base}${next.link}`} class="page-nav-card next">
+                  <div class="page-nav-dir">next →</div>
+                  <div class="page-nav-title">{next.text}</div>
+                </a>
+              )}
+            </div>
+          </nav>
+        )}
+      </div>
+    </main>
+  </div>
+</body>
+</html>
+
+<style is:global>
+  :root {
+    --ocean-void: #020b14;
+    --ocean-deep: #050f1f;
+    --ocean-mid: #091929;
+    --ocean-surface: #0d2237;
+    --biolum: #00e5c8;
+    --biolum-glow: #00ffde;
+    --biolum-dim: #007a6c;
+    --blue-accent: #0066ff;
+    --foam: rgba(0,229,200,0.07);
+    --text-bright: #e8f4f8;
+    --text-mid: #7fb8cc;
+    --text-dim: #3a6a80;
+    --border: rgba(0,229,200,0.1);
+    --border-bright: rgba(0,229,200,0.18);
+    --code-bg: #020c18;
+    --topbar-h: 64px;
+    --sidebar-w: 256px;
+  }
+
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'Bricolage Grotesque', sans-serif;
+    background: var(--ocean-void);
+    color: var(--text-bright);
+    min-height: 100vh;
+    overflow-x: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 80% 50% at 15% 65%, rgba(0,102,255,0.05) 0%, transparent 60%),
+      radial-gradient(ellipse 60% 80% at 85% 15%, rgba(0,229,200,0.03) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  #ocean-canvas {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.5;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: var(--sidebar-w) 1fr;
+    grid-template-rows: var(--topbar-h) 1fr;
+    min-height: 100vh;
+    position: relative;
+    z-index: 1;
+  }
+
+  /* ── TOPBAR ── */
+  .topbar {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 0 1.75rem;
+    border-bottom: 1px solid var(--border);
+    background: rgba(2, 11, 20, 0.9);
+    backdrop-filter: blur(20px);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    height: var(--topbar-h);
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-decoration: none;
+    flex-shrink: 0;
+  }
+
+  .logo-icon { width: 30px; height: 30px; }
+
+  .logo-wordmark {
+    font-size: 1.2rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-bright);
+  }
+
+  .logo-accent { color: var(--biolum); }
+
+  .topbar-nav {
+    display: flex;
+    list-style: none;
+    gap: 0;
+    margin-left: 0.5rem;
+  }
+
+  .topbar-nav a {
+    display: block;
+    padding: 0.35rem 0.85rem;
+    color: var(--text-mid);
+    text-decoration: none;
+    font-size: 0.84rem;
+    font-weight: 500;
+    border-radius: 6px;
+    transition: color 0.15s, background 0.15s;
+  }
+
+  .topbar-nav a:hover { color: var(--biolum); background: var(--foam); }
+  .topbar-nav a.active { color: var(--biolum-glow); }
+
+  .topbar-search {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--ocean-surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.4rem 0.85rem;
+    cursor: pointer;
+    transition: border-color 0.15s;
+    min-width: 200px;
+  }
+
+  .topbar-search:hover { border-color: var(--biolum-dim); }
+
+  .search-icon { color: var(--text-dim); font-size: 0.95rem; }
+
+  .search-placeholder {
+    font-size: 0.8rem;
+    color: var(--text-dim);
+    flex: 1;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .search-kbd {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    background: var(--ocean-mid);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: var(--text-dim);
+  }
+
+  .btn-version {
+    padding: 0.35rem 0.85rem;
+    border: 1px solid var(--biolum);
+    background: rgba(0,229,200,0.08);
+    color: var(--biolum-glow);
+    font-size: 0.78rem;
+    font-weight: 600;
+    border-radius: 6px;
+    text-decoration: none;
+    flex-shrink: 0;
+    transition: all 0.15s;
+    box-shadow: 0 0 10px rgba(0,229,200,0.12);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .btn-version:hover {
+    background: rgba(0,229,200,0.14);
+    box-shadow: 0 0 20px rgba(0,229,200,0.2);
+  }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    padding: 1.5rem 0;
+    border-right: 1px solid var(--border);
+    background: rgba(5,15,31,0.5);
+    backdrop-filter: blur(10px);
+    overflow-y: auto;
+    height: calc(100vh - var(--topbar-h));
+    position: sticky;
+    top: var(--topbar-h);
+  }
+
+  .sidebar-section { margin-bottom: 0.25rem; }
+
+  .sidebar-label {
+    font-size: 0.62rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-dim);
+    padding: 0.75rem 1.5rem 0.3rem;
+  }
+
+  .sidebar-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0.4rem 1.5rem;
+    color: var(--text-mid);
+    text-decoration: none;
+    font-size: 0.86rem;
+    font-weight: 400;
+    transition: all 0.12s;
+    border-left: 2px solid transparent;
+    position: relative;
+  }
+
+  .sidebar-link:hover { color: var(--text-bright); background: var(--foam); }
+
+  .sidebar-link.active {
+    color: var(--biolum-glow);
+    background: rgba(0,229,200,0.05);
+    border-left-color: var(--biolum);
+  }
+
+  .sidebar-dot {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    flex-shrink: 0;
+    transition: background 0.12s, box-shadow 0.12s;
+  }
+
+  .sidebar-link.active .sidebar-dot,
+  .sidebar-link:hover .sidebar-dot {
+    background: var(--biolum);
+    box-shadow: 0 0 6px var(--biolum);
+  }
+
+  /* ── MAIN ── */
+  .main { overflow-y: auto; }
+
+  .content {
+    padding: 3rem 4rem 6rem;
+    max-width: 860px;
+  }
+
+  /* ── TYPOGRAPHY ── */
+  .content h1 {
+    font-size: 2.5rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    color: var(--text-bright);
+    margin-bottom: 0.75rem;
+    margin-top: 0;
+  }
+
+  .content h2 {
+    font-size: 1.45rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-bright);
+    margin: 2.5rem 0 0.85rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+    scroll-margin-top: calc(var(--topbar-h) + 1rem);
+  }
+
+  .content h3 {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin: 1.75rem 0 0.6rem;
+    scroll-margin-top: calc(var(--topbar-h) + 1rem);
+  }
+
+  .content h4 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-mid);
+    margin: 1.25rem 0 0.4rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-size: 0.82rem;
+  }
+
+  .content p {
+    color: var(--text-mid);
+    line-height: 1.8;
+    font-size: 0.95rem;
+    margin-bottom: 1rem;
+    font-weight: 300;
+  }
+
+  .content a {
+    color: var(--biolum);
+    text-decoration: none;
+    border-bottom: 1px solid rgba(0,229,200,0.25);
+    transition: border-color 0.12s;
+  }
+
+  .content a:hover { border-bottom-color: var(--biolum); }
+
+  .content strong { color: var(--text-bright); font-weight: 600; }
+
+  .content em { color: var(--text-mid); font-style: italic; }
+
+  /* ── INLINE CODE ── */
+  .content :not(pre) > code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82em;
+    background: var(--ocean-surface);
+    color: var(--biolum-glow);
+    padding: 2px 7px;
+    border-radius: 4px;
+    border: 1px solid var(--border-bright);
+  }
+
+  /* ── CODE BLOCKS ── */
+  .content pre {
+    background: var(--code-bg) !important;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    margin: 1rem 0;
+    overflow-x: auto;
+    position: relative;
+  }
+
+  .copy-btn {
+    position: absolute;
+    top: 0.55rem;
+    right: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: var(--text-dim);
+    background: var(--ocean-surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.15s;
+    z-index: 2;
+    opacity: 0;
+    user-select: none;
+  }
+
+  .content pre:hover .copy-btn { opacity: 1; }
+
+  .copy-btn:hover {
+    color: var(--biolum);
+    border-color: var(--biolum-dim);
+    background: rgba(0,229,200,0.06);
+  }
+
+  .copy-btn.copied {
+    color: var(--biolum-glow);
+    border-color: var(--biolum);
+    opacity: 1;
+  }
+
+  .content pre code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.875rem;
+    line-height: 1.75;
+    background: none !important;
+    border: none !important;
+    padding: 0 !important;
+    color: inherit;
+  }
+
+  /* Language label on code blocks */
+  .content pre[class*="language-"] {
+    padding-top: 2.25rem;
+  }
+
+  .content pre[class*="language-"]::before {
+    content: attr(class);
+    position: absolute;
+    top: 0.55rem;
+    left: 1.25rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--biolum);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  /* ── LISTS ── */
+  .content ul, .content ol {
+    margin: 0.75rem 0 1rem 1.25rem;
+    color: var(--text-mid);
+  }
+
+  .content li {
+    font-size: 0.95rem;
+    line-height: 1.75;
+    margin-bottom: 0.25rem;
+    font-weight: 300;
+  }
+
+  .content li code { font-size: 0.8em; }
+
+  /* ── TABLES ── */
+  .content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.25rem 0;
+    font-size: 0.875rem;
+  }
+
+  .content th {
+    background: var(--ocean-surface);
+    color: var(--biolum);
+    font-weight: 600;
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.65rem 1rem;
+    border: 1px solid var(--border);
+    text-align: left;
+  }
+
+  .content td {
+    padding: 0.55rem 1rem;
+    border: 1px solid var(--border);
+    color: var(--text-mid);
+    vertical-align: top;
+    line-height: 1.55;
+  }
+
+  .content tr:hover td { background: var(--foam); }
+
+  /* ── BLOCKQUOTE ── */
+  .content blockquote {
+    border-left: 3px solid var(--biolum-dim);
+    margin: 1rem 0;
+    padding: 0.5rem 1.25rem;
+    background: var(--foam);
+    border-radius: 0 8px 8px 0;
+  }
+
+  .content blockquote p {
+    margin: 0;
+    font-style: italic;
+    color: var(--text-mid);
+  }
+
+  /* ── HORIZONTAL RULE ── */
+  .content hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2rem 0;
+  }
+
+  /* ── CALLOUTS (from VitePress ::: containers) ── */
+  .content .callout {
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    margin: 1.25rem 0;
+    border: 1px solid;
+  }
+
+  .content .callout-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.5rem;
+  }
+
+  .content .callout p { margin: 0; font-size: 0.875rem; }
+  .content .callout pre { margin: 0.5rem 0 0; }
+
+  .content .callout-tip {
+    background: rgba(0,229,200,0.05);
+    border-color: rgba(0,229,200,0.2);
+  }
+  .content .callout-tip .callout-label { color: var(--biolum); }
+
+  .content .callout-warning {
+    background: rgba(255,184,0,0.05);
+    border-color: rgba(255,184,0,0.2);
+  }
+  .content .callout-warning .callout-label { color: #ffb800; }
+
+  .content .callout-danger {
+    background: rgba(255,60,60,0.05);
+    border-color: rgba(255,60,60,0.2);
+  }
+  .content .callout-danger .callout-label { color: #ff4444; }
+
+  /* ── CODE GROUP ── */
+  .content .code-group {
+    margin: 1rem 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .content .code-group pre {
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .content .code-group pre:first-child { border-top: none; }
+
+  /* ── PAGE NAV ── */
+  .page-nav {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-top: 4rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .page-nav-card {
+    display: block;
+    background: var(--ocean-mid);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.25rem;
+    text-decoration: none;
+    transition: all 0.15s;
+  }
+
+  .page-nav-card:hover {
+    border-color: var(--biolum-dim);
+    background: rgba(9,25,41,0.8);
+  }
+
+  .page-nav-dir {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 0.3rem;
+  }
+
+  .page-nav-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--biolum);
+    border-bottom: none !important;
+  }
+
+  .page-nav-card.next { text-align: right; }
+</style>
+
+<script>
+  // Bioluminescent particle system
+  const canvas = document.getElementById('ocean-canvas') as HTMLCanvasElement;
+  const ctx = canvas.getContext('2d')!;
+
+  function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  }
+  resize();
+  window.addEventListener('resize', resize);
+
+  interface Particle {
+    x: number; y: number;
+    r: number; vx: number; vy: number;
+    opacity: number; pulse: number; pulseSpeed: number;
+  }
+
+  const particles: Particle[] = Array.from({ length: 70 }, () => ({
+    x: Math.random() * window.innerWidth,
+    y: Math.random() * window.innerHeight,
+    r: Math.random() * 2 + 0.5,
+    vx: (Math.random() - 0.5) * 0.12,
+    vy: (Math.random() - 0.5) * 0.06 - 0.04,
+    opacity: Math.random() * 0.5 + 0.08,
+    pulse: Math.random() * Math.PI * 2,
+    pulseSpeed: 0.008 + Math.random() * 0.018,
+  }));
+
+  function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const t = Date.now() * 0.001;
+
+    for (const p of particles) {
+      p.pulse += p.pulseSpeed;
+      p.x += p.vx + Math.sin(t * 0.25 + p.y * 0.008) * 0.08;
+      p.y += p.vy;
+
+      if (p.y < -10) p.y = canvas.height + 10;
+      if (p.x < -10) p.x = canvas.width + 10;
+      if (p.x > canvas.width + 10) p.x = -10;
+
+      const alpha = p.opacity * (0.4 + 0.6 * Math.sin(p.pulse));
+      const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.r * 5);
+      grd.addColorStop(0, `rgba(0,229,200,${alpha})`);
+      grd.addColorStop(1, 'rgba(0,229,200,0)');
+
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.r * 5, 0, Math.PI * 2);
+      ctx.fillStyle = grd;
+      ctx.fill();
+    }
+
+    requestAnimationFrame(draw);
+  }
+  draw();
+
+  // Copy-to-clipboard for all code blocks
+  document.querySelectorAll('.content pre').forEach((pre) => {
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.textContent = 'copy';
+    btn.setAttribute('aria-label', 'Copy code');
+    pre.appendChild(btn);
+
+    btn.addEventListener('click', async () => {
+      const code = pre.querySelector('code')?.innerText ?? pre.innerText;
+      try {
+        await navigator.clipboard.writeText(code);
+        btn.textContent = 'copied!';
+        btn.classList.add('copied');
+        setTimeout(() => {
+          btn.textContent = 'copy';
+          btn.classList.remove('copied');
+        }, 2000);
+      } catch {
+        btn.textContent = 'error';
+        setTimeout(() => { btn.textContent = 'copy'; }, 2000);
+      }
+    });
+  });
+
+  // Sidebar active link — smooth scroll highlight
+  const links = document.querySelectorAll('.sidebar-link');
+  links.forEach(link => {
+    link.addEventListener('click', () => {
+      links.forEach(l => l.classList.remove('active'));
+      link.classList.add('active');
+    });
+  });
+
+  // Search shortcut
+  document.getElementById('search-trigger')?.addEventListener('click', () => {
+    document.querySelector<HTMLInputElement>('[data-search]')?.focus();
+  });
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      document.getElementById('search-trigger')?.click();
+    }
+  });
+</script>

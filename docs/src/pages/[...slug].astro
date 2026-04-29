@@ -1,0 +1,58 @@
+---
+import { getCollection } from 'astro:content';
+import DocsLayout from '../layouts/DocsLayout.astro';
+
+export async function getStaticPaths() {
+  const entries = await getCollection('docs');
+  return entries.map(entry => ({
+    params: { slug: entry.slug },
+    props: { entry },
+  }));
+}
+
+const { entry } = Astro.props;
+const { Content, headings } = await entry.render();
+
+// Extract title from frontmatter or first h1 in headings
+const title = entry.data.title || headings.find(h => h.depth === 1)?.text || entry.slug;
+const description = entry.data.description || '';
+
+// Build breadcrumb from slug
+const parts = entry.slug.split('/');
+---
+
+<DocsLayout title={title} description={description} currentSlug={entry.slug}>
+  <!-- Breadcrumb -->
+  <nav class="breadcrumb" aria-label="Breadcrumb">
+    <a href={`${import.meta.env.BASE_URL}`}>docs</a>
+    {parts.slice(0, -1).map(part => (
+      <>
+        <span class="bc-sep">/</span>
+        <span>{part}</span>
+      </>
+    ))}
+    {parts.length > 1 && (
+      <>
+        <span class="bc-sep">/</span>
+        <span>{parts[parts.length - 1]}</span>
+      </>
+    )}
+  </nav>
+
+  <Content />
+</DocsLayout>
+
+<style is:global>
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 2rem;
+    font-size: 0.78rem;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .breadcrumb a { color: var(--text-dim); text-decoration: none; transition: color 0.12s; }
+  .breadcrumb a:hover { color: var(--biolum); }
+  .bc-sep { opacity: 0.4; }
+</style>
