@@ -213,15 +213,16 @@ pub async fn handle_push(
         }
 
         if wh.infra {
-            info!("Webhook: infra push detected, spawning git pull + deploy all");
-            let state_clone = Arc::clone(&state);
-            tokio::spawn(async move {
-                match handle_infra_deploy(&state_clone).await {
-                    Ok(count) => info!("Infra deploy complete: {count} services"),
-                    Err(e) => error!("Webhook: infra deploy failed: {e}"),
+            info!("Webhook: infra push detected, running git pull + deploy all");
+            match handle_infra_deploy(&state).await {
+                Ok(count) => {
+                    deployed.push(format!("infra ({count} services)"));
                 }
-            });
-            deployed.push("infra (deploying)".to_string());
+                Err(e) => {
+                    error!("Webhook: infra deploy failed: {e}");
+                    errors.push(format!("infra: {e}"));
+                }
+            }
             continue;
         }
 
