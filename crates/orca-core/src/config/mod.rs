@@ -53,6 +53,14 @@ impl ClusterConfig {
         if let Some(net) = &mut self.network {
             resolve(&mut net.setup_key);
         }
+        // Named API tokens
+        for token in &mut self.token {
+            let mut v = Some(token.value.clone());
+            resolve(&mut v);
+            if let Some(resolved) = v {
+                token.value = resolved;
+            }
+        }
     }
 }
 
