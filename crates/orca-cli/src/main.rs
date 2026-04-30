@@ -26,6 +26,10 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // rustls 0.23 requires an explicit provider when multiple crypto crates are
+    // in the dependency graph (ring via reqwest + aws-lc-rs via orca-proxy).
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     let cli = Cli::parse();
 
     // Set up structured logging — console + optional file output for crash analysis.
