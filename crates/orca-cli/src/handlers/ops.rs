@@ -3,26 +3,28 @@ use std::path::PathBuf;
 use crate::client::OrcaClient;
 use crate::commands::{AlertsAction, SecretsAction, WebhookAction};
 
-/// Find the orca project directory by walking up from CWD looking for
-/// `cluster.toml` or `services/`. Falls back to `~/.orca/` then CWD.
-pub fn find_orca_dir() -> Option<PathBuf> {
-    // Walk up from CWD
-    if let Ok(mut dir) = std::env::current_dir() {
-        loop {
-            if dir.join("cluster.toml").exists() || dir.join("services").is_dir() {
-                return Some(dir);
-            }
-            if !dir.pop() {
-                break;
-            }
+/// Find the orca project directory by walking up from `base` looking for
+/// `cluster.toml` or `services/`. Falls back to `~/.orca/`.
+pub fn find_orca_dir_from(base: &std::path::Path) -> Option<PathBuf> {
+    let mut dir = base.to_path_buf();
+    loop {
+        if dir.join("cluster.toml").exists() || dir.join("services").is_dir() {
+            return Some(dir);
+        }
+        if !dir.pop() {
+            break;
         }
     }
-    // Fall back to ~/.orca
     let home_orca = dirs_next::home_dir()?.join("orca");
     if home_orca.join("cluster.toml").exists() {
         return Some(home_orca);
     }
     None
+}
+
+/// Find the orca project directory starting from the current working directory.
+pub fn find_orca_dir() -> Option<PathBuf> {
+    find_orca_dir_from(&std::env::current_dir().ok()?)
 }
 
 /// Resolve the API URL: on agent nodes, fall back to the saved leader URL
@@ -329,45 +331,30 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("cluster.toml"),
-            "[cluster]\nname = \"test\"\n",
+            "[cluster]\nname=\"test\"\n",
         )
         .unwrap();
         let sub = dir.path().join("a").join("b");
         std::fs::create_dir_all(&sub).unwrap();
-
-        // Change CWD into the nested dir — find_orca_dir walks up.
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&sub).unwrap();
-        let result = find_orca_dir();
-        std::env::set_current_dir(&prev).unwrap();
-
-        assert_eq!(result, Some(dir.path().to_path_buf()));
+        assert_eq!(find_orca_dir_from(&sub), Some(dir.path().to_path_buf()));
     }
 
     #[test]
     fn find_orca_dir_finds_services_dir() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("services")).unwrap();
-
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
-        let result = find_orca_dir();
-        std::env::set_current_dir(&prev).unwrap();
-
-        assert_eq!(result, Some(dir.path().to_path_buf()));
+        assert_eq!(
+            find_orca_dir_from(dir.path()),
+            Some(dir.path().to_path_buf())
+        );
     }
 
     #[test]
     fn find_orca_dir_returns_none_when_nothing_found() {
         let dir = tempfile::tempdir().unwrap();
-        // Empty dir — no cluster.toml, no services/
-        let prev = std::env::current_dir().unwrap();
-        std::env::set_current_dir(dir.path()).unwrap();
-        let result = find_orca_dir();
-        std::env::set_current_dir(&prev).unwrap();
-
-        // It might find ~/.orca/cluster.toml on the host, so we can only
-        // assert it does NOT equal the tempdir (which has neither marker).
-        assert_ne!(result, Some(dir.path().to_path_buf()));
+        assert_ne!(
+            find_orca_dir_from(dir.path()),
+            Some(dir.path().to_path_buf())
+        );
     }
 }
