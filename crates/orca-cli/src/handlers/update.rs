@@ -148,17 +148,45 @@ fn current_version() -> &'static str {
     }
 }
 
+/// Split `"0.2.5-rc.7"` into `("0.2.5", Some("rc.7"))`.
+fn split_prerelease(v: &str) -> (&str, Option<&str>) {
+    match v.find('-') {
+        Some(pos) => (&v[..pos], Some(&v[pos + 1..])),
+        None => (v, None),
+    }
+}
+
 /// Simple semver comparison: returns true if `latest` is newer than `current`.
+///
+/// Handles pre-release suffixes correctly: `0.2.5` > `0.2.5-rc.7` because a
+/// stable release always supersedes any RC of the same base version.
 fn is_newer(latest: &str, current: &str) -> bool {
-    let parse = |s: &str| -> Vec<u64> {
-        s.split(|c: char| !c.is_ascii_digit())
-            .filter(|p| !p.is_empty())
-            .filter_map(|p| p.parse().ok())
-            .collect()
-    };
-    let l = parse(latest);
-    let c = parse(current);
-    l > c
+    let parse_base =
+        |s: &str| -> Vec<u64> { s.split('.').filter_map(|p| p.parse().ok()).collect() };
+
+    let (l_base, l_pre) = split_prerelease(latest);
+    let (c_base, c_pre) = split_prerelease(current);
+    let l_nums = parse_base(l_base);
+    let c_nums = parse_base(c_base);
+
+    if l_nums != c_nums {
+        return l_nums > c_nums;
+    }
+    // Same base version: stable beats any RC; higher RC beats lower RC.
+    match (l_pre, c_pre) {
+        (None, None) => false,
+        (None, Some(_)) => true,
+        (Some(_), None) => false,
+        (Some(l), Some(c)) => {
+            let rc_num = |s: &str| -> u64 {
+                s.split('.')
+                    .next_back()
+                    .and_then(|p| p.parse().ok())
+                    .unwrap_or(0)
+            };
+            rc_num(l) > rc_num(c)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -192,6 +220,13 @@ mod tests {
     fn test_version_newer_detected() {
         // Full release is newer than release candidate
         assert!(is_newer("0.2.0", "0.1.0-rc.4"));
+    }
+
+    #[test]
+    fn stable_beats_rc_of_same_version() {
+        // The bug: 0.2.5 must be considered newer than 0.2.5-rc.7
+        assert!(is_newer("0.2.5", "0.2.5-rc.7"));
+        assert!(!is_newer("0.2.5-rc.7", "0.2.5"));
     }
 
     #[test]
