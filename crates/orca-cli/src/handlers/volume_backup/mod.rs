@@ -97,33 +97,19 @@ fn upload_volumes_to_s3(
         .and_then(|n| n.to_str())
         .unwrap_or("unknown");
 
-    println!("Uploading to {} S3 target(s) ...", s3_targets.len());
-    let mut uploaded = 0u32;
-    let mut failed = 0u32;
-
     for vol in volumes {
         let local_path = std::path::Path::new(backup_dir).join(format!("{vol}.tar.gz"));
         if !local_path.exists() {
-            println!("  {vol} ... skipped (no tarball)");
             continue;
         }
         let s3_name = format!("{vol}_{epoch}.tar.gz");
         for target in &s3_targets {
-            print!("  {vol} → S3 ... ");
             match orca_core::backup::s3::upload(&local_path, target, &s3_name) {
-                Ok(()) => {
-                    println!("done");
-                    uploaded += 1;
-                }
-                Err(e) => {
-                    println!("FAILED: {e}");
-                    failed += 1;
-                }
+                Ok(()) => tracing::info!("Uploaded {vol} to S3"),
+                Err(e) => tracing::error!("S3 upload failed for {vol}: {e}"),
             }
         }
     }
-
-    println!("S3 upload complete: {uploaded} uploaded, {failed} failed.");
 }
 
 fn load_service_hooks() -> std::collections::HashMap<String, String> {
