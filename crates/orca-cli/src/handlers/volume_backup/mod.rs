@@ -241,7 +241,11 @@ mod tests {
                 path: "/tmp/backups".into(),
             }],
         };
-        upload_volumes_to_s3(&config, &["orca-myapp".to_string()], "/tmp/.orca/backups/1000");
+        upload_volumes_to_s3(
+            &config,
+            &["orca-myapp".to_string()],
+            "/tmp/.orca/backups/1000",
+        );
     }
 
     /// Missing local tarball → upload_volumes_to_s3 skips that volume without panicking.

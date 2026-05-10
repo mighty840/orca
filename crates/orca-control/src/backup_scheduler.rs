@@ -292,13 +292,21 @@ mod tests {
             .unwrap()
             .filter_map(|e| e.ok())
             .collect();
-        assert_eq!(backups.len(), 2, "only cluster.db and secrets.json should be backed up");
+        assert_eq!(
+            backups.len(),
+            2,
+            "only cluster.db and secrets.json should be backed up"
+        );
         assert!(
-            backups.iter().any(|e| e.file_name().to_str().unwrap().starts_with("cluster-db")),
+            backups
+                .iter()
+                .any(|e| e.file_name().to_str().unwrap().starts_with("cluster-db")),
             "cluster-db backup must be present"
         );
         assert!(
-            backups.iter().any(|e| e.file_name().to_str().unwrap().starts_with("secrets")),
+            backups
+                .iter()
+                .any(|e| e.file_name().to_str().unwrap().starts_with("secrets")),
             "secrets backup must be present"
         );
     }
