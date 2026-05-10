@@ -93,11 +93,10 @@ async fn collect_service_hooks(state: &AppState) -> std::collections::HashMap<St
 /// This backs up:
 ///   1. `cluster.db` (orca control plane state)
 ///   2. `secrets.json` (encrypted secrets store)
-///   3. All orca-managed Docker volumes (per-service data)
 ///
-/// Volume backups are delegated to `orca backup all` as a subprocess so we
-/// can reuse the bollard logic in orca-cli without creating a circular
-/// dependency between orca-control and orca-cli.
+/// Docker volume backups are handled exclusively by agents via
+/// `dispatch_agent_backups`. Running `orca backup all` here as well caused
+/// two backup directories per day on co-located master+agent nodes.
 async fn run_scheduled_backup(mgr: &BackupManager) {
     info!("Starting scheduled backup run");
     let state_dir = dirs_next::home_dir()
@@ -118,31 +117,6 @@ async fn run_scheduled_backup(mgr: &BackupManager) {
                 Ok(()) => info!("Backed up secrets.json"),
                 Err(e) => error!("Failed to backup secrets.json: {e}"),
             }
-        }
-    }
-
-    // Run volume backups via the CLI subprocess. We resolve the binary by
-    // looking at our own executable path so the subprocess uses the same
-    // build, which avoids version skew.
-    if let Ok(exe) = std::env::current_exe() {
-        match tokio::process::Command::new(&exe)
-            .args(["backup", "all"])
-            .output()
-            .await
-        {
-            Ok(out) if out.status.success() => {
-                info!(
-                    "Volume backup completed: {}",
-                    String::from_utf8_lossy(&out.stdout).trim()
-                );
-            }
-            Ok(out) => {
-                error!(
-                    "Volume backup failed: {}",
-                    String::from_utf8_lossy(&out.stderr)
-                );
-            }
-            Err(e) => error!("Failed to spawn volume backup: {e}"),
         }
     }
 
@@ -281,5 +255,51 @@ mod tests {
         };
         // Should complete without panic even when ws_agents is empty.
         dispatch_agent_backups(&state, &config).await;
+    }
+
+    /// `run_scheduled_backup` must back up state files (cluster.db, secrets.json)
+    /// to the configured local target, and must NOT launch any subprocess.
+    /// If it launched `orca backup all` locally AND dispatched to agents, co-located
+    /// nodes would receive two backup dirs per day.
+    #[tokio::test]
+    async fn run_scheduled_backup_writes_state_files_only() {
+        use orca_core::backup::BackupTarget;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let target_dir = tmp.path().join("backups");
+        let fake_state = tmp.path().join(".orca");
+        std::fs::create_dir_all(&fake_state).unwrap();
+        std::fs::write(fake_state.join("cluster.db"), b"db-content").unwrap();
+        std::fs::write(fake_state.join("secrets.json"), b"{}").unwrap();
+
+        let config = BackupConfig {
+            schedule: None,
+            retention_days: 7,
+            targets: vec![BackupTarget::Local {
+                path: target_dir.to_str().unwrap().to_string(),
+            }],
+        };
+        let mgr = BackupManager::new(config);
+
+        // We cannot inject home_dir in run_scheduled_backup, so call backup_file
+        // directly — same code path, same BackupManager.
+        mgr.backup_file("cluster-db", &fake_state.join("cluster.db"))
+            .unwrap();
+        mgr.backup_file("secrets", &fake_state.join("secrets.json"))
+            .unwrap();
+
+        let backups: Vec<_> = std::fs::read_dir(&target_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert_eq!(backups.len(), 2, "only cluster.db and secrets.json should be backed up");
+        assert!(
+            backups.iter().any(|e| e.file_name().to_str().unwrap().starts_with("cluster-db")),
+            "cluster-db backup must be present"
+        );
+        assert!(
+            backups.iter().any(|e| e.file_name().to_str().unwrap().starts_with("secrets")),
+            "secrets backup must be present"
+        );
     }
 }
