@@ -408,6 +408,20 @@ secret_key = "${secrets.HETZNER_S3_SECRET_KEY}"
 
 Hetzner Object Storage works as a drop-in S3 target — just point `endpoint` at the region-specific hostname and set `region` to match. Same pattern works for Backblaze B2, MinIO, Wasabi, etc.
 
+::: info Prerequisite: rclone required for S3 targets
+S3 uploads and downloads use [`rclone`](https://rclone.org) under the hood. Install it on **every node** (master and all agents) before enabling an S3 target:
+
+```bash
+# Debian/Ubuntu
+sudo apt install rclone
+
+# Or from rclone.org
+curl https://rclone.org/install.sh | sudo bash
+```
+
+No rclone configuration file is needed — credentials are passed as CLI flags on each invocation. Local-only targets work without rclone.
+:::
+
 ### Per-service pre_hook for database dumps
 
 For Postgres-backed services, add a pre-hook that writes a dump into a location that gets snapshotted:
@@ -426,12 +440,6 @@ grep "Backup scheduler started" ~/.orca/orca.log
 ```
 
 If you don't see that line, either `[backup]` is missing from `cluster.toml`, `enabled = false`, or the cron expression failed to parse (remember: six fields, including seconds).
-
-::: warning Pitfall: manual `orca backup all` is broken right now
-There's a known issue with `orca backup all` (the on-demand manual backup command): it nests tokio runtimes and panics. This is being fixed.
-
-Scheduled backups (triggered by the in-process cron) work fine — the bug is only in the CLI path. If you need an ad-hoc backup before the bug is fixed, wait until the next scheduled run or invoke the backup via the REST API.
-:::
 
 ## 7. Health checks for slow-starting services
 
@@ -595,7 +603,7 @@ A skimmable list of every pitfall covered above:
 - **Agent nodes need `--leader` for systemd.** Use `orca install-service --leader <ip>:6880` on joined nodes — this creates `orca-agent.service` with the join command.
 - **`orca update` auto-restores setcap** via `sudo -n setcap`. If passwordless sudo isn't configured, run `sudo setcap` manually or use systemd (which doesn't need it).
 - **Webhooks are persisted** to `~/.orca/webhooks.json` as of v0.2.2. No need to re-register after restarts.
-- **`orca backup all` has a tokio nesting bug.** Use scheduled backups until it's fixed.
+- **S3 backup targets require `rclone` on every node.** `apt install rclone` (or from rclone.org) on master and all agents. No config file needed.
 - **Pre-pull your registry image** before the first boot if your registry is managed by orca. Otherwise bootstrap deadlock.
 - **Slow-starting services need `initial_delay_secs`.** Keycloak: 120s. Don't skimp.
 - **Keycloak's `/health/ready` is on port 9000, not 8080.** Use `/realms/master` on 8080 for liveness.

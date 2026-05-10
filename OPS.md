@@ -15,7 +15,7 @@ orca stop <service>            # Stop one service
 orca promote <service>         # Promote canary to stable
 orca tui                       # Terminal dashboard
 orca update                    # Self-update binary
-orca backup all                # Backup all volumes
+orca backup all                # Backup all volumes (S3 targets require rclone on PATH)
 orca token create --name ci --role deployer  # Create service account
 orca token list                # List API tokens
 ```
