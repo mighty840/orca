@@ -42,6 +42,10 @@ pub(super) async fn run_agent_backup(
         }
     };
 
+    // Cache the config so `orca backup all` run manually on this node picks
+    // up S3 targets without needing the env var.
+    cache_backup_config(&config_json);
+
     let hooks_json = serde_json::to_string(&service_hooks).unwrap_or_default();
     match tokio::process::Command::new(&exe)
         .args(["backup", "all"])
@@ -81,6 +85,17 @@ pub(super) async fn run_agent_backup(
                 })
                 .await;
         }
+    }
+}
+
+fn cache_backup_config(json: &str) {
+    let Some(home) = dirs_next::home_dir() else {
+        return;
+    };
+    let dir = home.join(".orca");
+    let path = dir.join("backup_config.json");
+    if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, json)) {
+        tracing::warn!("Failed to cache backup config: {e}");
     }
 }
 

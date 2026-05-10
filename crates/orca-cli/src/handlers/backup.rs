@@ -31,24 +31,37 @@ pub async fn handle_backup(action: BackupAction) {
 }
 
 pub(crate) fn load_backup_config() -> BackupConfig {
-    // When dispatched from an agent BackupRequest, master passes the resolved
-    // config as JSON so the agent subprocess picks up S3 credentials directly.
+    // 1. Master-dispatched agent run: full config passed as JSON env var.
     if let Ok(json) = std::env::var("ORCA_BACKUP_CONFIG_JSON")
         && let Ok(cfg) = serde_json::from_str::<BackupConfig>(&json)
     {
         return cfg;
     }
+    // 2. Master node: read cluster.toml from cwd (orca's working directory).
     let config = std::path::Path::new("cluster.toml");
     if config.exists() {
         match orca_core::config::ClusterConfig::load(config) {
-            Ok(cc) => cc.backup.unwrap_or_else(default_backup_config),
-            Err(e) => {
-                tracing::warn!("Failed to load cluster.toml: {e}");
-                default_backup_config()
-            }
+            Ok(cc) => return cc.backup.unwrap_or_else(default_backup_config),
+            Err(e) => tracing::warn!("Failed to load cluster.toml: {e}"),
         }
-    } else {
-        default_backup_config()
+    }
+    // 3. Agent node manual run: use the config cached by the agent daemon the
+    //    last time master dispatched a BackupRequest.
+    if let Some(cached) = load_cached_agent_config() {
+        return cached;
+    }
+    default_backup_config()
+}
+
+fn load_cached_agent_config() -> Option<BackupConfig> {
+    let path = dirs_next::home_dir()?.join(".orca/backup_config.json");
+    let json = std::fs::read_to_string(&path).ok()?;
+    match serde_json::from_str::<BackupConfig>(&json) {
+        Ok(cfg) => Some(cfg),
+        Err(e) => {
+            tracing::warn!("Failed to parse cached backup config: {e}");
+            None
+        }
     }
 }
 
