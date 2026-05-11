@@ -37,12 +37,22 @@ pub(crate) fn load_backup_config() -> BackupConfig {
     {
         return cfg;
     }
-    // 2. Master node: read cluster.toml from cwd (orca's working directory).
-    let config = std::path::Path::new("cluster.toml");
-    if config.exists() {
-        match orca_core::config::ClusterConfig::load(config) {
-            Ok(cc) => return cc.backup.unwrap_or_else(default_backup_config),
-            Err(e) => tracing::warn!("Failed to load cluster.toml: {e}"),
+    // 2. Master node: search for cluster.toml in cwd, ~/orca, and ~/.orca.
+    let mut candidates = vec![
+        std::path::PathBuf::from("cluster.toml"),
+        std::path::PathBuf::from("/etc/orca/cluster.toml"),
+    ];
+    if let Some(home) = dirs_next::home_dir() {
+        candidates.push(home.join("orca/cluster.toml"));
+        candidates.push(home.join(".orca/cluster.toml"));
+    }
+    for candidate in &candidates {
+        if candidate.exists() {
+            match orca_core::config::ClusterConfig::load(candidate) {
+                Ok(cc) => return cc.backup.unwrap_or_else(default_backup_config),
+                Err(e) => tracing::warn!("Failed to load {}: {e}", candidate.display()),
+            }
+            break;
         }
     }
     // 3. Agent node manual run: use the config cached by the agent daemon the
