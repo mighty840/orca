@@ -79,21 +79,61 @@ fn load_cached_agent_config() -> Option<BackupConfig> {
 }
 
 fn handle_basic(mgr: &BackupManager) {
-    let files = ["secrets.json", "cluster.toml", "services.toml"];
     let date = chrono::Utc::now().format("%Y-%m-%d");
     let prefix = format!("master/{date}");
+    let home = dirs_next::home_dir();
+
+    // Each entry: (backup name, candidate paths in priority order)
+    let mut candidates: Vec<(&str, Vec<std::path::PathBuf>)> = Vec::new();
+
+    // cluster.db lives exclusively at ~/.orca/cluster.db
+    if let Some(ref h) = home {
+        candidates.push(("cluster-db", vec![h.join(".orca/cluster.db")]));
+    }
+
+    // secrets.json: ~/.orca/secrets.json, then ./secrets.json
+    {
+        let mut paths = Vec::new();
+        if let Some(ref h) = home {
+            paths.push(h.join(".orca/secrets.json"));
+        }
+        paths.push(std::path::PathBuf::from("secrets.json"));
+        candidates.push(("secrets", paths));
+    }
+
+    // cluster.toml: ~/orca/cluster.toml, ~/.orca/cluster.toml, ./cluster.toml
+    {
+        let mut paths = Vec::new();
+        if let Some(ref h) = home {
+            paths.push(h.join("orca/cluster.toml"));
+            paths.push(h.join(".orca/cluster.toml"));
+        }
+        paths.push(std::path::PathBuf::from("cluster.toml"));
+        candidates.push(("cluster", paths));
+    }
+
+    // services.toml: ~/orca/services.toml, ./services.toml
+    {
+        let mut paths = Vec::new();
+        if let Some(ref h) = home {
+            paths.push(h.join("orca/services.toml"));
+        }
+        paths.push(std::path::PathBuf::from("services.toml"));
+        candidates.push(("services", paths));
+    }
+
     let mut count = 0u32;
-    for file in &files {
-        let path = std::path::Path::new(file);
-        if path.exists() {
-            let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or(file);
-            match mgr.backup_file(name, path, &prefix) {
+    for (name, paths) in &candidates {
+        let found = paths.iter().find(|p| p.exists());
+        match found {
+            Some(path) => match mgr.backup_file(name, path, &prefix) {
                 Ok(()) => {
-                    println!("Backed up: {file}");
+                    println!("Backed up: {}", path.display());
                     count += 1;
                 }
-                Err(e) => tracing::error!("Failed to backup {file}: {e}"),
-            }
+                Err(e) => tracing::error!("Failed to backup {name}: {e}"),
+            },
+            None => tracing::debug!("Skipping {name}: not found in any candidate path"),
         }
     }
     if count == 0 {
