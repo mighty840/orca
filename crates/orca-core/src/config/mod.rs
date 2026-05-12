@@ -61,6 +61,20 @@ impl ClusterConfig {
                 token.value = resolved;
             }
         }
+        // Backup S3 credentials
+        if let Some(backup) = &mut self.backup {
+            for target in &mut backup.targets {
+                if let BackupTarget::S3 {
+                    access_key,
+                    secret_key,
+                    ..
+                } = target
+                {
+                    resolve(access_key);
+                    resolve(secret_key);
+                }
+            }
+        }
     }
 }
 

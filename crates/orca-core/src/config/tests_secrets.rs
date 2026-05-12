@@ -97,3 +97,56 @@ endpoint = "http://localhost:11434"
     assert_eq!(ai.endpoint.as_deref(), Some("http://localhost:11434"));
     assert_eq!(ai.provider, "ollama");
 }
+
+#[test]
+fn resolve_secrets_resolves_backup_s3_credentials() {
+    let _lock = HOME_LOCK.lock().unwrap();
+    let dir = tempfile::tempdir().unwrap();
+
+    let prev_home = std::env::var("HOME").ok();
+    unsafe { set_home(dir.path()) };
+
+    let secrets_path = crate::secrets::default_path();
+    let mut store = crate::secrets::SecretStore::open(&secrets_path).unwrap();
+    store.set("S3_ACCESS_KEY", "AKID123").unwrap();
+    store.set("S3_SECRET_KEY", "SECRET456").unwrap();
+    drop(store);
+
+    let toml_path = dir.path().join("cluster.toml");
+    std::fs::write(
+        &toml_path,
+        r#"
+[cluster]
+name = "test"
+
+[backup]
+schedule = "0 0 3 * * *"
+retention_days = 14
+
+[[backup.targets]]
+type = "s3"
+bucket = "my-bucket"
+region = "us-east-1"
+access_key = "${secrets.S3_ACCESS_KEY}"
+secret_key = "${secrets.S3_SECRET_KEY}"
+"#,
+    )
+    .unwrap();
+
+    let config = ClusterConfig::load(&toml_path).unwrap();
+
+    unsafe { restore_home(prev_home) };
+
+    let backup = config.backup.unwrap();
+    match &backup.targets[0] {
+        BackupTarget::S3 {
+            access_key,
+            secret_key,
+            ..
+        } => {
+            assert_eq!(access_key.as_deref(), Some("AKID123"));
+            assert_eq!(secret_key.as_deref(), Some("SECRET456"));
+        }
+        _ => panic!("expected S3 target"),
+    }
+}

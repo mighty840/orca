@@ -87,12 +87,22 @@ impl BackupManager {
     }
 
     /// Backup a single file to all targets.
+    ///
+    /// Failures on individual targets are logged and skipped so a broken S3
+    /// config never prevents the local backup from being written.
     pub fn backup_file(&self, name: &str, path: &Path) -> Result<()> {
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("bak");
         let backup_name = format!("{name}_{timestamp}.{ext}");
+        let mut any_ok = false;
         for t in &self.config.targets {
-            self.store(path, t, &backup_name)?;
+            match self.store(path, t, &backup_name) {
+                Ok(_) => any_ok = true,
+                Err(e) => warn!("backup target failed for {name}: {e}"),
+            }
+        }
+        if !any_ok && !self.config.targets.is_empty() {
+            anyhow::bail!("all backup targets failed for {name}");
         }
         Ok(())
     }
