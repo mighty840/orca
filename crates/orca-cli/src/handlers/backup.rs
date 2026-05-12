@@ -81,7 +81,8 @@ fn handle_create(mgr: &BackupManager) {
     for file in &files {
         let path = std::path::Path::new(file);
         if path.exists() {
-            match mgr.backup_file(file, path) {
+            let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or(file);
+            match mgr.backup_file(name, path) {
                 Ok(()) => {
                     println!("Backed up: {file}");
                     count += 1;
