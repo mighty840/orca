@@ -166,7 +166,7 @@ Backup volumes and configs.
 ```bash
 orca backup all           # Volumes + config files (secrets.json, cluster.toml)
 orca backup basic         # Config files only
-orca backup restore-basic # Restore latest secrets.json / cluster.toml / services.toml
+orca backup restore-basic # Restore latest secrets.json / cluster.toml from local backup
 orca backup list          # List backups
 ```
 

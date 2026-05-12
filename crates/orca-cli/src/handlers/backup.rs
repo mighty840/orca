@@ -112,16 +112,6 @@ fn handle_basic(mgr: &BackupManager) {
         candidates.push(("cluster", paths));
     }
 
-    // services.toml: ~/orca/services.toml, ./services.toml
-    {
-        let mut paths = Vec::new();
-        if let Some(ref h) = home {
-            paths.push(h.join("orca/services.toml"));
-        }
-        paths.push(std::path::PathBuf::from("services.toml"));
-        candidates.push(("services", paths));
-    }
-
     let mut count = 0u32;
     for (name, paths) in &candidates {
         let found = paths.iter().find(|p| p.exists());
@@ -178,7 +168,6 @@ fn restore_target(filename: &str) -> Option<String> {
     match (name, ext) {
         ("secrets", "json") => Some("secrets.json".to_string()),
         ("cluster", "toml") => Some("cluster.toml".to_string()),
-        ("services", "toml") => Some("services.toml".to_string()),
         (_, "tar.gz" | "tgz") => None, // volume backups handled separately
         (n, e) => Some(format!("{n}.{e}")),
     }
@@ -290,7 +279,6 @@ fn restore_basic(config: &BackupConfig) {
     let targets = [
         ("secrets", "secrets.json"),
         ("cluster", "cluster.toml"),
-        ("services", "services.toml"),
     ];
     let mut restored = 0u32;
     for (prefix, dest) in &targets {

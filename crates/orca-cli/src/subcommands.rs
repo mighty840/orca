@@ -59,15 +59,15 @@ pub enum ImportSource {
 
 #[derive(Subcommand)]
 pub enum BackupAction {
-    /// Backup volumes + config files (secrets.json, cluster.toml, services.toml)
+    /// Backup volumes + config files (secrets.json, cluster.toml, cluster.db)
     All,
-    /// Backup config files only (secrets.json, cluster.toml, services.toml)
+    /// Backup config files only (secrets.json, cluster.toml, cluster.db)
     Basic,
     List,
     Restore {
         id: String,
     },
-    /// Restore config files (secrets.json, cluster.toml, services.toml) from latest backup
+    /// Restore config files (secrets.json, cluster.toml) from latest backup
     RestoreBasic,
     /// Restore a Docker volume from the latest backup
     RestoreVolume {
