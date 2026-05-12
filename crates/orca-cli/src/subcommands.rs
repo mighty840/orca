@@ -59,13 +59,16 @@ pub enum ImportSource {
 
 #[derive(Subcommand)]
 pub enum BackupAction {
-    Create,
+    /// Backup volumes + config files (secrets.json, cluster.toml, services.toml)
+    All,
+    /// Backup config files only (secrets.json, cluster.toml, services.toml)
+    Basic,
     List,
     Restore {
         id: String,
     },
-    /// Backup all orca Docker volumes
-    All,
+    /// Restore config files (secrets.json, cluster.toml, services.toml) from latest backup
+    RestoreBasic,
     /// Restore a Docker volume from the latest backup
     RestoreVolume {
         volume_name: String,

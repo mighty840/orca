@@ -164,9 +164,10 @@ orca secrets import -f .env
 Backup volumes and configs.
 
 ```bash
-orca backup create
-orca backup all          # Backup everything
-orca backup list         # List backups
+orca backup all           # Volumes + config files (secrets.json, cluster.toml)
+orca backup basic         # Config files only
+orca backup restore-basic # Restore latest secrets.json / cluster.toml / services.toml
+orca backup list          # List backups
 ```
 
 ### `orca cleanup`

@@ -10,6 +10,8 @@ pub async fn handle_backup(action: BackupAction) {
     match &action {
         BackupAction::All => {
             volume_backup::backup_all_volumes().await;
+            let backup_cfg = load_backup_config();
+            handle_basic(&BackupManager::new(backup_cfg));
             return;
         }
         BackupAction::RestoreVolume { volume_name } => {
@@ -23,9 +25,10 @@ pub async fn handle_backup(action: BackupAction) {
     let mgr = BackupManager::new(backup_cfg.clone());
 
     match action {
-        BackupAction::Create => handle_create(&mgr),
+        BackupAction::Basic => handle_basic(&mgr),
         BackupAction::List => handle_list(&mgr, &backup_cfg),
         BackupAction::Restore { id } => restore_backup(&mgr, &backup_cfg, &id),
+        BackupAction::RestoreBasic => restore_basic(&backup_cfg),
         BackupAction::All | BackupAction::RestoreVolume { .. } => unreachable!(),
     }
 }
@@ -75,7 +78,7 @@ fn load_cached_agent_config() -> Option<BackupConfig> {
     }
 }
 
-fn handle_create(mgr: &BackupManager) {
+fn handle_basic(mgr: &BackupManager) {
     let files = ["secrets.json", "cluster.toml", "services.toml"];
     let date = chrono::Utc::now().format("%Y-%m-%d");
     let prefix = format!("master/{date}");
@@ -224,6 +227,62 @@ fn restore_backup(mgr: &BackupManager, config: &BackupConfig, id: &str) {
                 return;
             }
         }
+    }
+}
+
+/// Restore the latest backup of each config file from the first local target.
+fn restore_basic(config: &BackupConfig) {
+    let local_path = config.targets.iter().find_map(|t| match t {
+        BackupTarget::Local { path } => Some(path.clone()),
+        _ => None,
+    });
+    let Some(path) = local_path else {
+        println!("No local backup target configured.");
+        return;
+    };
+    let dir = std::path::Path::new(&path);
+    if !dir.exists() {
+        println!("Backup directory does not exist: {path}");
+        return;
+    }
+
+    // For each config file, find the most recent backup by filename sort.
+    let targets = [
+        ("secrets", "secrets.json"),
+        ("cluster", "cluster.toml"),
+        ("services", "services.toml"),
+    ];
+    let mut restored = 0u32;
+    for (prefix, dest) in &targets {
+        let latest = std::fs::read_dir(dir).ok().and_then(|entries| {
+            let mut matches: Vec<_> = entries
+                .flatten()
+                .filter(|e| {
+                    e.file_name()
+                        .to_str()
+                        .map(|n| n.starts_with(prefix) && n.contains('_'))
+                        .unwrap_or(false)
+                })
+                .collect();
+            matches.sort_by_key(|e| e.file_name());
+            matches.into_iter().next_back()
+        });
+        let Some(entry) = latest else {
+            println!("No backup found for {dest}");
+            continue;
+        };
+        match std::fs::copy(entry.path(), dest) {
+            Ok(_) => {
+                println!("Restored {} -> {dest}", entry.file_name().to_string_lossy());
+                restored += 1;
+            }
+            Err(e) => tracing::error!("Failed to restore {dest}: {e}"),
+        }
+    }
+    if restored == 0 {
+        println!("No config files restored.");
+    } else {
+        println!("Restored {restored} file(s).");
     }
 }
 
