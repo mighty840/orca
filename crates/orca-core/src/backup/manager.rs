@@ -88,15 +88,28 @@ impl BackupManager {
 
     /// Backup a single file to all targets.
     ///
+    /// `s3_prefix` is prepended to the S3 object key so backups land in a
+    /// structured path (e.g. `"master/2026-05-12"`). Local targets always
+    /// use a flat filename regardless of the prefix.
+    ///
     /// Failures on individual targets are logged and skipped so a broken S3
     /// config never prevents the local backup from being written.
-    pub fn backup_file(&self, name: &str, path: &Path) -> Result<()> {
+    pub fn backup_file(&self, name: &str, path: &Path, s3_prefix: &str) -> Result<()> {
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("bak");
-        let backup_name = format!("{name}_{timestamp}.{ext}");
+        let local_name = format!("{name}_{timestamp}.{ext}");
+        let s3_name = if s3_prefix.is_empty() {
+            local_name.clone()
+        } else {
+            format!("{s3_prefix}/{local_name}")
+        };
         let mut any_ok = false;
         for t in &self.config.targets {
-            match self.store(path, t, &backup_name) {
+            let key = match t {
+                BackupTarget::S3 { .. } => s3_name.as_str(),
+                BackupTarget::Local { .. } => &local_name,
+            };
+            match self.store(path, t, key) {
                 Ok(_) => any_ok = true,
                 Err(e) => warn!("backup target failed for {name}: {e}"),
             }
@@ -194,7 +207,7 @@ mod tests {
         let mgr = BackupManager::new(config);
         let src = tmp.path().join("test.json");
         std::fs::write(&src, r#"{"key":"value"}"#).unwrap();
-        mgr.backup_file("secrets", &src).unwrap();
+        mgr.backup_file("secrets", &src, "").unwrap();
         let backups = std::fs::read_dir(&target_dir).unwrap().count();
         assert_eq!(backups, 1);
     }

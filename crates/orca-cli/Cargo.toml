@@ -30,6 +30,7 @@ reqwest = { workspace = true }
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
 hostname = "0.4"
 bollard = { workspace = true }
+chrono = { workspace = true }
 dirs-next = "2"
 futures-util = "0.3"
 libc = "0.2"

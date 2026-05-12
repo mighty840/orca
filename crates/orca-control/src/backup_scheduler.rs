@@ -104,16 +104,18 @@ async fn run_scheduled_backup(mgr: &BackupManager) {
         .join(".orca");
 
     if state_dir.exists() {
+        let date = chrono::Utc::now().format("%Y-%m-%d");
+        let prefix = format!("master/{date}");
         let cluster_db = state_dir.join("cluster.db");
         if cluster_db.exists() {
-            match mgr.backup_file("cluster-db", &cluster_db) {
+            match mgr.backup_file("cluster-db", &cluster_db, &prefix) {
                 Ok(()) => info!("Backed up cluster.db"),
                 Err(e) => error!("Failed to backup cluster.db: {e}"),
             }
         }
         let secrets = state_dir.join("secrets.json");
         if secrets.exists() {
-            match mgr.backup_file("secrets", &secrets) {
+            match mgr.backup_file("secrets", &secrets, &prefix) {
                 Ok(()) => info!("Backed up secrets.json"),
                 Err(e) => error!("Failed to backup secrets.json: {e}"),
             }
@@ -283,9 +285,9 @@ mod tests {
 
         // We cannot inject home_dir in run_scheduled_backup, so call backup_file
         // directly — same code path, same BackupManager.
-        mgr.backup_file("cluster-db", &fake_state.join("cluster.db"))
+        mgr.backup_file("cluster-db", &fake_state.join("cluster.db"), "")
             .unwrap();
-        mgr.backup_file("secrets", &fake_state.join("secrets.json"))
+        mgr.backup_file("secrets", &fake_state.join("secrets.json"), "")
             .unwrap();
 
         let backups: Vec<_> = std::fs::read_dir(&target_dir)

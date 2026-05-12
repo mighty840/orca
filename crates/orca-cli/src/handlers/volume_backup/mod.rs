@@ -92,17 +92,15 @@ fn upload_volumes_to_s3(
         return;
     }
 
-    let epoch = std::path::Path::new(backup_dir)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown");
+    let hostname = node_hostname();
+    let date = chrono::Utc::now().format("%Y-%m-%d");
 
     for vol in volumes {
         let local_path = std::path::Path::new(backup_dir).join(format!("{vol}.tar.gz"));
         if !local_path.exists() {
             continue;
         }
-        let s3_name = format!("{vol}_{epoch}.tar.gz");
+        let s3_name = format!("agents/{hostname}/{date}/{vol}.tar.gz");
         for target in &s3_targets {
             match orca_core::backup::s3::upload(&local_path, target, &s3_name) {
                 Ok(()) => tracing::info!("Uploaded {vol} to S3"),
@@ -110,6 +108,13 @@ fn upload_volumes_to_s3(
             }
         }
     }
+}
+
+fn node_hostname() -> String {
+    std::fs::read_to_string("/etc/hostname")
+        .map(|s| s.trim().to_string())
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "unknown".to_string())
 }
 
 fn load_service_hooks() -> std::collections::HashMap<String, String> {

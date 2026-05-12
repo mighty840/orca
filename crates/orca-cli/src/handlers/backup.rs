@@ -77,12 +77,14 @@ fn load_cached_agent_config() -> Option<BackupConfig> {
 
 fn handle_create(mgr: &BackupManager) {
     let files = ["secrets.json", "cluster.toml", "services.toml"];
+    let date = chrono::Utc::now().format("%Y-%m-%d");
+    let prefix = format!("master/{date}");
     let mut count = 0u32;
     for file in &files {
         let path = std::path::Path::new(file);
         if path.exists() {
             let name = path.file_stem().and_then(|s| s.to_str()).unwrap_or(file);
-            match mgr.backup_file(name, path) {
+            match mgr.backup_file(name, path, &prefix) {
                 Ok(()) => {
                     println!("Backed up: {file}");
                     count += 1;
