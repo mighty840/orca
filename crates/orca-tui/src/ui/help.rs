@@ -48,7 +48,11 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
     for (k, d) in [
         ("1", "Services view (grouped by project)"),
         ("2 / n", "Nodes view (CPU/Mem/Disk/Net sparklines)"),
-        ("3", "Secrets view"),
+        ("3", "Secrets view (grouped by inferred scope + ref counts)"),
+        (
+            "↵ on a secret row",
+            "Drill into the list of services referencing that key",
+        ),
         ("4", "Backups view (per-node snapshot status)"),
         (
             "↵ on a backup row",

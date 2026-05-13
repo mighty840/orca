@@ -196,6 +196,41 @@ pub struct TriggerBackupResponse {
     pub master_dispatched: bool,
 }
 
+/// Response from `GET /api/v1/secrets/usage` — aggregates each secret key
+/// with the list of services that reference it. Used by the secrets organizer
+/// view in the TUI.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretsUsageResponse {
+    pub secrets: Vec<SecretUsage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretUsage {
+    pub key: String,
+    /// `Some(scope)` once we parse a `${secrets.<scope>.<KEY>}` reference;
+    /// `None` for the unscoped form. Project-scoped secrets don't yet exist
+    /// (#37 ships read-only against the current flat store), but the field
+    /// is here so a future writer can populate it without a wire change.
+    #[serde(default)]
+    pub scope: Option<String>,
+    /// Services that template this secret somewhere in their env block.
+    /// Empty for orphan keys that exist in the store but aren't referenced.
+    pub refs: Vec<SecretRef>,
+    /// `true` if this key exists in the secrets store. `false` means a
+    /// service template references a key that isn't stored — the dashboard
+    /// highlights these as broken references.
+    pub in_store: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretRef {
+    pub service_name: String,
+    /// Project that owns the referencing service, or `None` if the service
+    /// is not in a project directory.
+    #[serde(default)]
+    pub project: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

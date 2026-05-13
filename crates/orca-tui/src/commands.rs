@@ -32,10 +32,8 @@ pub async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str
         Some("drain") => cmd_drain(state, client, &parts).await,
         Some("undrain") => cmd_undrain(state, client, &parts).await,
         Some("secrets") => {
-            if let Ok(keys) = client.list_secrets().await {
-                state.secret_keys = keys;
-                state.selected_secret = 0;
-            }
+            crate::refresh_secrets_usage(client, state).await;
+            state.selected_secret = 0;
             state.push_view(View::Secrets);
         }
         Some("set") => cmd_secret_set(state, client, &parts).await,
@@ -64,9 +62,7 @@ async fn cmd_secret_set(state: &mut AppState, client: &ApiClient, parts: &[&str]
     match client.set_secret(key, &value).await {
         Ok(()) => {
             state.flash(format!("Secret {key} set"));
-            if let Ok(keys) = client.list_secrets().await {
-                state.secret_keys = keys;
-            }
+            crate::refresh_secrets_usage(client, state).await;
         }
         Err(e) => state.error = Some(format!("Set secret failed: {e}")),
     }
@@ -134,12 +130,13 @@ async fn cmd_secret_rm(state: &mut AppState, client: &ApiClient, parts: &[&str])
     match client.remove_secret(key).await {
         Ok(()) => {
             state.flash(format!("Secret {key} removed"));
-            if let Ok(keys) = client.list_secrets().await {
-                state.secret_keys = keys;
-                if state.selected_secret >= state.secret_keys.len() && !state.secret_keys.is_empty()
-                {
-                    state.selected_secret = state.secret_keys.len() - 1;
-                }
+            crate::refresh_secrets_usage(client, state).await;
+            // After the row drops out, clamp selection back into the
+            // selectable range (skip past group headers).
+            let rows = crate::ui::secrets::flatten(&state.secrets_usage);
+            let sel = crate::ui::secrets::selectable_indices(&rows);
+            if !sel.contains(&state.selected_secret) {
+                state.selected_secret = sel.last().copied().unwrap_or(0);
             }
         }
         Err(e) => state.error = Some(format!("Remove secret failed: {e}")),

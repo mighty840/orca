@@ -1,5 +1,7 @@
+mod refs;
 mod store;
 
+pub use refs::{SecretReference, extract_refs};
 pub use store::SecretStore;
 
 /// Canonical on-disk location for the secrets store: `~/.orca/secrets.json`.

@@ -78,6 +78,7 @@ Auth supports RBAC roles: `admin` (full), `deployer` (CI/CD), `viewer` (read-onl
 | DELETE | /api/v1/webhooks/{id} | Yes | Remove webhook (id = service name) |
 | GET | /api/v1/webhooks/{id}/invocations | Yes | Recent push history (last 10, in-memory) |
 | GET | /api/v1/cluster/backups | Yes | Per-node backup status (master + all agents) |
+| GET | /api/v1/secrets/usage | Yes | Per-key list of services that reference each secret |
 | POST | /api/v1/cluster/backups/trigger | Yes | Manual backup: `?node_id=N` / `?master=true` / no params = all |
 | GET | /api/v1/health | No | Health check |
 | GET | /metrics | No | Prometheus metrics |
@@ -224,7 +225,7 @@ last-10 invocation history, `a` to add, `e` to edit, `x` to delete.
 |-----|------|
 | `1` | Services (grouped by project) |
 | `2` / `n` | Nodes (CPU/Mem/Disk/Net sparklines) |
-| `3` | Secrets |
+| `3` | Secrets (grouped by scope; `Enter` shows referencing services) |
 | `4` / `:backups` | Per-node backup status; `b` trigger, `Enter` snapshot drill-down |
 | `5` / `:webhooks` | Webhooks; `a`/`e`/`x` add/edit/delete, `Enter` invocation history |
 | `l` | Logs for selected service |

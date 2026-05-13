@@ -5,8 +5,9 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 pub use orca_core::api_types::{
-    ClusterBackupsResponse, LastBackupResult, NodeBackupStatus, NodeRole, TriggerBackupResponse,
-    WebhookEntry, WebhookInvocation, WebhookInvocationsResponse, WebhookListResponse,
+    ClusterBackupsResponse, LastBackupResult, NodeBackupStatus, NodeRole, SecretRef, SecretUsage,
+    SecretsUsageResponse, TriggerBackupResponse, WebhookEntry, WebhookInvocation,
+    WebhookInvocationsResponse, WebhookListResponse,
 };
 
 /// Fetches cluster data from the orca API.
@@ -227,6 +228,21 @@ impl ApiClient {
         .await?
         .error_for_status()?;
         Ok(())
+    }
+
+    /// Fetch the secrets organizer view: every key + the services that
+    /// reference it. Computed server-side from `state.services` so the TUI
+    /// doesn't need to fetch full service configs.
+    pub async fn secrets_usage(&self) -> anyhow::Result<SecretsUsageResponse> {
+        let resp = self
+            .auth(
+                self.client
+                    .get(format!("{}/api/v1/secrets/usage", self.base_url)),
+            )
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
     }
 
     pub async fn list_secrets(&self) -> anyhow::Result<Vec<String>> {

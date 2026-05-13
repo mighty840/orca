@@ -1,6 +1,7 @@
 pub mod api;
 mod commands;
 mod keys;
+mod metrics;
 mod persist;
 pub mod state;
 pub mod ui;
@@ -261,6 +262,16 @@ async fn refresh_backups(client: &ApiClient, state: &mut AppState) {
             state.backups = Some(resp);
         }
         Err(e) => state.error = Some(format!("Backup status failed: {e}")),
+    }
+}
+
+/// Fetch the secrets organizer view (key → referencing-services index).
+/// Refreshed on entry and on `r`; never polled. Also called after
+/// `:set`/`:rm` flows that may change the visible counts.
+pub(crate) async fn refresh_secrets_usage(client: &ApiClient, state: &mut AppState) {
+    match client.secrets_usage().await {
+        Ok(resp) => state.secrets_usage = resp.secrets,
+        Err(e) => state.error = Some(format!("Secrets usage failed: {e}")),
     }
 }
 
