@@ -153,9 +153,11 @@ to start without re-research.
   (`MasterMessage::RestoreRequest` / `AgentMessage::RestoreResult`)
   since today only `orca backup restore` works, run manually on each
   node. S3-snapshot listing tracked separately in #41.
-- **Secrets organizer.** Group secrets by project, show which services
-  reference each secret, add/edit/delete from TUI. Today secrets are
-  a flat list managed via `orca secrets set`.
+- **Secrets organizer: inline add/edit/delete.** #37 shipped the read-only
+  organizer (grouping, ref counts, drill-down). Inline `a` / `e` / `x`
+  actions in the secrets view are deferred — they pair cleanly with
+  project-scoped secrets (see "Project-level environment variables (secrets)"
+  in this file) so it makes sense to land them together.
 - **AI chat interface as TUI landing page.** Open the TUI to an
   `orca ask`-style chat pane by default. The user types questions,
   the AI responds with cluster context (services, health, stats).

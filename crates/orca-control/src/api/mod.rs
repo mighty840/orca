@@ -41,6 +41,10 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handlers::trigger_cluster_backup),
         )
         .route("/api/v1/secrets", get(handlers::secrets::list_secrets))
+        .route(
+            "/api/v1/secrets/usage",
+            get(handlers::secrets::secrets_usage),
+        )
         .route("/api/v1/secrets/{key}", post(handlers::secrets::set_secret))
         .route(
             "/api/v1/secrets/{key}",

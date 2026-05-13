@@ -1,50 +1,13 @@
 //! TUI application state — k9s-style view stack navigation.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use crate::api::{
-    ClusterBackupsResponse, ClusterInfo, NodeInfo, ServiceStatus, StatusResponse, WebhookEntry,
-    WebhookInvocation,
+    ClusterBackupsResponse, ClusterInfo, NodeInfo, SecretUsage, ServiceStatus, StatusResponse,
+    WebhookEntry, WebhookInvocation,
 };
-
-/// How many samples to keep in each rolling history buffer. With a 2s
-/// refresh tick this gives ~3 minutes of trailing data.
-const HISTORY_LEN: usize = 90;
-
-/// Rolling per-service metric history. Reused for nodes too.
-#[derive(Debug, Default, Clone)]
-pub struct MetricHistory {
-    pub cpu: VecDeque<f64>,
-    pub mem_bytes: VecDeque<u64>,
-    pub disk_used: VecDeque<u64>,
-    pub net_rx: VecDeque<u64>,
-    pub net_tx: VecDeque<u64>,
-}
-
-impl MetricHistory {
-    /// Append a new (cpu_percent, memory_bytes) sample, dropping the oldest
-    /// once the buffer reaches `HISTORY_LEN`. Used by services and nodes.
-    pub fn push_basic(&mut self, cpu: f64, mem_bytes: u64) {
-        push_capped(&mut self.cpu, cpu);
-        push_capped(&mut self.mem_bytes, mem_bytes);
-    }
-
-    /// Extended sample for nodes (also tracks disk + network).
-    pub fn push_full(&mut self, cpu: f64, mem_bytes: u64, disk_used: u64, rx: u64, tx: u64) {
-        self.push_basic(cpu, mem_bytes);
-        push_capped(&mut self.disk_used, disk_used);
-        push_capped(&mut self.net_rx, rx);
-        push_capped(&mut self.net_tx, tx);
-    }
-}
-
-fn push_capped<T>(buf: &mut VecDeque<T>, value: T) {
-    if buf.len() >= HISTORY_LEN {
-        buf.pop_front();
-    }
-    buf.push_back(value);
-}
+pub use crate::metrics::{MetricHistory, parse_human_bytes};
 
 /// Full-screen views (k9s style — each replaces the entire screen).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +35,10 @@ pub enum View {
     /// (same identifier the API uses).
     WebhookInvocations {
         service: String,
+    },
+    /// Drill-down: list of services that reference one secret key.
+    SecretRefs {
+        key: String,
     },
 }
 
@@ -133,9 +100,10 @@ pub struct AppState {
     /// Cluster version + commit hash from `/api/v1/cluster/info`.
     pub cluster_version: Option<String>,
     pub cluster_commit: Option<String>,
-    /// Secret keys (values are never sent to the TUI).
-    pub secret_keys: Vec<String>,
-    /// Currently selected row in the secrets view.
+    /// Currently selected row in the secrets view. Indexes into the flat list
+    /// of `ui::secrets::flatten(&secrets_usage)` (group headers + key rows),
+    /// so use `ui::secrets::selectable_indices` when navigating to skip
+    /// non-selectable header rows.
     pub selected_secret: usize,
     /// Cached cluster-backups response; refreshed when entering the view or
     /// on explicit `r` keypress. `None` means we haven't fetched yet this
@@ -151,6 +119,9 @@ pub struct AppState {
     pub selected_webhook: usize,
     /// Cached invocation history for the currently drilled-down webhook.
     pub webhook_invocations: Vec<WebhookInvocation>,
+    /// Secrets organizer data (`GET /api/v1/secrets/usage`). Refreshed on
+    /// entry and on `r`; never auto-polled.
+    pub secrets_usage: Vec<SecretUsage>,
 }
 
 impl Default for AppState {
@@ -192,7 +163,6 @@ impl AppState {
             collapsed_projects: HashSet::new(),
             cluster_version: None,
             cluster_commit: None,
-            secret_keys: Vec::new(),
             selected_secret: 0,
             backups: None,
             selected_backup_node: 0,
@@ -200,6 +170,7 @@ impl AppState {
             webhooks: Vec::new(),
             selected_webhook: 0,
             webhook_invocations: Vec::new(),
+            secrets_usage: Vec::new(),
         }
     }
 
@@ -391,30 +362,7 @@ impl AppState {
             View::BackupSnapshots { .. } => "Snapshots",
             View::Webhooks => "Webhooks",
             View::WebhookInvocations { .. } => "Invocations",
+            View::SecretRefs { .. } => "Secret Refs",
         }
     }
-}
-
-/// Best-effort parser for `42.5MiB` / `1024Ki` / `1.2G` style strings into
-/// raw bytes. Used to convert the string-form `memory_usage` reported by
-/// the API into a number we can plot.
-pub fn parse_human_bytes(s: &str) -> u64 {
-    let s = s.trim();
-    if s.is_empty() {
-        return 0;
-    }
-    let (num_part, suffix) = s
-        .find(|c: char| c.is_alphabetic())
-        .map(|i| (&s[..i], &s[i..]))
-        .unwrap_or((s, ""));
-    let n: f64 = num_part.parse().unwrap_or(0.0);
-    let mult: f64 = match suffix.to_ascii_lowercase().as_str() {
-        "" | "b" => 1.0,
-        "k" | "kb" | "ki" | "kib" => 1024.0,
-        "m" | "mb" | "mi" | "mib" => 1024.0 * 1024.0,
-        "g" | "gb" | "gi" | "gib" => 1024.0 * 1024.0 * 1024.0,
-        "t" | "tb" | "ti" | "tib" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
-        _ => 1.0,
-    };
-    (n * mult) as u64
 }

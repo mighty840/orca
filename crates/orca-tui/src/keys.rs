@@ -74,11 +74,7 @@ pub async fn handle_normal_key(
 
         // Navigation
         KeyCode::Char('j') | KeyCode::Down => match state.view {
-            View::Secrets => {
-                if state.selected_secret + 1 < state.secret_keys.len() {
-                    state.selected_secret += 1;
-                }
-            }
+            View::Secrets => secret_nav_next(state),
             View::Backups => {
                 let len = state.backups.as_ref().map(|b| b.nodes.len()).unwrap_or(0);
                 if len > 0 && state.selected_backup_node + 1 < len {
@@ -99,11 +95,7 @@ pub async fn handle_normal_key(
             _ => state.next_service(),
         },
         KeyCode::Char('k') | KeyCode::Up => match state.view {
-            View::Secrets => {
-                if state.selected_secret > 0 {
-                    state.selected_secret -= 1;
-                }
-            }
+            View::Secrets => secret_nav_prev(state),
             View::Backups => {
                 if state.selected_backup_node > 0 {
                     state.selected_backup_node -= 1;
@@ -122,18 +114,14 @@ pub async fn handle_normal_key(
             _ => state.prev_service(),
         },
         KeyCode::Char('g') => match state.view {
-            View::Secrets => state.selected_secret = 0,
+            View::Secrets => secret_nav_first(state),
             View::Backups => state.selected_backup_node = 0,
             View::BackupSnapshots { .. } => state.selected_backup_snapshot = 0,
             View::Webhooks => state.selected_webhook = 0,
             _ => state.selected_service = 0,
         },
         KeyCode::Char('G') => match state.view {
-            View::Secrets => {
-                if !state.secret_keys.is_empty() {
-                    state.selected_secret = state.secret_keys.len() - 1;
-                }
-            }
+            View::Secrets => secret_nav_last(state),
             View::Backups => {
                 let len = state.backups.as_ref().map(|b| b.nodes.len()).unwrap_or(0);
                 if len > 0 {
@@ -188,6 +176,9 @@ pub async fn handle_normal_key(
                     let s = service.clone();
                     super::refresh_webhook_invocations(client, state, &s).await;
                 }
+                View::Secrets | View::SecretRefs { .. } => {
+                    super::refresh_secrets_usage(client, state).await
+                }
                 _ => {}
             }
             *last_refresh = tokio::time::Instant::now();
@@ -204,10 +195,8 @@ pub async fn handle_normal_key(
         }
         KeyCode::Char('2') | KeyCode::Char('n') => {}
         KeyCode::Char('3') if !matches!(state.view, View::Secrets) => {
-            if let Ok(keys) = client.list_secrets().await {
-                state.secret_keys = keys;
-                state.selected_secret = 0;
-            }
+            super::refresh_secrets_usage(client, state).await;
+            secret_nav_first(state);
             state.push_view(View::Secrets);
         }
         KeyCode::Char('3') => {}
@@ -293,6 +282,40 @@ fn handle_esc(state: &mut AppState) {
     }
 }
 
+/// Navigation helpers for the secrets organizer. The view is a flat list of
+/// group-headers interleaved with key rows, but selection should only land on
+/// key rows. Going through `selectable_indices` keeps the contract in one
+/// place (see `ui::secrets::flatten`).
+fn secret_nav_first(state: &mut AppState) {
+    let rows = crate::ui::secrets::flatten(&state.secrets_usage);
+    if let Some(&i) = crate::ui::secrets::selectable_indices(&rows).first() {
+        state.selected_secret = i;
+    }
+}
+
+fn secret_nav_last(state: &mut AppState) {
+    let rows = crate::ui::secrets::flatten(&state.secrets_usage);
+    if let Some(&i) = crate::ui::secrets::selectable_indices(&rows).last() {
+        state.selected_secret = i;
+    }
+}
+
+fn secret_nav_next(state: &mut AppState) {
+    let rows = crate::ui::secrets::flatten(&state.secrets_usage);
+    let sel = crate::ui::secrets::selectable_indices(&rows);
+    if let Some(next) = sel.iter().find(|&&i| i > state.selected_secret) {
+        state.selected_secret = *next;
+    }
+}
+
+fn secret_nav_prev(state: &mut AppState) {
+    let rows = crate::ui::secrets::flatten(&state.secrets_usage);
+    let sel = crate::ui::secrets::selectable_indices(&rows);
+    if let Some(prev) = sel.iter().rev().find(|&&i| i < state.selected_secret) {
+        state.selected_secret = *prev;
+    }
+}
+
 /// Number of snapshots for the given node index, or 0 if the backup state
 /// hasn't been fetched or the index is stale.
 fn snapshot_count(state: &AppState, node_idx: usize) -> usize {
@@ -329,6 +352,12 @@ async fn handle_enter(state: &mut AppState, client: &ApiClient) {
                 let service = w.service_name.clone();
                 super::refresh_webhook_invocations(client, state, &service).await;
                 state.push_view(View::WebhookInvocations { service });
+            }
+        }
+        View::Secrets => {
+            if let Some(u) = crate::ui::secrets::selected_key(state) {
+                let key = u.key.clone();
+                state.push_view(View::SecretRefs { key });
             }
         }
         _ => {}
