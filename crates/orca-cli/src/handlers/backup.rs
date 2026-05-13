@@ -276,10 +276,7 @@ fn restore_basic(config: &BackupConfig) {
     }
 
     // For each config file, find the most recent backup by filename sort.
-    let targets = [
-        ("secrets", "secrets.json"),
-        ("cluster", "cluster.toml"),
-    ];
+    let targets = [("secrets", "secrets.json"), ("cluster", "cluster.toml")];
     let mut restored = 0u32;
     for (prefix, dest) in &targets {
         let latest = std::fs::read_dir(dir).ok().and_then(|entries| {
