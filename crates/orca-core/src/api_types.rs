@@ -102,6 +102,57 @@ fn default_tail() -> u64 {
     100
 }
 
+/// Response from `GET /api/v1/cluster/backups`. Aggregates backup status
+/// across every node in the cluster for the TUI dashboard.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterBackupsResponse {
+    pub nodes: Vec<NodeBackupStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeBackupStatus {
+    /// `None` for the master, `Some(node_id)` for joined agents — saves the
+    /// client from carrying a separate `is_master` flag.
+    #[serde(default)]
+    pub node_id: Option<u64>,
+    pub hostname: String,
+    pub role: NodeRole,
+    pub snapshots: Vec<crate::backup::BackupSnapshotSummary>,
+    /// Last `BackupResult` seen for this node, if any.
+    #[serde(default)]
+    pub last_result: Option<LastBackupResult>,
+    /// `false` if the agent did not respond before the dashboard timeout.
+    /// Master is always reachable in practice — we surface it here for the
+    /// "did we get fresh data" indicator.
+    pub reachable: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeRole {
+    Master,
+    Agent,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LastBackupResult {
+    pub success: bool,
+    pub message: String,
+    pub recorded_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Response from `POST /api/v1/cluster/backups/trigger`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TriggerBackupResponse {
+    /// Agent node IDs that received a `BackupRequest`.
+    pub dispatched_to: Vec<u64>,
+    /// `true` if the master's local backup was kicked off (runs as a
+    /// subprocess in the background; result lands in
+    /// `master_last_backup_result` when it completes).
+    #[serde(default)]
+    pub master_dispatched: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

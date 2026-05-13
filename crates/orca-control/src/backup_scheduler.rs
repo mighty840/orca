@@ -46,7 +46,7 @@ pub fn spawn_backup_scheduler(
             };
             info!("Next backup in {}s", sleep_dur.as_secs());
             tokio::time::sleep(sleep_dur).await;
-            run_local_backup(&config).await;
+            run_master_backup(&state, &config).await;
             dispatch_agent_backups(&state, &config).await;
         }
     });
@@ -87,26 +87,40 @@ async fn collect_service_hooks(state: &AppState) -> std::collections::HashMap<St
         .collect()
 }
 
-/// Execute a full local backup on master by spawning `orca backup all`.
+/// Execute a full local backup on master by spawning `orca backup all`, then
+/// record the outcome on `state.master_last_backup_result` so the dashboard
+/// can render it.
 ///
 /// This backs up master's Docker volumes AND config files (cluster.db,
 /// secrets.json, cluster.toml) — same code path as a manual `orca backup all`.
 /// The backup config is passed via env var so the subprocess uses the same
 /// targets (including resolved S3 credentials) as the scheduler.
-async fn run_local_backup(config: &BackupConfig) {
-    info!("Starting scheduled local backup");
+pub(crate) async fn run_master_backup(state: &Arc<AppState>, config: &BackupConfig) {
+    info!("Starting master backup");
+    let (success, message) = invoke_subprocess(config).await;
+    let result = orca_core::api_types::LastBackupResult {
+        success,
+        message,
+        recorded_at: chrono::Utc::now(),
+    };
+    *state.master_last_backup_result.write().await = Some(result);
+}
+
+async fn invoke_subprocess(config: &BackupConfig) -> (bool, String) {
     let config_json = match serde_json::to_string(config) {
         Ok(j) => j,
         Err(e) => {
-            error!("Failed to serialize backup config: {e}");
-            return;
+            let msg = format!("config serialization failed: {e}");
+            error!("{msg}");
+            return (false, msg);
         }
     };
     let exe = match std::env::current_exe() {
         Ok(p) => p,
         Err(e) => {
-            error!("Failed to resolve current exe for local backup: {e}");
-            return;
+            let msg = format!("cannot resolve current exe: {e}");
+            error!("{msg}");
+            return (false, msg);
         }
     };
     match tokio::process::Command::new(&exe)
@@ -116,15 +130,35 @@ async fn run_local_backup(config: &BackupConfig) {
         .await
     {
         Ok(out) if out.status.success() => {
-            let msg = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            // The subprocess intermixes tracing (with ANSI colors) and plain
+            // `println!` summaries on stdout. The last non-empty line is
+            // always the human-readable summary (e.g. "Backup complete: 2
+            // file(s)."); take that and we don't have to scrub colors.
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let msg = last_non_empty_line(&stdout)
+                .unwrap_or("backup complete")
+                .to_string();
             info!("Master backup complete: {msg}");
+            (true, msg)
         }
         Ok(out) => {
-            let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let msg = last_non_empty_line(&stderr)
+                .unwrap_or("backup failed (no error message)")
+                .to_string();
             error!("Master backup failed: {msg}");
+            (false, msg)
         }
-        Err(e) => error!("Failed to spawn master backup: {e}"),
+        Err(e) => {
+            let msg = format!("spawn failed: {e}");
+            error!("{msg}");
+            (false, msg)
+        }
     }
+}
+
+fn last_non_empty_line(text: &str) -> Option<&str> {
+    text.lines().rev().map(str::trim).find(|l| !l.is_empty())
 }
 
 #[cfg(test)]
@@ -261,11 +295,11 @@ mod tests {
         dispatch_agent_backups(&state, &config).await;
     }
 
-    /// `run_local_backup` serializes the config to JSON and passes it via env
+    /// `run_master_backup` serializes the config to JSON and passes it via env
     /// var. Verify the JSON round-trips so the spawned subprocess sees the
     /// same targets the scheduler holds.
     #[test]
-    fn local_backup_config_json_roundtrip() {
+    fn master_backup_config_json_roundtrip() {
         use orca_core::backup::BackupTarget;
 
         let config = BackupConfig {

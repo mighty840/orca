@@ -12,6 +12,11 @@ pub async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str
             state.view = View::Services;
         }
         Some("nodes") => state.push_view(View::Nodes),
+        Some("backups") => {
+            crate::refresh_backups(client, state).await;
+            state.selected_backup_node = 0;
+            state.push_view(View::Backups);
+        }
         Some("logs") => cmd_logs(state, client, &parts).await,
         Some("help") => state.push_view(View::Help),
         Some("scale") => cmd_scale(state, client, &parts).await,

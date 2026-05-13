@@ -35,6 +35,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/v1/services/{name}", delete(handlers::stop_service))
         .route("/api/v1/projects/{project}", delete(handlers::stop_project))
         .route("/api/v1/stop", post(handlers::stop_all))
+        .route("/api/v1/cluster/backups", get(handlers::cluster_backups))
+        .route(
+            "/api/v1/cluster/backups/trigger",
+            post(handlers::trigger_cluster_backup),
+        )
         .route("/api/v1/secrets", get(handlers::secrets::list_secrets))
         .route("/api/v1/secrets/{key}", post(handlers::secrets::set_secret))
         .route(

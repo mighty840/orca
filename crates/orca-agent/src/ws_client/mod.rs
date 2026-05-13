@@ -4,6 +4,7 @@
 //! Falls back to HTTP heartbeat if WS connection fails.
 
 mod backup;
+mod backup_status;
 mod logs;
 mod reconcile;
 
@@ -23,6 +24,7 @@ use crate::ws_exec::ExecSessions;
 use crate::grpc::AgentClient;
 
 use backup::run_agent_backup;
+use backup_status::send_backup_status;
 use logs::stream_logs;
 use reconcile::reconcile_services;
 
@@ -238,6 +240,12 @@ async fn handle_master_message(
             let tx = out_tx.clone();
             tokio::spawn(async move {
                 run_agent_backup(node_id, config, service_hooks, tx).await;
+            });
+        }
+        MasterMessage::BackupStatusRequest { request_id } => {
+            let tx = out_tx.clone();
+            tokio::spawn(async move {
+                send_backup_status(request_id, node_id, tx).await;
             });
         }
         MasterMessage::Ack { node_id } => {

@@ -147,16 +147,15 @@ to start without re-research.
 
 - **Single-project view filter.** Let user scope the TUI to one project
   at a time instead of a flat list of all services.
-- **Backups per node.** Show backup status grouped by node — last run
-  time, volume count, total size, any failures. Needs
-  `GET /api/v1/cluster/backups` aggregating results from all nodes.
-
 - **Webhook management.** View, add, edit, and delete webhooks from
   the TUI. Show last trigger time, status, and matched repo/branch.
   Today webhooks can only be managed via curl to the REST API.
-- **Backup dashboard.** Per-node backup status: last run, volume count,
-  total size, failures, retention. Trigger manual backup. View/restore
-  individual volume snapshots. Needs `GET /api/v1/cluster/backups`.
+- **Backup dashboard: restore action.** #35 shipped the dashboard
+  (table, `b` trigger, `Enter` drill-down). Still to do: `r` on a
+  snapshot row to restore it. Needs a new WS RPC
+  (`MasterMessage::RestoreRequest` / `AgentMessage::RestoreResult`)
+  since today only `orca backup restore` works, run manually on each
+  node. S3-snapshot listing tracked separately in #41.
 - **Secrets organizer.** Group secrets by project, show which services
   reference each secret, add/edit/delete from TUI. Today secrets are
   a flat list managed via `orca secrets set`.

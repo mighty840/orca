@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::backup::BackupConfig;
+use crate::backup::{BackupConfig, BackupSnapshotSummary};
 use crate::types::WorkloadSpec;
 
 /// Messages sent from agent to master.
@@ -40,6 +40,13 @@ pub enum AgentMessage {
         success: bool,
         message: String,
     },
+    /// Reply to `MasterMessage::BackupStatusRequest`. Carries the agent's
+    /// local snapshot index for the cluster dashboard.
+    BackupStatusReport {
+        request_id: String,
+        #[serde(flatten)]
+        data: BackupStatusReportData,
+    },
     /// PTY output chunk from a container exec session (base64-encoded bytes).
     ExecOutput { session_id: String, data: String },
     /// Exec session has ended.
@@ -67,6 +74,12 @@ pub enum MasterMessage {
         /// service_name → pre_hook shell command, populated from ServiceConfig.backup.
         #[serde(default)]
         service_hooks: HashMap<String, String>,
+    },
+    /// Ask an agent to enumerate its local backup snapshots and respond with
+    /// `AgentMessage::BackupStatusReport`. Request/response correlation via
+    /// the `request_id` field, same pattern as `LogRequest`.
+    BackupStatusRequest {
+        request_id: String,
     },
     Ack {
         node_id: u64,
@@ -102,6 +115,16 @@ pub enum MasterMessage {
     StatusPing,
     /// Signal the agent to run `docker system prune -f`.
     PruneSystem,
+}
+
+/// Payload of `AgentMessage::BackupStatusReport` — split into its own type so
+/// the master's listener channel can carry the data without the `request_id`
+/// (which is already used as the listener map key).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupStatusReportData {
+    pub node_id: u64,
+    pub hostname: String,
+    pub snapshots: Vec<BackupSnapshotSummary>,
 }
 
 /// Status of a single workload, reported by agent.
@@ -263,6 +286,53 @@ mod tests {
         };
         let json4 = serde_json::to_string(&done).unwrap();
         assert!(json4.contains("\"type\":\"exec_done\""));
+    }
+
+    #[test]
+    fn backup_status_request_roundtrip() {
+        let msg = MasterMessage::BackupStatusRequest {
+            request_id: "req-42".into(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"type\":\"backup_status_request\""));
+        let back: MasterMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, MasterMessage::BackupStatusRequest { .. }));
+    }
+
+    #[test]
+    fn backup_status_report_roundtrip() {
+        use crate::backup::{BackupFileEntry, BackupSnapshotSummary};
+        let msg = AgentMessage::BackupStatusReport {
+            request_id: "req-42".into(),
+            data: BackupStatusReportData {
+                node_id: 7,
+                hostname: "agent-1".into(),
+                snapshots: vec![BackupSnapshotSummary {
+                    epoch_secs: 1_700_000_000,
+                    total_size_bytes: 1024,
+                    files: vec![BackupFileEntry {
+                        name: "vol.tar.gz".into(),
+                        size_bytes: 1024,
+                    }],
+                }],
+            },
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"type\":\"backup_status_report\""));
+        // Verify the flattened representation: data fields appear at the
+        // top level of the JSON object alongside `type` and `request_id`,
+        // matching how every other AgentMessage variant looks on the wire.
+        assert!(json.contains("\"node_id\":7"));
+        let back: AgentMessage = serde_json::from_str(&json).unwrap();
+        match back {
+            AgentMessage::BackupStatusReport { data, .. } => {
+                assert_eq!(data.node_id, 7);
+                assert_eq!(data.hostname, "agent-1");
+                assert_eq!(data.snapshots.len(), 1);
+                assert_eq!(data.snapshots[0].epoch_secs, 1_700_000_000);
+            }
+            _ => panic!("unexpected variant"),
+        }
     }
 
     #[test]

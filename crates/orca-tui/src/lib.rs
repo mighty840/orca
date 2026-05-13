@@ -239,6 +239,54 @@ async fn handle_stop(client: &ApiClient, state: &mut AppState) {
     }
 }
 
+/// Fetch the cluster-wide backup status and cache it on the state. Called
+/// when entering the backups view and on explicit `r` refresh — not on every
+/// 2s tick, since the fan-out RPC to every agent is expensive and the data
+/// changes only when a backup actually runs.
+async fn refresh_backups(client: &ApiClient, state: &mut AppState) {
+    match client.cluster_backups().await {
+        Ok(resp) => {
+            // Clamp the selection so a node removal doesn't leave us pointing
+            // past the end of the list.
+            if state.selected_backup_node >= resp.nodes.len() {
+                state.selected_backup_node = resp.nodes.len().saturating_sub(1);
+            }
+            state.backups = Some(resp);
+        }
+        Err(e) => state.error = Some(format!("Backup status failed: {e}")),
+    }
+}
+
+/// Trigger a manual backup for the currently selected node. The master row
+/// runs the master's local `orca backup all` subprocess; an agent row
+/// dispatches a `BackupRequest` over WS to that single agent.
+async fn trigger_backup_for_selected(client: &ApiClient, state: &mut AppState) {
+    let Some(resp) = state.backups.as_ref() else {
+        return;
+    };
+    let Some(node) = resp.nodes.get(state.selected_backup_node) else {
+        return;
+    };
+    let target = match node.node_id {
+        Some(id) => crate::api::BackupTriggerTarget::Agent(id),
+        None => crate::api::BackupTriggerTarget::Master,
+    };
+    let hostname = node.hostname.clone();
+    match client.trigger_backup(target).await {
+        Ok(r) => {
+            let msg = if r.master_dispatched {
+                format!("Triggered master backup on {hostname}")
+            } else if let Some(id) = r.dispatched_to.first() {
+                format!("Triggered backup on {hostname} (node {id})")
+            } else {
+                format!("Backup trigger failed: {hostname} is not connected")
+            };
+            state.flash(msg);
+        }
+        Err(e) => state.error = Some(format!("Trigger failed: {e}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

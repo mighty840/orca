@@ -1,5 +1,7 @@
 //! TUI rendering — k9s-style full-screen views with header/footer chrome.
 
+pub mod backup_snapshots;
+pub mod backups;
 pub mod detail;
 pub mod help;
 pub mod logs;
@@ -60,6 +62,10 @@ fn draw_content(f: &mut Frame, area: Rect, state: &AppState) {
         View::Detail { service } => detail::draw_detail(f, area, state, service),
         View::Help => help::draw_help(f, area, state),
         View::Secrets => secrets::draw_secrets(f, area, state),
+        View::Backups => backups::draw_backups(f, area, state),
+        View::BackupSnapshots { node_idx } => {
+            backup_snapshots::draw_backup_snapshots(f, area, state, *node_idx)
+        }
     }
 }
 
@@ -154,6 +160,16 @@ fn draw_breadcrumb(f: &mut Frame, area: Rect, state: &AppState) {
         View::Detail { service } => format!("Services > {service}"),
         View::Help => "Help".to_string(),
         View::Secrets => "Secrets".to_string(),
+        View::Backups => "Backups".to_string(),
+        View::BackupSnapshots { node_idx } => {
+            let hostname = state
+                .backups
+                .as_ref()
+                .and_then(|b| b.nodes.get(*node_idx))
+                .map(|n| n.hostname.as_str())
+                .unwrap_or("?");
+            format!("Backups > {hostname} > Snapshots")
+        }
     };
     let line = Line::from(vec![
         Span::styled(" ", Style::default()),
@@ -248,6 +264,8 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
         View::Detail { .. } => "Esc:back s:scale x:stop l:logs ?:help",
         View::Help => "Esc:back",
         View::Secrets => "Esc:back :set/:rm ?:help",
+        View::Backups => "Esc:back j/k:select ↵:snapshots r:refresh b:trigger ?:help",
+        View::BackupSnapshots { .. } => "Esc:back j/k:select ?:help",
     };
     spans.push(Span::styled(keys, dim));
 

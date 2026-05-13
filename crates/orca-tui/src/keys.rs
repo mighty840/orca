@@ -79,6 +79,18 @@ pub async fn handle_normal_key(
                     state.selected_secret += 1;
                 }
             }
+            View::Backups => {
+                let len = state.backups.as_ref().map(|b| b.nodes.len()).unwrap_or(0);
+                if len > 0 && state.selected_backup_node + 1 < len {
+                    state.selected_backup_node += 1;
+                }
+            }
+            View::BackupSnapshots { node_idx } => {
+                let len = snapshot_count(state, node_idx);
+                if len > 0 && state.selected_backup_snapshot + 1 < len {
+                    state.selected_backup_snapshot += 1;
+                }
+            }
             _ => state.next_service(),
         },
         KeyCode::Char('k') | KeyCode::Up => match state.view {
@@ -87,16 +99,40 @@ pub async fn handle_normal_key(
                     state.selected_secret -= 1;
                 }
             }
+            View::Backups => {
+                if state.selected_backup_node > 0 {
+                    state.selected_backup_node -= 1;
+                }
+            }
+            View::BackupSnapshots { .. } => {
+                if state.selected_backup_snapshot > 0 {
+                    state.selected_backup_snapshot -= 1;
+                }
+            }
             _ => state.prev_service(),
         },
         KeyCode::Char('g') => match state.view {
             View::Secrets => state.selected_secret = 0,
+            View::Backups => state.selected_backup_node = 0,
+            View::BackupSnapshots { .. } => state.selected_backup_snapshot = 0,
             _ => state.selected_service = 0,
         },
         KeyCode::Char('G') => match state.view {
             View::Secrets => {
                 if !state.secret_keys.is_empty() {
                     state.selected_secret = state.secret_keys.len() - 1;
+                }
+            }
+            View::Backups => {
+                let len = state.backups.as_ref().map(|b| b.nodes.len()).unwrap_or(0);
+                if len > 0 {
+                    state.selected_backup_node = len - 1;
+                }
+            }
+            View::BackupSnapshots { node_idx } => {
+                let len = snapshot_count(state, node_idx);
+                if len > 0 {
+                    state.selected_backup_snapshot = len - 1;
                 }
             }
             _ => {
@@ -124,9 +160,14 @@ pub async fn handle_normal_key(
         // Full-screen logs
         KeyCode::Char('l') => handle_logs(state, client).await,
 
-        // Refresh
+        // Refresh — when in the backups view, refetch the backup status too
+        // (we don't auto-refresh it every 2s since it's an expensive
+        // fan-out RPC and the data changes infrequently).
         KeyCode::Char('r') => {
             super::refresh(client, state).await;
+            if matches!(state.view, View::Backups) {
+                super::refresh_backups(client, state).await;
+            }
             *last_refresh = tokio::time::Instant::now();
             state.flash("Refreshed".into());
         }
@@ -148,6 +189,18 @@ pub async fn handle_normal_key(
             state.push_view(View::Secrets);
         }
         KeyCode::Char('3') => {}
+        KeyCode::Char('4') if !matches!(state.view, View::Backups) => {
+            super::refresh_backups(client, state).await;
+            state.selected_backup_node = 0;
+            state.push_view(View::Backups);
+        }
+        KeyCode::Char('4') => {}
+        // `b` triggers a manual backup on the selected node when in the
+        // backups view. In other views the keybind is unused so it's safe to
+        // claim here without surprising existing muscle memory.
+        KeyCode::Char('b') if matches!(state.view, View::Backups) => {
+            super::trigger_backup_for_selected(client, state).await;
+        }
 
         // Actions
         KeyCode::Char('d') => {
@@ -194,13 +247,38 @@ fn handle_esc(state: &mut AppState) {
     }
 }
 
+/// Number of snapshots for the given node index, or 0 if the backup state
+/// hasn't been fetched or the index is stale.
+fn snapshot_count(state: &AppState, node_idx: usize) -> usize {
+    state
+        .backups
+        .as_ref()
+        .and_then(|b| b.nodes.get(node_idx))
+        .map(|n| n.snapshots.len())
+        .unwrap_or(0)
+}
+
 async fn handle_enter(state: &mut AppState, client: &ApiClient) {
-    if matches!(state.view, View::Services)
-        && let Some(name) = state.selected_service_name()
-    {
-        let name = name.to_string();
-        super::refresh_logs_named(client, state, &name).await;
-        state.push_view(View::Detail { service: name });
+    match state.view {
+        View::Services => {
+            if let Some(name) = state.selected_service_name() {
+                let name = name.to_string();
+                super::refresh_logs_named(client, state, &name).await;
+                state.push_view(View::Detail { service: name });
+            }
+        }
+        View::Backups => {
+            let node_idx = state.selected_backup_node;
+            let exists = state
+                .backups
+                .as_ref()
+                .is_some_and(|b| node_idx < b.nodes.len());
+            if exists {
+                state.selected_backup_snapshot = 0;
+                state.push_view(View::BackupSnapshots { node_idx });
+            }
+        }
+        _ => {}
     }
 }
 

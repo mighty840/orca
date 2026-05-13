@@ -272,6 +272,21 @@ async fn handle_agent_message(
             } else {
                 error!("Node {node_id}: backup failed — {message}");
             }
+            // Cache for the cluster-backups dashboard so it can surface the
+            // last-known failure without rescanning logs.
+            state.last_backup_results.write().await.insert(
+                node_id,
+                crate::state::LastBackupResult {
+                    success,
+                    message,
+                    recorded_at: chrono::Utc::now(),
+                },
+            );
+        }
+        AgentMessage::BackupStatusReport { request_id, data } => {
+            if let Some(tx) = state.backup_listeners.read().await.get(&request_id) {
+                let _ = tx.send(data).await;
+            }
         }
         AgentMessage::ExecOutput { session_id, data } => {
             use base64::Engine as _;
