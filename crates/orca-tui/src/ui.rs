@@ -5,6 +5,7 @@ pub mod backups;
 pub mod detail;
 pub mod help;
 pub mod logs;
+pub mod networks;
 pub mod nodes;
 pub mod secret_refs;
 pub mod secrets;
@@ -74,6 +75,7 @@ fn draw_content(f: &mut Frame, area: Rect, state: &AppState) {
             webhook_invocations::draw_webhook_invocations(f, area, state, service)
         }
         View::SecretRefs { key } => secret_refs::draw_secret_refs(f, area, state, key),
+        View::Networks => networks::draw_networks(f, area, state),
     }
 }
 
@@ -181,6 +183,7 @@ fn draw_breadcrumb(f: &mut Frame, area: Rect, state: &AppState) {
         View::Webhooks => "Webhooks".to_string(),
         View::WebhookInvocations { service } => format!("Webhooks > {service} > Invocations"),
         View::SecretRefs { key } => format!("Secrets > {key} > Refs"),
+        View::Networks => "Networks".to_string(),
     };
     let line = Line::from(vec![
         Span::styled(" ", Style::default()),
@@ -276,6 +279,7 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
         View::Help => "Esc:back",
         View::Secrets => "Esc:back j/k:select ↵:refs r:refresh :set/:rm ?:help",
         View::SecretRefs { .. } => "Esc:back r:refresh ?:help",
+        View::Networks => "Esc:back r:refresh ?:help",
         View::Backups => "Esc:back j/k:select ↵:snapshots r:refresh b:trigger ?:help",
         View::BackupSnapshots { .. } => "Esc:back j/k:select ?:help",
         View::Webhooks => {

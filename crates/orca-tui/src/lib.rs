@@ -265,6 +265,16 @@ async fn refresh_backups(client: &ApiClient, state: &mut AppState) {
     }
 }
 
+/// Fetch the cluster networks dashboard (per-node Docker bridge + edge
+/// routing). Refreshed on entry and on `r`; never auto-polled — the data
+/// changes only when services come and go.
+async fn refresh_networks(client: &ApiClient, state: &mut AppState) {
+    match client.cluster_networks().await {
+        Ok(resp) => state.networks = Some(resp),
+        Err(e) => state.error = Some(format!("Cluster networks failed: {e}")),
+    }
+}
+
 /// Fetch the secrets organizer view (key → referencing-services index).
 /// Refreshed on entry and on `r`; never polled. Also called after
 /// `:set`/`:rm` flows that may change the visible counts.

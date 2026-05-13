@@ -16,8 +16,8 @@ mod ops;
 pub(crate) mod secrets;
 
 pub(crate) use ops::{
-    cluster_backups, logs, promote, redeploy, rollback, scale, stop_all, stop_project,
-    stop_service, trigger_cluster_backup,
+    cluster_backups, cluster_networks, logs, promote, redeploy, rollback, scale, stop_all,
+    stop_project, stop_service, trigger_cluster_backup,
 };
 
 /// Health check endpoint.

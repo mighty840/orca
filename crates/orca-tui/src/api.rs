@@ -5,7 +5,8 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 pub use orca_core::api_types::{
-    ClusterBackupsResponse, LastBackupResult, NodeBackupStatus, NodeRole, SecretRef, SecretUsage,
+    ClusterBackupsResponse, ClusterNetworksResponse, DockerNetwork, DomainRoute, LastBackupResult,
+    NetworkService, NodeBackupStatus, NodeNetworks, NodeRole, SecretRef, SecretUsage,
     SecretsUsageResponse, TriggerBackupResponse, WebhookEntry, WebhookInvocation,
     WebhookInvocationsResponse, WebhookListResponse,
 };
@@ -228,6 +229,20 @@ impl ApiClient {
         .await?
         .error_for_status()?;
         Ok(())
+    }
+
+    /// Fetch the cluster networks dashboard: per-node `orca-*` Docker bridge
+    /// listing plus the master's public-edge route table.
+    pub async fn cluster_networks(&self) -> anyhow::Result<ClusterNetworksResponse> {
+        let resp = self
+            .auth(
+                self.client
+                    .get(format!("{}/api/v1/cluster/networks", self.base_url)),
+            )
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
     }
 
     /// Fetch the secrets organizer view: every key + the services that

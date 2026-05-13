@@ -40,6 +40,7 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/api/v1/cluster/backups/trigger",
             post(handlers::trigger_cluster_backup),
         )
+        .route("/api/v1/cluster/networks", get(handlers::cluster_networks))
         .route("/api/v1/secrets", get(handlers::secrets::list_secrets))
         .route(
             "/api/v1/secrets/usage",

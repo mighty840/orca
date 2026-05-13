@@ -231,6 +231,54 @@ pub struct SecretRef {
     pub project: Option<String>,
 }
 
+/// Response from `GET /api/v1/cluster/networks`. One entry per node, each
+/// listing the `orca-*` Docker bridge networks visible on that node plus the
+/// public-edge domain → service routes registered with that node's proxy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterNetworksResponse {
+    pub nodes: Vec<NodeNetworks>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NodeNetworks {
+    /// `None` for the master, `Some(node_id)` for joined agents — matches the
+    /// shape of `NodeBackupStatus`.
+    #[serde(default)]
+    pub node_id: Option<u64>,
+    pub hostname: String,
+    pub role: NodeRole,
+    /// Docker bridge networks named `orca-*` that exist on this node.
+    pub networks: Vec<DockerNetwork>,
+    /// Public-edge domain → service entries from this node's proxy route
+    /// table. Helpful for spotting DNS pointing at the wrong box.
+    pub domains: Vec<DomainRoute>,
+    /// `false` if the agent did not respond before the dashboard timeout.
+    /// Master is always reachable.
+    pub reachable: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DockerNetwork {
+    pub name: String,
+    /// Services attached to this network. Aliases are the DNS names other
+    /// containers on the same network can use to reach this one — when a
+    /// service references a peer by a name that isn't in this list, the
+    /// peer's container is unreachable (the original motivation for #17).
+    pub services: Vec<NetworkService>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkService {
+    pub name: String,
+    pub aliases: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomainRoute {
+    pub domain: String,
+    pub service: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

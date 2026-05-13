@@ -45,29 +45,26 @@ to start without re-research.
   master communication is strictly HTTP/WS with the cluster token so
   the trust boundary is a single shared secret.
 
-## TUI: networks tab
+## TUI: networks tab follow-ups
 
-- **Networks view** showing the full routing graph for the cluster, in
-  order of external-to-internal depth:
-  1. **Public edge** — the domains served by each node's proxy, grouped
-     by node. Each row includes the A record target IP so a mismatch
-     (e.g. DNS pointing to the wrong box) jumps out visually.
-  2. **Docker networks** — one block per `orca-<network>` bridge,
-     listing the services attached and their aliases. Cross-network
-     container links (a service with `internal = true` plus aliases
-     referenced from another network) should be drawn as connecting
-     edges.
-  3. **Inter-node links** — if a service on node A calls a service on
-     node B by public domain, draw that as a dashed edge so it's
-     obvious traffic is hair-pinning through the edge proxy.
-- Backend: `GET /api/v1/cluster/networks` that returns, per node, the
-  docker networks, their attached services+aliases, and the set of
-  route-table entries (domain → service). The TUI renders this as an
-  ASCII graph using ratatui's canvas widget.
-- Useful for debugging the kind of issue we hit today where
-  `compliance-dashboard` couldn't resolve `compliance-agent` because the
-  alias was missing — a networks tab would have shown the orca-certifai
-  bridge with only one name in the alias list.
+#17 shipped the tree-list view (`6` / `:networks`): per-node public-edge
+domains + `orca-*` bridge networks with services and aliases. The
+following pieces from the original proposal are deferred:
+
+- **A-record IP per public edge row.** Resolve the domain's A record on
+  master and surface alongside the proxy entry so DNS pointing at the
+  wrong box jumps out visually.
+- **ASCII graph rendering** with ratatui's canvas widget — cross-network
+  links (services with `internal = true` referenced from another network)
+  drawn as connecting edges, inter-node hair-pinned traffic as dashed
+  edges. Today both axes are rendered as nested lists.
+- **Missing-alias detection.** When service A's env references service B
+  by hostname but B isn't aliased on a shared network, the dashboard
+  should highlight the row in red. Needs heuristic env parsing across
+  services.
+- **Agent edge routes.** The `domains` field is currently only populated
+  for the master row; agents have their own proxy route tables, surface
+  them via a new WS field.
 
 ## Environments per project
 

@@ -47,6 +47,13 @@ pub enum AgentMessage {
         #[serde(flatten)]
         data: BackupStatusReportData,
     },
+    /// Reply to `MasterMessage::NetworkStatusRequest`. Carries the agent's
+    /// `orca-*` Docker network listing for the cluster networks view.
+    NetworkStatusReport {
+        request_id: String,
+        #[serde(flatten)]
+        data: NetworkStatusReportData,
+    },
     /// PTY output chunk from a container exec session (base64-encoded bytes).
     ExecOutput { session_id: String, data: String },
     /// Exec session has ended.
@@ -79,6 +86,12 @@ pub enum MasterMessage {
     /// `AgentMessage::BackupStatusReport`. Request/response correlation via
     /// the `request_id` field, same pattern as `LogRequest`.
     BackupStatusRequest {
+        request_id: String,
+    },
+    /// Ask an agent to enumerate its `orca-*` Docker networks and respond
+    /// with `AgentMessage::NetworkStatusReport`. Mirrors the backup-status
+    /// fan-out pattern.
+    NetworkStatusRequest {
         request_id: String,
     },
     Ack {
@@ -125,6 +138,16 @@ pub struct BackupStatusReportData {
     pub node_id: u64,
     pub hostname: String,
     pub snapshots: Vec<BackupSnapshotSummary>,
+}
+
+/// Payload of `AgentMessage::NetworkStatusReport`. Split out for the same
+/// reason as `BackupStatusReportData` — the listener-channel value doesn't
+/// need to re-carry the `request_id`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkStatusReportData {
+    pub node_id: u64,
+    pub hostname: String,
+    pub networks: Vec<crate::api_types::DockerNetwork>,
 }
 
 /// Status of a single workload, reported by agent.
