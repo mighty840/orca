@@ -141,6 +141,49 @@ pub struct LastBackupResult {
     pub recorded_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// One push that matched this webhook config. Stored in an in-memory ring
+/// buffer per service so the dashboard can show recent activity without us
+/// having to scrape logs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookInvocation {
+    pub at: chrono::DateTime<chrono::Utc>,
+    /// HTTP status code returned to the caller (200, 401, 503, etc.).
+    pub status_code: u16,
+    /// Short commit SHA (first 8 chars). Empty if the push payload had none.
+    pub commit_sha: String,
+    pub repo: String,
+    pub branch: String,
+    /// `true` if the redeploy/infra-deploy actually ran. `false` for ignored
+    /// pushes (wrong branch, no matching config, signature mismatch).
+    pub deployed: bool,
+}
+
+/// Augmented webhook record returned by `GET /api/v1/webhooks`. Wraps the
+/// stored `WebhookConfig` with the most recent invocation so the dashboard
+/// table renders without an extra round-trip per row.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookEntry {
+    pub repo: String,
+    pub service_name: String,
+    pub branch: String,
+    #[serde(default)]
+    pub has_secret: bool,
+    #[serde(default)]
+    pub infra: bool,
+    #[serde(default)]
+    pub last_invocation: Option<WebhookInvocation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookListResponse {
+    pub webhooks: Vec<WebhookEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookInvocationsResponse {
+    pub invocations: Vec<WebhookInvocation>,
+}
+
 /// Response from `POST /api/v1/cluster/backups/trigger`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TriggerBackupResponse {

@@ -8,6 +8,8 @@ pub mod logs;
 pub mod nodes;
 pub mod secrets;
 pub mod table;
+pub mod webhook_invocations;
+pub mod webhooks;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -65,6 +67,10 @@ fn draw_content(f: &mut Frame, area: Rect, state: &AppState) {
         View::Backups => backups::draw_backups(f, area, state),
         View::BackupSnapshots { node_idx } => {
             backup_snapshots::draw_backup_snapshots(f, area, state, *node_idx)
+        }
+        View::Webhooks => webhooks::draw_webhooks(f, area, state),
+        View::WebhookInvocations { service } => {
+            webhook_invocations::draw_webhook_invocations(f, area, state, service)
         }
     }
 }
@@ -170,6 +176,8 @@ fn draw_breadcrumb(f: &mut Frame, area: Rect, state: &AppState) {
                 .unwrap_or("?");
             format!("Backups > {hostname} > Snapshots")
         }
+        View::Webhooks => "Webhooks".to_string(),
+        View::WebhookInvocations { service } => format!("Webhooks > {service} > Invocations"),
     };
     let line = Line::from(vec![
         Span::styled(" ", Style::default()),
@@ -266,6 +274,10 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
         View::Secrets => "Esc:back :set/:rm ?:help",
         View::Backups => "Esc:back j/k:select ↵:snapshots r:refresh b:trigger ?:help",
         View::BackupSnapshots { .. } => "Esc:back j/k:select ?:help",
+        View::Webhooks => {
+            "Esc:back j/k:select ↵:invocations a:add e:edit x:delete r:refresh ?:help"
+        }
+        View::WebhookInvocations { .. } => "Esc:back r:refresh ?:help",
     };
     spans.push(Span::styled(keys, dim));
 

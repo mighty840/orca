@@ -22,6 +22,7 @@ pub mod store;
 pub mod topo_sort;
 pub mod watchdog;
 pub mod webhook;
+pub mod webhook_invocations;
 pub mod ws_handler;
 
 use std::collections::HashMap;

@@ -70,6 +70,13 @@ pub struct AppState {
     /// finishes. Separate from `last_backup_results` because the master has
     /// no `node_id` and runs its backups via subprocess rather than WS.
     pub master_last_backup_result: RwLock<Option<LastBackupResult>>,
+    /// Recent webhook invocations, keyed by `service_name`. Bounded ring
+    /// buffer of the last 10 deliveries per webhook so the TUI can render a
+    /// history view without scraping logs. Lost on restart by design — this
+    /// is operator-visible recent activity, not durable audit.
+    pub webhook_invocations: RwLock<
+        HashMap<String, std::collections::VecDeque<orca_core::api_types::WebhookInvocation>>,
+    >,
     /// Active exec sessions: session_id → output bytes sender (agent → CLI WS).
     pub exec_sessions: RwLock<HashMap<String, tokio::sync::mpsc::Sender<Vec<u8>>>>,
     /// Pending deploy result waiters: service_name → oneshot sender.
@@ -173,6 +180,7 @@ impl AppState {
             backup_listeners: RwLock::new(HashMap::new()),
             last_backup_results: RwLock::new(HashMap::new()),
             master_last_backup_result: RwLock::new(None),
+            webhook_invocations: RwLock::new(HashMap::new()),
             exec_sessions: RwLock::new(HashMap::new()),
             pending_deploys: RwLock::new(HashMap::new()),
         }

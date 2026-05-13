@@ -73,7 +73,12 @@ Auth supports RBAC roles: `admin` (full), `deployer` (CI/CD), `viewer` (read-onl
 | POST | /api/v1/cluster/nodes/{id}/drain | Yes | Drain node |
 | POST | /api/v1/cluster/nodes/{id}/undrain | Yes | Undrain node |
 | POST | /api/v1/webhooks/github | Sig | Git push webhook |
-| GET | /api/v1/webhooks | Yes | List webhooks |
+| GET | /api/v1/webhooks | Yes | List webhooks (each row includes `last_invocation`) |
+| POST | /api/v1/webhooks | Yes | Register webhook (dedupes on repo+branch+service) |
+| DELETE | /api/v1/webhooks/{id} | Yes | Remove webhook (id = service name) |
+| GET | /api/v1/webhooks/{id}/invocations | Yes | Recent push history (last 10, in-memory) |
+| GET | /api/v1/cluster/backups | Yes | Per-node backup status (master + all agents) |
+| POST | /api/v1/cluster/backups/trigger | Yes | Manual backup: `?node_id=N` / `?master=true` / no params = all |
 | GET | /api/v1/health | No | Health check |
 | GET | /metrics | No | Prometheus metrics |
 
@@ -206,6 +211,27 @@ orca webhooks add --repo org/myapp --service myapp --branch main
 ```
 
 On push to matching branch → auto-redeploy the service.
+
+The TUI's `5` / `:webhooks` view lists every registered webhook with last-trigger
+metadata (status, commit, age) and per-row actions: `Enter` to drill into the
+last-10 invocation history, `a` to add, `e` to edit, `x` to delete.
+
+## TUI
+
+`orca tui --api http://master:6880` (token via `ORCA_TOKEN` or `~/.orca/cluster.token`).
+
+| Key | View |
+|-----|------|
+| `1` | Services (grouped by project) |
+| `2` / `n` | Nodes (CPU/Mem/Disk/Net sparklines) |
+| `3` | Secrets |
+| `4` / `:backups` | Per-node backup status; `b` trigger, `Enter` snapshot drill-down |
+| `5` / `:webhooks` | Webhooks; `a`/`e`/`x` add/edit/delete, `Enter` invocation history |
+| `l` | Logs for selected service |
+| `?` | Help — full keybind reference |
+
+The backups view auto-fetches once on entry and on `r`; it does not poll. The
+webhooks view does the same.
 
 ## Persistent State
 

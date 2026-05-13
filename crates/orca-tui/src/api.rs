@@ -6,6 +6,7 @@ use serde::Deserialize;
 
 pub use orca_core::api_types::{
     ClusterBackupsResponse, LastBackupResult, NodeBackupStatus, NodeRole, TriggerBackupResponse,
+    WebhookEntry, WebhookInvocation, WebhookInvocationsResponse, WebhookListResponse,
 };
 
 /// Fetches cluster data from the orca API.
@@ -302,4 +303,56 @@ impl ApiClient {
 pub enum BackupTriggerTarget {
     Master,
     Agent(u64),
+}
+
+impl ApiClient {
+    pub async fn list_webhooks(&self) -> anyhow::Result<WebhookListResponse> {
+        let resp = self
+            .auth(
+                self.client
+                    .get(format!("{}/api/v1/webhooks", self.base_url)),
+            )
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
+    }
+
+    pub async fn webhook_invocations(
+        &self,
+        service: &str,
+    ) -> anyhow::Result<WebhookInvocationsResponse> {
+        let resp = self
+            .auth(self.client.get(format!(
+                "{}/api/v1/webhooks/{service}/invocations",
+                self.base_url
+            )))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
+    }
+
+    pub async fn add_webhook(&self, body: serde_json::Value) -> anyhow::Result<()> {
+        self.auth(
+            self.client
+                .post(format!("{}/api/v1/webhooks", self.base_url))
+                .json(&body),
+        )
+        .send()
+        .await?
+        .error_for_status()?;
+        Ok(())
+    }
+
+    pub async fn remove_webhook(&self, service: &str) -> anyhow::Result<()> {
+        self.auth(
+            self.client
+                .delete(format!("{}/api/v1/webhooks/{service}", self.base_url)),
+        )
+        .send()
+        .await?
+        .error_for_status()?;
+        Ok(())
+    }
 }

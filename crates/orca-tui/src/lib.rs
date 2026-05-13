@@ -4,6 +4,13 @@ mod keys;
 mod persist;
 pub mod state;
 pub mod ui;
+mod webhook_actions;
+
+// Re-export so `keys.rs` / `commands.rs` keep their existing
+// `super::refresh_webhooks(...)` / `crate::refresh_webhooks(...)` callsites.
+pub(crate) use webhook_actions::{
+    delete_selected_webhook, refresh_webhook_invocations, refresh_webhooks,
+};
 
 use std::io;
 use std::time::Duration;

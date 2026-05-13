@@ -54,6 +54,11 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
             "↵ on a backup row",
             "Drill into snapshot list for that node",
         ),
+        ("5", "Webhooks view (registered push triggers + history)"),
+        (
+            "↵ on a webhook row",
+            "Drill into invocation history for that webhook",
+        ),
         ("l", "Logs for selected service"),
         ("?", "This help screen"),
     ] {
@@ -70,6 +75,7 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
         ("p", "Filter by project of selected"),
         ("r", "Refresh immediately"),
         ("b", "Trigger backup on selected node (Backups view)"),
+        ("a / e / x", "Add / edit / delete webhook (Webhooks view)"),
         ("/", "Filter services by name"),
         ("w", "Toggle word wrap (in logs)"),
     ] {
@@ -87,6 +93,16 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
         (":project <name>", "Filter by project"),
         (":secrets", "Open the secrets view"),
         (":backups", "Open the cluster backups dashboard"),
+        (":webhooks", "Open the webhooks dashboard"),
+        (
+            ":webhook-add <repo> <branch> <svc> [--secret X] [--infra]",
+            "Register a webhook",
+        ),
+        (
+            ":webhook-edit <repo> <branch> <svc> [flags]",
+            "Update an existing webhook (replaces by repo+branch+service)",
+        ),
+        (":webhook-rm <service>", "Remove a webhook"),
         (":set <KEY> <val>", "Create or update a secret"),
         (":rm <KEY>", "Remove a secret"),
         (":drain <id>", "Drain a node"),
