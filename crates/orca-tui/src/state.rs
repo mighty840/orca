@@ -95,6 +95,10 @@ pub struct AppState {
     pub auto_refresh_logs: bool,
     /// Project filter (separate from text filter).
     pub project_filter: Option<String>,
+    /// Project loaded from `~/.orca/tui-state.json` on launch, kept here until
+    /// the first successful status refresh confirms (or denies) that the
+    /// project still exists in the cluster.
+    pub pending_restore_project: Option<String>,
     /// Set by `:sh` / `:exec` to signal the event loop to suspend the TUI
     /// and run an interactive command inside a container. Contents:
     /// (service name, optional node hostname, command argv).
@@ -146,6 +150,7 @@ impl AppState {
             tick: 0,
             auto_refresh_logs: true,
             project_filter: None,
+            pending_restore_project: None,
             pending_shell: None,
             history: HashMap::new(),
             node_history: HashMap::new(),
