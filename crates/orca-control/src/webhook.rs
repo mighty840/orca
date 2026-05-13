@@ -19,6 +19,7 @@ use tracing::{error, info, warn};
 use crate::operations::AgentOfflineError;
 use crate::reconciler;
 use crate::state::AppState;
+use crate::webhook_invocations::record_invocation;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -135,10 +136,15 @@ fn validate_signature(secret: &str, body: &[u8], signature_header: &str) -> bool
 /// Build webhook routes.
 /// Build webhook routes (call before with_state on parent router).
 pub fn webhook_router() -> Router<Arc<AppState>> {
+    use axum::routing::get;
     Router::new()
         .route("/api/v1/webhooks/github", post(handle_push))
         .route("/api/v1/webhooks", post(register).get(list))
         .route("/api/v1/webhooks/{id}", delete(remove_webhook))
+        .route(
+            "/api/v1/webhooks/{id}/invocations",
+            get(crate::webhook_invocations::invocations),
+        )
 }
 
 pub async fn handle_push(
@@ -209,6 +215,7 @@ pub async fn handle_push(
         {
             sig_failures += 1;
             warn!("Webhook: HMAC validation failed for {}", wh.service_name);
+            record_invocation(&state, wh, short_sha, 401, false).await;
             continue;
         }
 
@@ -222,18 +229,25 @@ pub async fn handle_push(
                 }
             });
             deployed.push("infra (deploying)".to_string());
+            record_invocation(&state, wh, short_sha, 202, true).await;
             continue;
         }
 
         info!("Webhook: triggering redeploy of {}", wh.service_name);
         match reconciler::redeploy(&state, &wh.service_name).await {
-            Ok(()) => deployed.push(wh.service_name.clone()),
+            Ok(()) => {
+                deployed.push(wh.service_name.clone());
+                record_invocation(&state, wh, short_sha, 200, true).await;
+            }
             Err(e) => {
-                if e.downcast_ref::<AgentOfflineError>().is_some() {
+                let offline = e.downcast_ref::<AgentOfflineError>().is_some();
+                if offline {
                     agent_offline = true;
                 }
                 error!("Webhook: redeploy of {} failed: {e}", wh.service_name);
                 errors.push(format!("{}: {e}", wh.service_name));
+                let code = if offline { 503 } else { 500 };
+                record_invocation(&state, wh, short_sha, code, false).await;
             }
         }
     }
@@ -290,10 +304,27 @@ pub async fn register(
 
 /// List all webhook configs.
 ///
-/// Mounted at `GET /api/v1/webhooks`.
+/// Mounted at `GET /api/v1/webhooks`. Each entry carries the most recent
+/// invocation (if any) so the TUI dashboard renders without an N+1 fetch.
 pub async fn list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    use orca_core::api_types::{WebhookEntry, WebhookListResponse};
     let webhooks = state.webhooks.read().await;
-    Json(serde_json::json!({ "webhooks": *webhooks }))
+    let invocations = state.webhook_invocations.read().await;
+    let entries: Vec<WebhookEntry> = webhooks
+        .iter()
+        .map(|w| WebhookEntry {
+            repo: w.repo.clone(),
+            service_name: w.service_name.clone(),
+            branch: w.branch.clone(),
+            has_secret: w.secret.is_some(),
+            infra: w.infra,
+            last_invocation: invocations
+                .get(&w.service_name)
+                .and_then(|q| q.back())
+                .cloned(),
+        })
+        .collect();
+    Json(WebhookListResponse { webhooks: entries })
 }
 
 /// Remove a webhook by service name.

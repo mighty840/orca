@@ -40,6 +40,14 @@ pub async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str
         }
         Some("set") => cmd_secret_set(state, client, &parts).await,
         Some("rm") => cmd_secret_rm(state, client, &parts).await,
+        Some("webhooks") => {
+            crate::refresh_webhooks(client, state).await;
+            state.selected_webhook = 0;
+            state.push_view(View::Webhooks);
+        }
+        Some("webhook-add") => cmd_webhook_add(state, client, &parts).await,
+        Some("webhook-edit") => cmd_webhook_edit(state, client, &parts).await,
+        Some("webhook-rm") => cmd_webhook_rm(state, client, &parts).await,
         Some(other) => state.flash(format!("Unknown command: {other}")),
         None => {}
     }
@@ -254,5 +262,151 @@ async fn cmd_undrain(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
     match client.undrain(node_id).await {
         Ok(()) => state.flash(format!("Undrained node {node_id}")),
         Err(e) => state.error = Some(format!("Undrain failed: {e}")),
+    }
+}
+
+/// `:webhook-add <repo> <branch> <service> [--secret X] [--infra]` — register
+/// a new webhook. Pre-filled from the `a` keybind on the Webhooks view; can
+/// also be typed manually.
+async fn cmd_webhook_add(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
+    if parts.len() < 4 {
+        state.flash("Usage: :webhook-add <repo> <branch> <service> [--secret X] [--infra]".into());
+        return;
+    }
+    let body = build_webhook_body(parts[1], parts[2], parts[3], &parts[4..]);
+    match client.add_webhook(body).await {
+        Ok(()) => {
+            state.flash(format!("Registered webhook for {}", parts[3]));
+            crate::refresh_webhooks(client, state).await;
+        }
+        Err(e) => state.error = Some(format!("Add failed: {e}")),
+    }
+}
+
+/// `:webhook-edit <repo> <branch> <service> [--secret X] [--infra]` — re-runs
+/// `:webhook-add` which dedupes by (repo, branch, service) and replaces the
+/// matching entry. The TUI's `e` keybind pre-fills the identity fields so
+/// the user only types the new optional flags.
+async fn cmd_webhook_edit(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
+    if parts.len() < 4 {
+        state.flash("Usage: :webhook-edit <repo> <branch> <service> [--secret X] [--infra]".into());
+        return;
+    }
+    let body = build_webhook_body(parts[1], parts[2], parts[3], &parts[4..]);
+    match client.add_webhook(body).await {
+        Ok(()) => {
+            state.flash(format!("Updated webhook for {}", parts[3]));
+            crate::refresh_webhooks(client, state).await;
+        }
+        Err(e) => state.error = Some(format!("Edit failed: {e}")),
+    }
+}
+
+async fn cmd_webhook_rm(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
+    if parts.len() < 2 {
+        state.flash("Usage: :webhook-rm <service>".into());
+        return;
+    }
+    let service = parts[1];
+    match client.remove_webhook(service).await {
+        Ok(()) => {
+            state.flash(format!("Removed webhook for {service}"));
+            crate::refresh_webhooks(client, state).await;
+        }
+        Err(e) => state.error = Some(format!("Remove failed: {e}")),
+    }
+}
+
+/// Build the `WebhookConfig` JSON body the server expects from positional +
+/// flag CLI arguments. Centralized so `add` and `edit` share the same parser.
+fn build_webhook_body(
+    repo: &str,
+    branch: &str,
+    service: &str,
+    flags: &[&str],
+) -> serde_json::Value {
+    let mut infra = false;
+    let mut secret: Option<String> = None;
+    let mut i = 0;
+    while i < flags.len() {
+        match flags[i] {
+            "--infra" => {
+                infra = true;
+                i += 1;
+            }
+            "--secret" => {
+                if i + 1 < flags.len() {
+                    secret = Some(flags[i + 1].to_string());
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    let mut body = serde_json::json!({
+        "repo": repo,
+        "branch": branch,
+        "service_name": service,
+        "infra": infra,
+    });
+    if let Some(s) = secret {
+        body["secret"] = serde_json::Value::String(s);
+    }
+    body
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Positional args land in their expected fields; flags default to off.
+    /// Locks in the on-wire field names since the server's `WebhookConfig`
+    /// uses `service_name` (not `service`) — easy to typo.
+    #[test]
+    fn build_webhook_body_positionals() {
+        let body = build_webhook_body("acme/api", "main", "api", &[]);
+        assert_eq!(body["repo"], "acme/api");
+        assert_eq!(body["branch"], "main");
+        assert_eq!(body["service_name"], "api");
+        assert_eq!(body["infra"], false);
+        assert!(body.get("secret").is_none());
+    }
+
+    /// `--secret X` captures the value following the flag.
+    #[test]
+    fn build_webhook_body_secret_flag() {
+        let body = build_webhook_body("acme/api", "main", "api", &["--secret", "shhh"]);
+        assert_eq!(body["secret"], "shhh");
+    }
+
+    /// `--infra` is a boolean flag with no value.
+    #[test]
+    fn build_webhook_body_infra_flag() {
+        let body = build_webhook_body("acme/infra", "main", "infra", &["--infra"]);
+        assert_eq!(body["infra"], true);
+        assert!(body.get("secret").is_none());
+    }
+
+    /// Flags can appear in any order; an unknown token is ignored rather than
+    /// erroring (which would be surprising mid-command for the user).
+    #[test]
+    fn build_webhook_body_flag_order_and_unknowns() {
+        let body = build_webhook_body(
+            "acme/api",
+            "main",
+            "api",
+            &["--infra", "garbage", "--secret", "s"],
+        );
+        assert_eq!(body["infra"], true);
+        assert_eq!(body["secret"], "s");
+    }
+
+    /// `--secret` without a value must not panic and must not set the field.
+    #[test]
+    fn build_webhook_body_secret_without_value() {
+        let body = build_webhook_body("acme/api", "main", "api", &["--secret"]);
+        assert!(body.get("secret").is_none());
     }
 }

@@ -315,6 +315,10 @@ Orca force-pulls `:latest` tags on every reconcile (this landed in main today). 
 As of v0.2.2, registered webhooks are saved to `~/.orca/webhooks.json` and survive restarts. You no longer need to re-register them after a reboot or `orca shutdown`.
 :::
 
+::: tip Manage webhooks from the TUI
+`orca tui` → press `5` (or `:webhooks`) for a dashboard of every registered webhook with last-trigger metadata (status, commit, age). Press `Enter` on a row to see the last 10 invocations; `a` to add, `e` to edit, `x` to delete. The invocation history is an in-memory ring on the master — it resets on `orca shutdown`.
+:::
+
 ### Infra webhook: GitOps auto-deploy
 
 In addition to per-service webhooks, orca supports an **infra webhook** that
@@ -384,6 +388,10 @@ On subsequent boots this isn't a problem — the image is cached — but it bite
 ## 6. Backups
 
 Orca has a built-in backup scheduler configured via `cluster.toml`. It snapshots volumes and, optionally, runs per-service `pre_hook` commands (e.g. `pg_dump`) before snapshotting.
+
+::: tip Backup dashboard in the TUI
+`orca tui` → press `4` (or `:backups`) for a per-node table of backup status: hostname, role (master / agent), last-run age, snapshot count, total size, and the last result message. Press `b` on a row to trigger an immediate backup on that node (master row runs `orca backup all` as a subprocess; agent rows dispatch over WS). `Enter` drills into a per-snapshot listing with file inventory. The view shows local-disk snapshots only — S3 listing is tracked separately (#41).
+:::
 
 ### cluster.toml backup config
 

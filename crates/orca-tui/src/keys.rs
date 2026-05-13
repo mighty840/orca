@@ -91,6 +91,11 @@ pub async fn handle_normal_key(
                     state.selected_backup_snapshot += 1;
                 }
             }
+            View::Webhooks => {
+                if !state.webhooks.is_empty() && state.selected_webhook + 1 < state.webhooks.len() {
+                    state.selected_webhook += 1;
+                }
+            }
             _ => state.next_service(),
         },
         KeyCode::Char('k') | KeyCode::Up => match state.view {
@@ -109,12 +114,18 @@ pub async fn handle_normal_key(
                     state.selected_backup_snapshot -= 1;
                 }
             }
+            View::Webhooks => {
+                if state.selected_webhook > 0 {
+                    state.selected_webhook -= 1;
+                }
+            }
             _ => state.prev_service(),
         },
         KeyCode::Char('g') => match state.view {
             View::Secrets => state.selected_secret = 0,
             View::Backups => state.selected_backup_node = 0,
             View::BackupSnapshots { .. } => state.selected_backup_snapshot = 0,
+            View::Webhooks => state.selected_webhook = 0,
             _ => state.selected_service = 0,
         },
         KeyCode::Char('G') => match state.view {
@@ -133,6 +144,11 @@ pub async fn handle_normal_key(
                 let len = snapshot_count(state, node_idx);
                 if len > 0 {
                     state.selected_backup_snapshot = len - 1;
+                }
+            }
+            View::Webhooks => {
+                if !state.webhooks.is_empty() {
+                    state.selected_webhook = state.webhooks.len() - 1;
                 }
             }
             _ => {
@@ -165,8 +181,14 @@ pub async fn handle_normal_key(
         // fan-out RPC and the data changes infrequently).
         KeyCode::Char('r') => {
             super::refresh(client, state).await;
-            if matches!(state.view, View::Backups) {
-                super::refresh_backups(client, state).await;
+            match &state.view {
+                View::Backups => super::refresh_backups(client, state).await,
+                View::Webhooks => super::refresh_webhooks(client, state).await,
+                View::WebhookInvocations { service } => {
+                    let s = service.clone();
+                    super::refresh_webhook_invocations(client, state, &s).await;
+                }
+                _ => {}
             }
             *last_refresh = tokio::time::Instant::now();
             state.flash("Refreshed".into());
@@ -195,6 +217,27 @@ pub async fn handle_normal_key(
             state.push_view(View::Backups);
         }
         KeyCode::Char('4') => {}
+        KeyCode::Char('5') if !matches!(state.view, View::Webhooks) => {
+            super::refresh_webhooks(client, state).await;
+            state.selected_webhook = 0;
+            state.push_view(View::Webhooks);
+        }
+        KeyCode::Char('5') => {}
+        // `a` adds a webhook (claimed only in the Webhooks view to avoid
+        // colliding with future global shortcuts).
+        KeyCode::Char('a') if matches!(state.view, View::Webhooks) => {
+            state.input_mode = InputMode::Command;
+            state.command_input = "webhook-add ".into();
+        }
+        // `e` edits — opens command mode pre-filled with the current row's
+        // identity so the user only types the changed field(s).
+        KeyCode::Char('e') if matches!(state.view, View::Webhooks) => {
+            if let Some(w) = state.webhooks.get(state.selected_webhook) {
+                state.input_mode = InputMode::Command;
+                state.command_input =
+                    format!("webhook-edit {} {} {} ", w.repo, w.branch, w.service_name);
+            }
+        }
         // `b` triggers a manual backup on the selected node when in the
         // backups view. In other views the keybind is unused so it's safe to
         // claim here without surprising existing muscle memory.
@@ -205,6 +248,9 @@ pub async fn handle_normal_key(
         // Actions
         KeyCode::Char('d') => {
             state.flash("Use `orca deploy` from CLI to redeploy".into());
+        }
+        KeyCode::Char('x') if matches!(state.view, View::Webhooks) => {
+            super::delete_selected_webhook(client, state).await;
         }
         KeyCode::Char('x') => super::handle_stop(client, state).await,
         KeyCode::Char('s') => handle_scale_prompt(state),
@@ -276,6 +322,13 @@ async fn handle_enter(state: &mut AppState, client: &ApiClient) {
             if exists {
                 state.selected_backup_snapshot = 0;
                 state.push_view(View::BackupSnapshots { node_idx });
+            }
+        }
+        View::Webhooks => {
+            if let Some(w) = state.webhooks.get(state.selected_webhook) {
+                let service = w.service_name.clone();
+                super::refresh_webhook_invocations(client, state, &service).await;
+                state.push_view(View::WebhookInvocations { service });
             }
         }
         _ => {}

@@ -3,7 +3,10 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 
-use crate::api::{ClusterBackupsResponse, ClusterInfo, NodeInfo, ServiceStatus, StatusResponse};
+use crate::api::{
+    ClusterBackupsResponse, ClusterInfo, NodeInfo, ServiceStatus, StatusResponse, WebhookEntry,
+    WebhookInvocation,
+};
 
 /// How many samples to keep in each rolling history buffer. With a 2s
 /// refresh tick this gives ~3 minutes of trailing data.
@@ -63,6 +66,12 @@ pub enum View {
     /// can be the target too.
     BackupSnapshots {
         node_idx: usize,
+    },
+    Webhooks,
+    /// Drill-down: invocation history for one webhook, keyed by service name
+    /// (same identifier the API uses).
+    WebhookInvocations {
+        service: String,
     },
 }
 
@@ -136,6 +145,12 @@ pub struct AppState {
     pub selected_backup_node: usize,
     /// Selected snapshot row in the backup-snapshots drill-down.
     pub selected_backup_snapshot: usize,
+    /// Cached webhook list; refreshed when entering the view or on `r`.
+    pub webhooks: Vec<WebhookEntry>,
+    /// Selected row in the webhooks view.
+    pub selected_webhook: usize,
+    /// Cached invocation history for the currently drilled-down webhook.
+    pub webhook_invocations: Vec<WebhookInvocation>,
 }
 
 impl Default for AppState {
@@ -182,6 +197,9 @@ impl AppState {
             backups: None,
             selected_backup_node: 0,
             selected_backup_snapshot: 0,
+            webhooks: Vec::new(),
+            selected_webhook: 0,
+            webhook_invocations: Vec::new(),
         }
     }
 
@@ -371,6 +389,8 @@ impl AppState {
             View::Secrets => "Secrets",
             View::Backups => "Backups",
             View::BackupSnapshots { .. } => "Snapshots",
+            View::Webhooks => "Webhooks",
+            View::WebhookInvocations { .. } => "Invocations",
         }
     }
 }

@@ -147,9 +147,6 @@ to start without re-research.
 
 - **Single-project view filter.** Let user scope the TUI to one project
   at a time instead of a flat list of all services.
-- **Webhook management.** View, add, edit, and delete webhooks from
-  the TUI. Show last trigger time, status, and matched repo/branch.
-  Today webhooks can only be managed via curl to the REST API.
 - **Backup dashboard: restore action.** #35 shipped the dashboard
   (table, `b` trigger, `Enter` drill-down). Still to do: `r` on a
   snapshot row to restore it. Needs a new WS RPC
