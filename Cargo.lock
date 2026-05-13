@@ -2602,11 +2602,13 @@ version = "0.2.6-rc.7"
 dependencies = [
  "anyhow",
  "crossterm",
+ "dirs-next",
  "orca-core",
  "ratatui",
  "reqwest",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

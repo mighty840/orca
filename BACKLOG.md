@@ -147,9 +147,6 @@ to start without re-research.
 
 - **Single-project view filter.** Let user scope the TUI to one project
   at a time instead of a flat list of all services.
-- **Remember last-opened project.** On TUI launch, reopen whichever
-  project was active last session. If none (first run or project
-  deleted), start with no project selected.
 - **Backups per node.** Show backup status grouped by node — last run
   time, volume count, total size, any failures. Needs
   `GET /api/v1/cluster/backups` aggregating results from all nodes.

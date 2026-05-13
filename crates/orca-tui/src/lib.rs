@@ -1,6 +1,7 @@
 pub mod api;
 mod commands;
 mod keys;
+mod persist;
 pub mod state;
 pub mod ui;
 
@@ -27,6 +28,15 @@ pub async fn run_tui(api_url: &str) -> anyhow::Result<()> {
     let client = ApiClient::new(api_url);
     let mut state = AppState::new();
     state.api_url = client.url().to_string();
+
+    // Optimistically apply the last project filter so the user sees their
+    // saved view immediately. The first successful refresh validates that the
+    // project still exists; if not, refresh() clears it.
+    let persisted = persist::load();
+    if let Some(p) = persisted.last_project {
+        state.project_filter = Some(p.clone());
+        state.pending_restore_project = Some(p);
+    }
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -82,12 +92,20 @@ async fn event_loop(
             continue;
         }
 
+        // Snapshot the project filter so we can detect changes and persist
+        // them exactly once below, regardless of which handler mutated it.
+        let prev_project_filter = state.project_filter.clone();
+
         match state.input_mode {
             InputMode::Filter => keys::handle_filter_key(state, key.code),
             InputMode::Command => keys::handle_command_key(state, client, key.code).await,
             InputMode::Normal => {
                 keys::handle_normal_key(state, client, key.code, &mut last_refresh).await;
             }
+        }
+
+        if state.project_filter != prev_project_filter {
+            persist::save(state);
         }
 
         // If a :sh / :exec command left a pending shell request on the
@@ -161,7 +179,10 @@ fn current_service_name(state: &AppState) -> Option<String> {
 async fn refresh(client: &ApiClient, state: &mut AppState) {
     state.error = None;
     match client.status().await {
-        Ok(resp) => state.update_status(resp),
+        Ok(resp) => {
+            state.update_status(resp);
+            try_restore_project_filter(state);
+        }
         Err(e) => {
             state.mark_disconnected();
             state.error = Some(format!("API error: {e}"));
@@ -169,6 +190,29 @@ async fn refresh(client: &ApiClient, state: &mut AppState) {
     }
     if let Ok(info) = client.cluster_info().await {
         state.update_cluster(info);
+    }
+}
+
+/// Validate the project loaded from disk against the freshly-fetched service
+/// list. Runs at most once per session (the pending value is consumed). If the
+/// project still exists, flash a confirmation. If it does not, drop the filter
+/// and persist the cleared state so the next launch starts clean.
+pub(crate) fn try_restore_project_filter(state: &mut AppState) {
+    let Some(target) = state.pending_restore_project.take() else {
+        return;
+    };
+    let exists = state
+        .services
+        .iter()
+        .any(|s| s.project.as_deref() == Some(target.as_str()));
+    if exists {
+        state.flash(format!("Restored filter: {target}"));
+    } else {
+        state.project_filter = None;
+        persist::save(state);
+        state.flash(format!(
+            "Last project '{target}' no longer exists — filter cleared"
+        ));
     }
 }
 
@@ -192,5 +236,104 @@ async fn handle_stop(client: &ApiClient, state: &mut AppState) {
             Ok(()) => state.flash(format!("Stopped {name}")),
             Err(e) => state.error = Some(format!("Stop failed: {e}")),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::ServiceStatus;
+
+    fn svc_with_project(name: &str, project: Option<&str>) -> ServiceStatus {
+        ServiceStatus {
+            name: name.into(),
+            image: String::new(),
+            runtime: "container".into(),
+            desired_replicas: 1,
+            running_replicas: 1,
+            status: "running".into(),
+            domain: None,
+            project: project.map(String::from),
+            memory_usage: None,
+            cpu_percent: None,
+            node: None,
+            memory_limit_bytes: None,
+        }
+    }
+
+    /// With nothing pending, the function must be a no-op: the user is just
+    /// navigating, not relaunching, so we don't want to clobber state or fire
+    /// a stale flash.
+    #[test]
+    fn no_pending_restore_is_noop() {
+        let mut state = AppState::new();
+        state.project_filter = Some("compliance".into());
+        state.services = vec![svc_with_project("api", Some("compliance"))];
+
+        try_restore_project_filter(&mut state);
+
+        assert_eq!(state.project_filter.as_deref(), Some("compliance"));
+        assert!(state.pending_restore_project.is_none());
+        assert!(state.status_msg.is_none());
+    }
+
+    /// When the persisted project still has at least one service, the filter
+    /// stays active and the user gets a confirmation flash. The pending slot
+    /// is consumed so the next refresh doesn't re-trigger.
+    #[test]
+    fn pending_with_matching_project_flashes_restored() {
+        let mut state = AppState::new();
+        state.project_filter = Some("compliance".into());
+        state.pending_restore_project = Some("compliance".into());
+        state.services = vec![
+            svc_with_project("api", Some("compliance")),
+            svc_with_project("web", Some("frontend")),
+        ];
+
+        try_restore_project_filter(&mut state);
+
+        assert_eq!(state.project_filter.as_deref(), Some("compliance"));
+        assert!(state.pending_restore_project.is_none());
+        assert_eq!(
+            state.status_msg.as_deref(),
+            Some("Restored filter: compliance"),
+        );
+    }
+
+    /// If the persisted project has been deleted between sessions, drop the
+    /// filter and tell the user. Without this, the TUI would show an empty
+    /// list with no explanation and the stale value would survive the next
+    /// launch too.
+    #[test]
+    fn pending_with_missing_project_clears_filter() {
+        let mut state = AppState::new();
+        state.project_filter = Some("compliance".into());
+        state.pending_restore_project = Some("compliance".into());
+        state.services = vec![svc_with_project("web", Some("frontend"))];
+
+        try_restore_project_filter(&mut state);
+
+        assert!(state.project_filter.is_none());
+        assert!(state.pending_restore_project.is_none());
+        let msg = state.status_msg.as_deref().unwrap_or("");
+        assert!(
+            msg.contains("compliance") && msg.contains("no longer exists"),
+            "expected explanatory flash, got: {msg:?}"
+        );
+    }
+
+    /// An empty service list (cluster just booted, nothing deployed) counts as
+    /// "project missing" — we don't have any way to know it'll come back, so
+    /// clear cleanly rather than holding the user in a stuck filtered view.
+    #[test]
+    fn pending_with_empty_service_list_clears_filter() {
+        let mut state = AppState::new();
+        state.project_filter = Some("compliance".into());
+        state.pending_restore_project = Some("compliance".into());
+
+        try_restore_project_filter(&mut state);
+
+        assert!(state.project_filter.is_none());
+        assert!(state.pending_restore_project.is_none());
     }
 }
