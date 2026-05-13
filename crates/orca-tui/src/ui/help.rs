@@ -49,6 +49,8 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
         ("1", "Services view (grouped by project)"),
         ("2 / n", "Nodes view (CPU/Mem/Disk/Net sparklines)"),
         ("3", "Secrets view"),
+        ("4", "Backups view (per-node snapshot status)"),
+        ("↵ on a backup row", "Drill into snapshot list for that node"),
         ("l", "Logs for selected service"),
         ("?", "This help screen"),
     ] {
@@ -64,6 +66,7 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
         ("c", "Collapse / expand the selected project"),
         ("p", "Filter by project of selected"),
         ("r", "Refresh immediately"),
+        ("b", "Trigger backup on selected node (Backups view)"),
         ("/", "Filter services by name"),
         ("w", "Toggle word wrap (in logs)"),
     ] {
@@ -80,6 +83,7 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
         (":filter <text>", "Filter services"),
         (":project <name>", "Filter by project"),
         (":secrets", "Open the secrets view"),
+        (":backups", "Open the cluster backups dashboard"),
         (":set <KEY> <val>", "Create or update a secret"),
         (":rm <KEY>", "Remove a secret"),
         (":drain <id>", "Drain a node"),

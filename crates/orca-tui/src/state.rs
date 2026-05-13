@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Instant;
 
-use crate::api::{ClusterInfo, NodeInfo, ServiceStatus, StatusResponse};
+use crate::api::{ClusterBackupsResponse, ClusterInfo, NodeInfo, ServiceStatus, StatusResponse};
 
 /// How many samples to keep in each rolling history buffer. With a 2s
 /// refresh tick this gives ~3 minutes of trailing data.
@@ -52,6 +52,12 @@ pub enum View {
     Detail { service: String },
     Help,
     Secrets,
+    Backups,
+    /// Drill-down: snapshot list for the node at `node_idx` in
+    /// `AppState::backups.nodes`. The index is captured at push-time
+    /// rather than a node identifier so master (which has no `node_id`)
+    /// can be the target too.
+    BackupSnapshots { node_idx: usize },
 }
 
 /// Input mode for the TUI.
@@ -116,6 +122,14 @@ pub struct AppState {
     pub secret_keys: Vec<String>,
     /// Currently selected row in the secrets view.
     pub selected_secret: usize,
+    /// Cached cluster-backups response; refreshed when entering the view or
+    /// on explicit `r` keypress. `None` means we haven't fetched yet this
+    /// session — the view shows a "loading" placeholder.
+    pub backups: Option<ClusterBackupsResponse>,
+    /// Selected row in the backups view.
+    pub selected_backup_node: usize,
+    /// Selected snapshot row in the backup-snapshots drill-down.
+    pub selected_backup_snapshot: usize,
 }
 
 impl Default for AppState {
@@ -159,6 +173,9 @@ impl AppState {
             cluster_commit: None,
             secret_keys: Vec::new(),
             selected_secret: 0,
+            backups: None,
+            selected_backup_node: 0,
+            selected_backup_snapshot: 0,
         }
     }
 
@@ -346,6 +363,8 @@ impl AppState {
             View::Detail { .. } => "Detail",
             View::Help => "Help",
             View::Secrets => "Secrets",
+            View::Backups => "Backups",
+            View::BackupSnapshots { .. } => "Snapshots",
         }
     }
 }

@@ -54,12 +54,30 @@ pub struct AppState {
     pub ws_agents: RwLock<HashMap<u64, crate::ws_handler::AgentSender>>,
     /// Log stream listeners: request_id → (data, done) sender.
     pub log_listeners: RwLock<HashMap<String, tokio::sync::mpsc::Sender<(String, bool)>>>,
+    /// Backup status listeners: request_id → report sender. Used by the
+    /// `/api/v1/cluster/backups` handler to collect reports dispatched in
+    /// parallel to every connected agent.
+    pub backup_listeners: RwLock<
+        HashMap<String, tokio::sync::mpsc::Sender<orca_core::ws_types::BackupStatusReportData>>,
+    >,
+    /// Last completed `BackupResult` per agent node, recorded as the result
+    /// arrives over WS. Surfaced alongside the snapshot listing so the
+    /// dashboard can show a node's last-failure message without having to
+    /// scrape logs. Master has its own field — its backups are subprocess-
+    /// driven, not WS-dispatched.
+    pub last_backup_results: RwLock<HashMap<u64, LastBackupResult>>,
+    /// Last completed master backup result, recorded when `run_master_backup`
+    /// finishes. Separate from `last_backup_results` because the master has
+    /// no `node_id` and runs its backups via subprocess rather than WS.
+    pub master_last_backup_result: RwLock<Option<LastBackupResult>>,
     /// Active exec sessions: session_id → output bytes sender (agent → CLI WS).
     pub exec_sessions: RwLock<HashMap<String, tokio::sync::mpsc::Sender<Vec<u8>>>>,
     /// Pending deploy result waiters: service_name → oneshot sender.
     /// Inserted by queue_remote_deploy, resolved by ws_handler on DeployResult.
     pub pending_deploys: RwLock<HashMap<String, tokio::sync::oneshot::Sender<Result<(), String>>>>,
 }
+
+pub use orca_core::api_types::LastBackupResult;
 
 /// A node registered in the cluster.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -152,6 +170,9 @@ impl AppState {
             store: None,
             ws_agents: RwLock::new(HashMap::new()),
             log_listeners: RwLock::new(HashMap::new()),
+            backup_listeners: RwLock::new(HashMap::new()),
+            last_backup_results: RwLock::new(HashMap::new()),
+            master_last_backup_result: RwLock::new(None),
             exec_sessions: RwLock::new(HashMap::new()),
             pending_deploys: RwLock::new(HashMap::new()),
         }

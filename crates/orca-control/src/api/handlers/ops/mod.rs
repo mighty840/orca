@@ -1,5 +1,6 @@
 //! Service-level ops handlers: scale, redeploy, rollback, promote, stop, logs.
 
+mod backups;
 mod cluster;
 mod deploy;
 
@@ -8,6 +9,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use tracing::error;
 
+pub(crate) use backups::{cluster_backups, trigger_cluster_backup};
 pub(crate) use cluster::logs;
 pub(crate) use deploy::{promote, redeploy, rollback, scale, stop_all, stop_project, stop_service};
 

@@ -2601,6 +2601,7 @@ name = "orca-tui"
 version = "0.2.6-rc.7"
 dependencies = [
  "anyhow",
+ "chrono",
  "crossterm",
  "dirs-next",
  "orca-core",
