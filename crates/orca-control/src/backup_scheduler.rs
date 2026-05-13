@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use cron::Schedule;
-use orca_core::backup::{BackupConfig, BackupManager};
+use orca_core::backup::BackupConfig;
 use orca_core::ws_types::MasterMessage;
 use tracing::{error, info};
 
@@ -36,7 +36,6 @@ pub fn spawn_backup_scheduler(
 
     info!("Backup scheduler started with schedule: {schedule_str}");
     let handle = tokio::spawn(async move {
-        let mgr = Arc::new(BackupManager::new(config.clone()));
         loop {
             let sleep_dur = match duration_until_next(&schedule) {
                 Some(d) => d,
@@ -47,7 +46,7 @@ pub fn spawn_backup_scheduler(
             };
             info!("Next backup in {}s", sleep_dur.as_secs());
             tokio::time::sleep(sleep_dur).await;
-            run_scheduled_backup(&mgr).await;
+            run_local_backup(&config).await;
             dispatch_agent_backups(&state, &config).await;
         }
     });
@@ -88,41 +87,44 @@ async fn collect_service_hooks(state: &AppState) -> std::collections::HashMap<St
         .collect()
 }
 
-/// Execute a backup run for all configured targets.
+/// Execute a full local backup on master by spawning `orca backup all`.
 ///
-/// This backs up:
-///   1. `cluster.db` (orca control plane state)
-///   2. `secrets.json` (encrypted secrets store)
-///
-/// Docker volume backups are handled exclusively by agents via
-/// `dispatch_agent_backups`. Running `orca backup all` here as well caused
-/// two backup directories per day on co-located master+agent nodes.
-async fn run_scheduled_backup(mgr: &BackupManager) {
-    info!("Starting scheduled backup run");
-    let state_dir = dirs_next::home_dir()
-        .unwrap_or_else(|| ".".into())
-        .join(".orca");
-
-    if state_dir.exists() {
-        let date = chrono::Utc::now().format("%Y-%m-%d");
-        let prefix = format!("master/{date}");
-        let cluster_db = state_dir.join("cluster.db");
-        if cluster_db.exists() {
-            match mgr.backup_file("cluster-db", &cluster_db, &prefix) {
-                Ok(()) => info!("Backed up cluster.db"),
-                Err(e) => error!("Failed to backup cluster.db: {e}"),
-            }
+/// This backs up master's Docker volumes AND config files (cluster.db,
+/// secrets.json, cluster.toml) — same code path as a manual `orca backup all`.
+/// The backup config is passed via env var so the subprocess uses the same
+/// targets (including resolved S3 credentials) as the scheduler.
+async fn run_local_backup(config: &BackupConfig) {
+    info!("Starting scheduled local backup");
+    let config_json = match serde_json::to_string(config) {
+        Ok(j) => j,
+        Err(e) => {
+            error!("Failed to serialize backup config: {e}");
+            return;
         }
-        let secrets = state_dir.join("secrets.json");
-        if secrets.exists() {
-            match mgr.backup_file("secrets", &secrets, &prefix) {
-                Ok(()) => info!("Backed up secrets.json"),
-                Err(e) => error!("Failed to backup secrets.json: {e}"),
-            }
+    };
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(e) => {
+            error!("Failed to resolve current exe for local backup: {e}");
+            return;
         }
+    };
+    match tokio::process::Command::new(&exe)
+        .args(["backup", "all"])
+        .env("ORCA_BACKUP_CONFIG_JSON", &config_json)
+        .output()
+        .await
+    {
+        Ok(out) if out.status.success() => {
+            let msg = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            info!("Master backup complete: {msg}");
+        }
+        Ok(out) => {
+            let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            error!("Master backup failed: {msg}");
+        }
+        Err(e) => error!("Failed to spawn master backup: {e}"),
     }
-
-    info!("Scheduled backup run complete");
 }
 
 #[cfg(test)]
@@ -259,57 +261,26 @@ mod tests {
         dispatch_agent_backups(&state, &config).await;
     }
 
-    /// `run_scheduled_backup` must back up state files (cluster.db, secrets.json)
-    /// to the configured local target, and must NOT launch any subprocess.
-    /// If it launched `orca backup all` locally AND dispatched to agents, co-located
-    /// nodes would receive two backup dirs per day.
-    #[tokio::test]
-    async fn run_scheduled_backup_writes_state_files_only() {
+    /// `run_local_backup` serializes the config to JSON and passes it via env
+    /// var. Verify the JSON round-trips so the spawned subprocess sees the
+    /// same targets the scheduler holds.
+    #[test]
+    fn local_backup_config_json_roundtrip() {
         use orca_core::backup::BackupTarget;
 
-        let tmp = tempfile::tempdir().unwrap();
-        let target_dir = tmp.path().join("backups");
-        let fake_state = tmp.path().join(".orca");
-        std::fs::create_dir_all(&fake_state).unwrap();
-        std::fs::write(fake_state.join("cluster.db"), b"db-content").unwrap();
-        std::fs::write(fake_state.join("secrets.json"), b"{}").unwrap();
-
         let config = BackupConfig {
-            schedule: None,
+            schedule: Some("0 0 3 * * *".to_string()),
             retention_days: 7,
             targets: vec![BackupTarget::Local {
-                path: target_dir.to_str().unwrap().to_string(),
+                path: "/tmp/backups".to_string(),
             }],
         };
-        let mgr = BackupManager::new(config);
-
-        // We cannot inject home_dir in run_scheduled_backup, so call backup_file
-        // directly — same code path, same BackupManager.
-        mgr.backup_file("cluster-db", &fake_state.join("cluster.db"), "")
-            .unwrap();
-        mgr.backup_file("secrets", &fake_state.join("secrets.json"), "")
-            .unwrap();
-
-        let backups: Vec<_> = std::fs::read_dir(&target_dir)
-            .unwrap()
-            .filter_map(|e| e.ok())
-            .collect();
-        assert_eq!(
-            backups.len(),
-            2,
-            "only cluster.db and secrets.json should be backed up"
-        );
-        assert!(
-            backups
-                .iter()
-                .any(|e| e.file_name().to_str().unwrap().starts_with("cluster-db")),
-            "cluster-db backup must be present"
-        );
-        assert!(
-            backups
-                .iter()
-                .any(|e| e.file_name().to_str().unwrap().starts_with("secrets")),
-            "secrets backup must be present"
-        );
+        let json = serde_json::to_string(&config).unwrap();
+        let back: BackupConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.retention_days, 7);
+        match &back.targets[0] {
+            BackupTarget::Local { path } => assert_eq!(path, "/tmp/backups"),
+            _ => panic!("expected Local target"),
+        }
     }
 }
