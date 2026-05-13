@@ -41,7 +41,7 @@ pub fn enumerate_local_backups(home: &Path) -> Vec<BackupSnapshotSummary> {
         .filter_map(Result::ok)
         .filter_map(|e| snapshot_from_dir(&e.path()))
         .collect();
-    snapshots.sort_by(|a, b| b.epoch_secs.cmp(&a.epoch_secs));
+    snapshots.sort_by_key(|s| std::cmp::Reverse(s.epoch_secs));
     snapshots
 }
 
