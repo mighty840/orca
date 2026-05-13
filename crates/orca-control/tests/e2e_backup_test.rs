@@ -1,52 +1,21 @@
 //! E2E tests: volume backup and restore with real Docker.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
+use futures_util::StreamExt;
 
-use tokio::sync::RwLock;
-
-use orca_control::state::AppState;
-use orca_core::config::{ClusterConfig, ClusterMeta};
-
-fn test_state() -> Arc<AppState> {
-    let runtime = Arc::new(orca_agent::docker::ContainerRuntime::new().expect("Docker required"));
-    Arc::new(AppState::new(
-        ClusterConfig {
-            cluster: ClusterMeta {
-                name: "e2e-backup".into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-        runtime,
-        None,
-        Arc::new(RwLock::new(HashMap::new())),
-        Arc::new(RwLock::new(Vec::new())),
-    ))
-}
-
-async fn cleanup(prefix: &str) {
-    let docker = bollard::Docker::connect_with_local_defaults().unwrap();
-    let opts = bollard::container::ListContainersOptions::<String> {
-        all: true,
-        filters: HashMap::from([("name".to_string(), vec![prefix.to_string()])]),
+/// Pull `image` if it isn't already present locally. The test creates
+/// short-lived busybox containers via `create_container`, which doesn't pull
+/// implicitly — without this the test 404s on a fresh machine.
+async fn ensure_image(docker: &bollard::Docker, image: &str) {
+    if docker.inspect_image(image).await.is_ok() {
+        return;
+    }
+    let opts = bollard::image::CreateImageOptions {
+        from_image: image,
         ..Default::default()
     };
-    if let Ok(containers) = docker.list_containers(Some(opts)).await {
-        for c in containers {
-            if let Some(id) = c.id {
-                let _ = docker
-                    .remove_container(
-                        &id,
-                        Some(bollard::container::RemoveContainerOptions {
-                            force: true,
-                            ..Default::default()
-                        }),
-                    )
-                    .await;
-            }
-        }
+    let mut stream = docker.create_image(Some(opts), None, None);
+    while let Some(item) = stream.next().await {
+        item.unwrap_or_else(|e| panic!("failed to pull {image}: {e}"));
     }
 }
 
@@ -55,6 +24,7 @@ async fn cleanup(prefix: &str) {
 #[ignore]
 async fn e2e_backup_and_restore_volume() {
     let docker = bollard::Docker::connect_with_local_defaults().unwrap();
+    ensure_image(&docker, "busybox:latest").await;
     let vol_name = "orca-e2e-backup-data";
 
     // Clean up any leftover volume
@@ -197,7 +167,6 @@ async fn e2e_backup_and_restore_volume() {
     docker.wait_container::<&str>(&c.id, None).next().await;
 
     use bollard::container::LogsOptions;
-    use futures_util::StreamExt;
     let mut logs = docker.logs::<&str>(
         &c.id,
         Some(LogsOptions {

@@ -15,6 +15,11 @@ pub fn free_port() -> u16 {
     listener.local_addr().unwrap().port()
 }
 
+/// Bearer token preconfigured in the test `cluster.toml`. Baked into the
+/// reqwest client returned by [`OrcaServer::client`] so requests authenticate
+/// against the auto-token-required orca server out of the box.
+pub const E2E_TOKEN: &str = "e2e-test-token";
+
 /// Guard struct that manages an `orca server` child process.
 ///
 /// On [`Drop`], the process is killed and the temporary config file is cleaned up.
@@ -44,8 +49,16 @@ impl OrcaServer {
         std::fs::create_dir_all(&config_dir).expect("failed to create temp dir");
         let config_path = config_dir.join("cluster.toml");
 
+        // Preconfigure an `api_tokens` entry so the server skips its
+        // auto-generation path (`crates/orca-cli/src/handlers/server.rs`,
+        // `if cluster_config.api_tokens.is_empty()`) and uses a token we
+        // already know — without it the server writes a random token to
+        // `~/.orca/cluster.token` and every request from this test
+        // would 401.
         let config_content = format!(
-            r#"[cluster]
+            r#"api_tokens = ["{E2E_TOKEN}"]
+
+[cluster]
 name = "e2e-test"
 api_port = {api_port}
 "#
@@ -130,9 +143,20 @@ api_port = {api_port}
         }
     }
 
-    /// Return a [`reqwest::Client`] for making API calls.
+    /// Return a [`reqwest::Client`] preconfigured with the bearer token from
+    /// the test cluster.toml. Every request through this client authenticates
+    /// against the orca server without each test re-declaring the header.
     pub fn client(&self) -> reqwest::Client {
-        reqwest::Client::new()
+        let mut headers = reqwest::header::HeaderMap::new();
+        let value = format!("Bearer {E2E_TOKEN}");
+        headers.insert(
+            reqwest::header::AUTHORIZATION,
+            reqwest::header::HeaderValue::from_str(&value).expect("static header value"),
+        );
+        reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            .expect("reqwest client build")
     }
 }
 
