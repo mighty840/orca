@@ -50,7 +50,10 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
         ("2 / n", "Nodes view (CPU/Mem/Disk/Net sparklines)"),
         ("3", "Secrets view"),
         ("4", "Backups view (per-node snapshot status)"),
-        ("↵ on a backup row", "Drill into snapshot list for that node"),
+        (
+            "↵ on a backup row",
+            "Drill into snapshot list for that node",
+        ),
         ("l", "Logs for selected service"),
         ("?", "This help screen"),
     ] {

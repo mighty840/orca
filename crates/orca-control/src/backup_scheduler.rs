@@ -135,7 +135,9 @@ async fn invoke_subprocess(config: &BackupConfig) -> (bool, String) {
             // always the human-readable summary (e.g. "Backup complete: 2
             // file(s)."); take that and we don't have to scrub colors.
             let stdout = String::from_utf8_lossy(&out.stdout);
-            let msg = last_non_empty_line(&stdout).unwrap_or("backup complete").to_string();
+            let msg = last_non_empty_line(&stdout)
+                .unwrap_or("backup complete")
+                .to_string();
             info!("Master backup complete: {msg}");
             (true, msg)
         }

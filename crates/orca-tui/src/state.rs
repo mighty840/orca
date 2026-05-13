@@ -48,8 +48,12 @@ fn push_capped<T>(buf: &mut VecDeque<T>, value: T) {
 pub enum View {
     Services,
     Nodes,
-    Logs { service: String },
-    Detail { service: String },
+    Logs {
+        service: String,
+    },
+    Detail {
+        service: String,
+    },
     Help,
     Secrets,
     Backups,
@@ -57,7 +61,9 @@ pub enum View {
     /// `AppState::backups.nodes`. The index is captured at push-time
     /// rather than a node identifier so master (which has no `node_id`)
     /// can be the target too.
-    BackupSnapshots { node_idx: usize },
+    BackupSnapshots {
+        node_idx: usize,
+    },
 }
 
 /// Input mode for the TUI.

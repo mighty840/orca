@@ -11,17 +11,13 @@ use crate::api::NodeBackupStatus;
 use crate::state::AppState;
 
 pub fn draw_backup_snapshots(f: &mut Frame, area: Rect, state: &AppState, node_idx: usize) {
-    let Some(node) = state
-        .backups
-        .as_ref()
-        .and_then(|b| b.nodes.get(node_idx))
-    else {
+    let Some(node) = state.backups.as_ref().and_then(|b| b.nodes.get(node_idx)) else {
         let block = Block::default()
             .title(" Snapshots ")
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Yellow));
-        let para = Paragraph::new("  Node no longer in the latest response — press Esc.")
-            .block(block);
+        let para =
+            Paragraph::new("  Node no longer in the latest response — press Esc.").block(block);
         f.render_widget(para, area);
         return;
     };
@@ -31,9 +27,10 @@ pub fn draw_backup_snapshots(f: &mut Frame, area: Rect, state: &AppState, node_i
             .title(format!(" Snapshots — {} (0) ", node.hostname))
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Cyan));
-        let para =
-            Paragraph::new("  No snapshots on this node yet. Press 'b' on the Backups view to trigger one.")
-                .block(block);
+        let para = Paragraph::new(
+            "  No snapshots on this node yet. Press 'b' on the Backups view to trigger one.",
+        )
+        .block(block);
         f.render_widget(para, area);
         return;
     }
