@@ -43,6 +43,10 @@ pub async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str
             state.selected_webhook = 0;
             state.push_view(View::Webhooks);
         }
+        Some("networks") => {
+            crate::refresh_networks(client, state).await;
+            state.push_view(View::Networks);
+        }
         Some("webhook-add") => cmd_webhook_add(state, client, &parts).await,
         Some("webhook-edit") => cmd_webhook_edit(state, client, &parts).await,
         Some("webhook-rm") => cmd_webhook_rm(state, client, &parts).await,

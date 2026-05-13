@@ -60,6 +60,11 @@ pub struct AppState {
     pub backup_listeners: RwLock<
         HashMap<String, tokio::sync::mpsc::Sender<orca_core::ws_types::BackupStatusReportData>>,
     >,
+    /// Network status listeners: request_id → report sender. Same pattern as
+    /// `backup_listeners`, used by the `/api/v1/cluster/networks` handler.
+    pub network_listeners: RwLock<
+        HashMap<String, tokio::sync::mpsc::Sender<orca_core::ws_types::NetworkStatusReportData>>,
+    >,
     /// Last completed `BackupResult` per agent node, recorded as the result
     /// arrives over WS. Surfaced alongside the snapshot listing so the
     /// dashboard can show a node's last-failure message without having to
@@ -178,6 +183,7 @@ impl AppState {
             ws_agents: RwLock::new(HashMap::new()),
             log_listeners: RwLock::new(HashMap::new()),
             backup_listeners: RwLock::new(HashMap::new()),
+            network_listeners: RwLock::new(HashMap::new()),
             last_backup_results: RwLock::new(HashMap::new()),
             master_last_backup_result: RwLock::new(None),
             webhook_invocations: RwLock::new(HashMap::new()),

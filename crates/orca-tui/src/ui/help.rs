@@ -60,6 +60,10 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
         ),
         ("5", "Webhooks view (registered push triggers + history)"),
         (
+            "6",
+            "Networks view (per-node Docker bridges + public-edge routes)",
+        ),
+        (
             "↵ on a webhook row",
             "Drill into invocation history for that webhook",
         ),
@@ -98,6 +102,7 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
         (":secrets", "Open the secrets view"),
         (":backups", "Open the cluster backups dashboard"),
         (":webhooks", "Open the webhooks dashboard"),
+        (":networks", "Open the cluster networks view"),
         (
             ":webhook-add <repo> <branch> <svc> [--secret X] [--infra]",
             "Register a webhook",

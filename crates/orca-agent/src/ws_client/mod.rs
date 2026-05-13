@@ -6,6 +6,7 @@
 mod backup;
 mod backup_status;
 mod logs;
+pub mod network_status;
 mod reconcile;
 
 use std::sync::Arc;
@@ -26,6 +27,7 @@ use crate::grpc::AgentClient;
 use backup::run_agent_backup;
 use backup_status::send_backup_status;
 use logs::stream_logs;
+use network_status::send_network_status;
 use reconcile::reconcile_services;
 
 /// Run the WS connection loop with automatic reconnection.
@@ -246,6 +248,12 @@ async fn handle_master_message(
             let tx = out_tx.clone();
             tokio::spawn(async move {
                 send_backup_status(request_id, node_id, tx).await;
+            });
+        }
+        MasterMessage::NetworkStatusRequest { request_id } => {
+            let tx = out_tx.clone();
+            tokio::spawn(async move {
+                send_network_status(request_id, node_id, tx).await;
             });
         }
         MasterMessage::Ack { node_id } => {

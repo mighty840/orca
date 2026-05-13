@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use crate::api::{
-    ClusterBackupsResponse, ClusterInfo, NodeInfo, SecretUsage, ServiceStatus, StatusResponse,
-    WebhookEntry, WebhookInvocation,
+    ClusterBackupsResponse, ClusterInfo, ClusterNetworksResponse, NodeInfo, SecretUsage,
+    ServiceStatus, StatusResponse, WebhookEntry, WebhookInvocation,
 };
 pub use crate::metrics::{MetricHistory, parse_human_bytes};
 
@@ -40,6 +40,7 @@ pub enum View {
     SecretRefs {
         key: String,
     },
+    Networks,
 }
 
 /// Input mode for the TUI.
@@ -122,6 +123,9 @@ pub struct AppState {
     /// Secrets organizer data (`GET /api/v1/secrets/usage`). Refreshed on
     /// entry and on `r`; never auto-polled.
     pub secrets_usage: Vec<SecretUsage>,
+    /// Cluster networks data (`GET /api/v1/cluster/networks`). Refreshed on
+    /// entry and on `r`. `None` means we haven't fetched yet this session.
+    pub networks: Option<ClusterNetworksResponse>,
 }
 
 impl Default for AppState {
@@ -171,6 +175,7 @@ impl AppState {
             selected_webhook: 0,
             webhook_invocations: Vec::new(),
             secrets_usage: Vec::new(),
+            networks: None,
         }
     }
 
@@ -363,6 +368,7 @@ impl AppState {
             View::Webhooks => "Webhooks",
             View::WebhookInvocations { .. } => "Invocations",
             View::SecretRefs { .. } => "Secret Refs",
+            View::Networks => "Networks",
         }
     }
 }

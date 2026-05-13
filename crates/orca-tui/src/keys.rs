@@ -179,6 +179,7 @@ pub async fn handle_normal_key(
                 View::Secrets | View::SecretRefs { .. } => {
                     super::refresh_secrets_usage(client, state).await
                 }
+                View::Networks => super::refresh_networks(client, state).await,
                 _ => {}
             }
             *last_refresh = tokio::time::Instant::now();
@@ -212,6 +213,11 @@ pub async fn handle_normal_key(
             state.push_view(View::Webhooks);
         }
         KeyCode::Char('5') => {}
+        KeyCode::Char('6') if !matches!(state.view, View::Networks) => {
+            super::refresh_networks(client, state).await;
+            state.push_view(View::Networks);
+        }
+        KeyCode::Char('6') => {}
         // `a` adds a webhook (claimed only in the Webhooks view to avoid
         // colliding with future global shortcuts).
         KeyCode::Char('a') if matches!(state.view, View::Webhooks) => {
