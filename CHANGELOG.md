@@ -7,15 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.7-rc.2] - 2026-05-14
-
-### Fixed
-
-- **TUI secrets view didn't scroll.** Moving the cursor past the bottom of the visible area left the highlight off-screen because the Table widget renders top-of-list only. Mirrored the services-view's `compute_scroll`, slice the flat row list, and surface a `[N/total]` indicator in the title. (#47)
-- **TUI networks tab was slow and unresponsive on load.** `enumerate_orca_networks` in the agent did `inspect_container` serially per orca-* container — 20 containers ≈ 20 sequential round-trips to the Docker socket. Replaced the loop with `futures::join_all` so inspects run concurrently. (#47)
-- **TUI networks tab didn't scroll.** `draw_networks` rendered the whole tree as a Paragraph with no viewport. Added `state.network_scroll`, window the rendered Lines, and wired `j`/`k`/`g`/`G`/`PgUp`/`PgDn` for scrolling. (#47)
-
-## [0.2.7-rc.1] - 2026-05-14
+## [0.2.7] - 2026-05-14
 
 ### Added
 
@@ -25,10 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **TUI secrets organizer** (`3` view, now grouped). Keys are now grouped by inferred scope — `global` for cluster-wide or cross-project secrets, project name for keys referenced by services in exactly one project, and `broken refs` for keys templated in env values but missing from the store. Each row shows a reference-count badge. `Enter` drills into the list of referencing services. Add/edit/delete continues to work through the existing `:set` / `:rm` commands. New endpoint: `GET /api/v1/secrets/usage` returns each key with its referencing services (parsed from `${secrets.KEY}` patterns in `ServiceConfig.env`). (#37)
 - **TUI networks view** (`6` / `:networks`) — per-node tree of `orca-*` Docker bridge networks plus the master's public-edge route table. For each node: hostname, role, public-edge `domain → service` mappings, then each bridge network with its attached services and per-network aliases (color-coded: green for services with aliases, yellow for the "no aliases" case the rc2 migration was bitten by). Aggregated via a new `GET /api/v1/cluster/networks` endpoint that dispatches `NetworkStatusRequest` over WS to every connected agent and merges with the master's own enumeration. Read-only; agent edge-route surfacing + ASCII graph rendering are deferred to follow-ups. (#17)
 - **Nightly E2E test job in CI.** `.github/workflows/ci.yml` gained a `schedule: cron "0 6 * * *"` and `workflow_dispatch` trigger. The previously-dormant `e2e` job (gated on `github.event_name == 'schedule'`) now actually fires once a day and can be kicked off manually for release validation. (#46)
-- **14 new E2E regression tests** across auth enforcement, secret env interpolation, the cluster networks dashboard, master backup volume inclusion, GitHub webhook HMAC validation, RBAC role matrix (viewer/deployer/admin), HTTP fallback proxy, and multi-replica route filtering on partial failure. Local suite now stands at 42 ignored tests, all green. (#46)
+- **24 new E2E regression tests.** 14 in #46 — auth enforcement, secret env interpolation, the cluster networks dashboard, master backup volume inclusion, GitHub webhook HMAC validation, RBAC role matrix (viewer/deployer/admin), HTTP fallback proxy, and multi-replica route filtering on partial failure. 10 more in #48 — a `fake_agent` fixture (tokio-tungstenite) that joins the master over a real WebSocket so the cluster fan-out RPCs (`cluster/networks`, `cluster/backups`) are exercised end-to-end with an actual joined agent, plus CLI E2E tests for `status`, `logs`, `stop`, `redeploy`, `rollback`, `secrets list`, and the full `webhooks add/list/remove` round-trip. Total ignored suite: 51 tests, all green.
 
 ### Fixed
 
+- **TUI secrets view didn't scroll.** Moving the cursor past the bottom of the visible area left the highlight off-screen because the Table widget renders top-of-list only. Mirrored the services-view's `compute_scroll`, slice the flat row list, and surface a `[N/total]` indicator in the title. (#47)
+- **TUI networks tab was slow and unresponsive on load.** `enumerate_orca_networks` in the agent did `inspect_container` serially per orca-* container — 20 containers ≈ 20 sequential round-trips to the Docker socket. Replaced the loop with `futures::join_all` so inspects run concurrently. (#47)
+- **TUI networks tab didn't scroll.** `draw_networks` rendered the whole tree as a Paragraph with no viewport. Added `state.network_scroll`, window the rendered Lines, and wired `j`/`k`/`g`/`G`/`PgUp`/`PgDn` for scrolling. (#47)
 - **HTTP fallback proxy was dead config.** `FallbackConfig.http` was accepted in `cluster.toml` and plumbed through `run_proxy_with_fallback`, but `handler::handle_request` never consulted it — requests to unmatched hosts always returned 404 regardless of fallback. Now the handler forwards to `fallback.http` via the existing `forward_with_retry` path. TLS SNI passthrough was already wired and is unchanged. (#46)
 - **Three latent failures in the ignored E2E suite.** The CLI test harness (`OrcaServer`) now pre-declares `api_tokens` so the spawned `orca server` doesn't auto-generate a random token the test client can't see (deploy/scale tests were 401'ing). `e2e_backup_and_restore_volume` pre-pulls `busybox:latest` since `bollard::create_container` doesn't pull on miss. `e2e_health_checker_marks_unhealthy` switched from the legacy `health: ...` shorthand to an explicit `liveness` block with `initial_delay_secs: 0` so it doesn't race the default 5s probe-delay window. (#46)
 
