@@ -17,9 +17,25 @@ use crate::forward::{forward_with_retry, redirect_to_https};
 use crate::rate_limit::RateLimiter;
 use crate::routing::{find_matching_trigger, select_path_targets};
 use crate::{RouteTarget, SharedWasmTriggers, WasmInvoker};
+use orca_core::config::FallbackConfig;
 
 /// ACME challenge path prefix.
 const ACME_CHALLENGE_PREFIX: &str = "/.well-known/acme-challenge/";
+
+/// Synthesize a one-element `Vec<RouteTarget>` pointing at the configured
+/// `fallback.http` target, used when the route table doesn't know about the
+/// requested host (or path) and we want to forward to another reverse proxy
+/// instead of returning 404. Returns `None` when no HTTP fallback is set.
+fn fallback_target(fallback: Option<&FallbackConfig>) -> Option<RouteTarget> {
+    let addr = fallback?.http.as_ref()?.clone();
+    Some(RouteTarget {
+        address: addr,
+        service_name: "<fallback>".to_string(),
+        path_pattern: None,
+        weight: 100,
+        strip_prefix: None,
+    })
+}
 
 /// Handle ACME HTTP-01 challenge requests.
 ///
@@ -74,6 +90,7 @@ pub(crate) async fn handle_request(
     is_tls: bool,
     rate_limiter: &RateLimiter,
     peer: SocketAddr,
+    fallback: Option<&FallbackConfig>,
 ) -> Result<Response<http_body_util::Full<hyper::body::Bytes>>, hyper::Error> {
     let start = Instant::now();
     let path = req.uri().path().to_string();
@@ -148,30 +165,51 @@ pub(crate) async fn handle_request(
         }
     }
 
+    // Resolve the request to either matched route targets or a synthetic
+    // fallback target. When the route table doesn't know about this host (or
+    // path) but a `fallback.http` is configured, build a one-element target
+    // vec pointing at the fallback so the existing forward path handles it
+    // uniformly. This is what makes orca able to coexist with another
+    // reverse proxy on the same edge.
     let routes = route_table.read().await;
-    let Some(targets) = routes.get(&host) else {
-        return Ok(error_response(
-            StatusCode::NOT_FOUND,
-            &format!("no service for host: {host}"),
-        ));
+    let matched: Vec<RouteTarget> = match routes.get(&host) {
+        Some(targets) if targets.is_empty() => {
+            drop(routes);
+            return Ok(error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                &format!("no backends for host: {host}"),
+            ));
+        }
+        Some(targets) => {
+            let sel = select_path_targets(targets, &path);
+            if sel.is_empty() {
+                drop(routes);
+                if let Some(target) = fallback_target(fallback) {
+                    vec![target]
+                } else {
+                    return Ok(error_response(
+                        StatusCode::NOT_FOUND,
+                        &format!("no backend for path: {path} on host: {host}"),
+                    ));
+                }
+            } else {
+                sel
+            }
+        }
+        None => {
+            drop(routes);
+            if let Some(target) = fallback_target(fallback) {
+                vec![target]
+            } else {
+                return Ok(error_response(
+                    StatusCode::NOT_FOUND,
+                    &format!("no service for host: {host}"),
+                ));
+            }
+        }
     };
-
-    if targets.is_empty() {
-        return Ok(error_response(
-            StatusCode::SERVICE_UNAVAILABLE,
-            &format!("no backends for host: {host}"),
-        ));
-    }
-
-    let matched = select_path_targets(targets, &path);
-    if matched.is_empty() {
-        return Ok(error_response(
-            StatusCode::NOT_FOUND,
-            &format!("no backend for path: {path} on host: {host}"),
-        ));
-    }
     let base_idx = counter.fetch_add(1, Ordering::Relaxed);
-    drop(routes);
+    // `routes` was dropped in each branch above; nothing more to release.
 
     // WebSocket upgrade: tunnel via raw TCP instead of HTTP proxying
     if crate::websocket::is_websocket_upgrade(&req) {

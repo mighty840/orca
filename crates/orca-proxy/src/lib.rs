@@ -326,6 +326,7 @@ pub(crate) async fn serve_loop_with_fallback(
         let fb = fallback.clone();
         let routes_for_sni = routes.clone();
 
+        let fb_for_service = fb.clone();
         tokio::spawn(async move {
             let service = service_fn(move |req: Request<Incoming>| {
                 let routes = routes.clone();
@@ -335,6 +336,7 @@ pub(crate) async fn serve_loop_with_fallback(
                 let client = client.clone();
                 let acme = acme.clone();
                 let rl = rl.clone();
+                let fb = fb_for_service.clone();
                 async move {
                     if let Some(resp) = handle_acme_challenge(&req, acme.as_deref()).await {
                         return Ok(resp);
@@ -349,6 +351,7 @@ pub(crate) async fn serve_loop_with_fallback(
                         is_tls,
                         &rl,
                         peer,
+                        fb.as_ref().as_ref(),
                     )
                     .await
                 }
