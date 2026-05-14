@@ -7,8 +7,9 @@ to start without re-research.
 
 - **Split files over 275 lines back under the original limit.** The
   multi-node rollout pushed 12 files over 275 lines. CI limit was
-  temporarily relaxed to 420 to unblock v0.2.0-rc.2; needs to come
-  back down. Offenders:
+  temporarily relaxed to 420 to unblock v0.2.0-rc.2, then to 500 in
+  v0.2.8 when the proxy-timeout fix pushed `orca-proxy/src/lib.rs`
+  past 420; needs to come back down. Offenders:
   - `crates/orca-proxy/src/lib.rs` (406) — move `RouteTarget` to its
     own module
   - `crates/orca-agent/src/docker/runtime.rs` (384) — split out

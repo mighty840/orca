@@ -12,7 +12,12 @@ use tokio::net::TcpStream;
 /// remain available for the subsequent TLS handshake.
 pub async fn peek_sni(stream: &mut TcpStream) -> Option<String> {
     let mut buf = [0u8; 2048];
-    let n = stream.peek(&mut buf).await.ok()?;
+    // Bound the peek so a slowloris client (TCP open, no bytes sent) can't
+    // park this task indefinitely. Real TLS clients send ClientHello in <1s.
+    let n = tokio::time::timeout(std::time::Duration::from_secs(5), stream.peek(&mut buf))
+        .await
+        .ok()?
+        .ok()?;
     parse_sni(&buf[..n])
 }
 
@@ -149,5 +154,42 @@ mod tests {
         // Handshake record but not ClientHello (type=0x02 = ServerHello)
         let buf = [0x16, 0x03, 0x01, 0x00, 0x10, 0x02];
         assert_eq!(parse_sni(&buf), None);
+    }
+
+    /// A slowloris client (opens TCP, sends no bytes) must not park
+    /// `peek_sni` indefinitely. Regression coverage for the missing
+    /// timeout on `stream.peek()` that could hang the TLS accept loop.
+    #[tokio::test]
+    async fn peek_sni_returns_quickly_when_client_sends_nothing() {
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // Client task: connect and hold the socket without sending anything.
+        let client_task = tokio::spawn(async move {
+            let _s = tokio::net::TcpStream::connect(addr).await.unwrap();
+            // Hold open until the test completes.
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+        });
+
+        let (mut server_stream, _) = listener.accept().await.unwrap();
+
+        let start = std::time::Instant::now();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(8),
+            peek_sni(&mut server_stream),
+        )
+        .await
+        .expect("peek_sni must not hang past its own timeout");
+        let elapsed = start.elapsed();
+
+        assert_eq!(result, None, "no bytes sent → no SNI extractable");
+        assert!(
+            elapsed < std::time::Duration::from_secs(7),
+            "peek_sni took {elapsed:?}; expected to bail at the 5s internal timeout"
+        );
+
+        client_task.abort();
     }
 }

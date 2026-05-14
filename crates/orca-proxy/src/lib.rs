@@ -298,6 +298,13 @@ pub(crate) async fn serve_loop_with_fallback(
         reqwest::Client::builder()
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
+            // Timeouts are mandatory: without them, a hung upstream (slow
+            // backend, dead fallback, slowloris) parks the per-request task
+            // forever. We accept many in-flight tasks but every one must
+            // eventually complete so the proxy can recover without a restart.
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(300))
+            .pool_idle_timeout(std::time::Duration::from_secs(90))
             .build()
             .expect("failed to build HTTP client"),
     );

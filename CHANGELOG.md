@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.8] - 2026-05-14
+
+### Fixed
+
+- **Proxy could get stuck on hung upstreams, requiring a restart to recover.** The reverse proxy's reqwest client was built without timeouts, so a slow/dead backend (or a hung HTTP fallback target) parked the per-request task forever — observed as the proxy going unresponsive while CPU idled and the listener kept accepting connections. The v0.2.7 fallback wire amplified the impact by routing every unmatched-host request through the same un-timed code path. Bounded with `connect_timeout = 10s`, `timeout = 300s`, `pool_idle_timeout = 90s`. (Affects all v0.2.x; surfaced in 0.2.7.)
+- **TLS listener could hang on slowloris.** `peek_sni` did an unbounded `TcpStream::peek` before accepting the TLS handshake, so a client that opened TCP and sent no bytes pinned the per-connection task. Bounded to 5s — real TLS clients send ClientHello in well under one second.
+- **WebSocket proxy could hang on dead backends.** Both `TcpStream::connect` and the 101-response header read had no timeout, so a backend that accepted the TCP connection but never replied parked the upgrade task. Bounded to 5s and 10s respectively; on timeout the client sees 504 Gateway Timeout instead of hanging.
+
 ## [0.2.7] - 2026-05-14
 
 ### Added
