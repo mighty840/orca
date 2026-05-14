@@ -19,6 +19,21 @@ use ratatui::widgets::{Block, Borders, Paragraph};
 use crate::api::{NodeNetworks, NodeRole};
 use crate::state::AppState;
 
+/// Total rendered lines for the current networks data. Used by `keys.rs::G`
+/// to snap the scroll viewport to the last screen without having to peek at
+/// the frame area at key-handling time.
+pub fn rendered_line_count(state: &AppState) -> usize {
+    let Some(resp) = &state.networks else {
+        return 0;
+    };
+    let mut lines: Vec<Line> = Vec::new();
+    for node in &resp.nodes {
+        render_node(node, &mut lines);
+        lines.push(Line::from(""));
+    }
+    lines.len()
+}
+
 pub fn draw_networks(f: &mut Frame, area: Rect, state: &AppState) {
     let Some(resp) = &state.networks else {
         let block = Block::default()
@@ -41,8 +56,23 @@ pub fn draw_networks(f: &mut Frame, area: Rect, state: &AppState) {
         lines.push(Line::from(""));
     }
 
+    // Window the tree to keep `state.network_scroll` rows at the top. The
+    // view has no selection cursor — scroll is purely viewport offset that
+    // j/k/PgUp/PgDn move. 2 rows reserved for the top/bottom border of the
+    // surrounding Block.
+    let visible_rows = (area.height as usize).saturating_sub(2).max(1);
+    let max_scroll = lines.len().saturating_sub(visible_rows);
+    let scroll = state.network_scroll.min(max_scroll);
+    let end = (scroll + visible_rows).min(lines.len());
+    let view: Vec<Line> = lines[scroll..end].to_vec();
+
+    let scroll_indicator = if lines.len() > visible_rows {
+        format!(" [{}/{}] ", scroll + 1, lines.len())
+    } else {
+        String::new()
+    };
     let title = format!(
-        " Networks ({total_nodes} node{}, {total_bridges} bridge{}, {total_domains} domain{}) ",
+        " Networks ({total_nodes} node{}, {total_bridges} bridge{}, {total_domains} domain{}){scroll_indicator}",
         plural(total_nodes),
         plural(total_bridges),
         plural(total_domains),
@@ -51,7 +81,7 @@ pub fn draw_networks(f: &mut Frame, area: Rect, state: &AppState) {
         .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
-    f.render_widget(Paragraph::new(lines).block(block), area);
+    f.render_widget(Paragraph::new(view).block(block), area);
 }
 
 fn render_node(node: &NodeNetworks, out: &mut Vec<Line>) {

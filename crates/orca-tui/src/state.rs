@@ -126,6 +126,9 @@ pub struct AppState {
     /// Cluster networks data (`GET /api/v1/cluster/networks`). Refreshed on
     /// entry and on `r`. `None` means we haven't fetched yet this session.
     pub networks: Option<ClusterNetworksResponse>,
+    /// Scroll offset (in rendered lines) for the Networks view. The view has
+    /// no selection cursor — j/k just shift the viewport.
+    pub network_scroll: usize,
 }
 
 impl Default for AppState {
@@ -176,6 +179,7 @@ impl AppState {
             webhook_invocations: Vec::new(),
             secrets_usage: Vec::new(),
             networks: None,
+            network_scroll: 0,
         }
     }
 

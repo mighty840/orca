@@ -92,6 +92,7 @@ pub async fn handle_normal_key(
                     state.selected_webhook += 1;
                 }
             }
+            View::Networks => state.network_scroll = state.network_scroll.saturating_add(1),
             _ => state.next_service(),
         },
         KeyCode::Char('k') | KeyCode::Up => match state.view {
@@ -111,6 +112,7 @@ pub async fn handle_normal_key(
                     state.selected_webhook -= 1;
                 }
             }
+            View::Networks => state.network_scroll = state.network_scroll.saturating_sub(1),
             _ => state.prev_service(),
         },
         KeyCode::Char('g') => match state.view {
@@ -118,6 +120,7 @@ pub async fn handle_normal_key(
             View::Backups => state.selected_backup_node = 0,
             View::BackupSnapshots { .. } => state.selected_backup_snapshot = 0,
             View::Webhooks => state.selected_webhook = 0,
+            View::Networks => state.network_scroll = 0,
             _ => state.selected_service = 0,
         },
         KeyCode::Char('G') => match state.view {
@@ -138,6 +141,11 @@ pub async fn handle_normal_key(
                 if !state.webhooks.is_empty() {
                     state.selected_webhook = state.webhooks.len() - 1;
                 }
+            }
+            View::Networks => {
+                // Snap to last line; render clamps to the visible window.
+                let total = super::ui::networks::rendered_line_count(state);
+                state.network_scroll = total.saturating_sub(1);
             }
             _ => {
                 let len = state.filtered_services().len();
@@ -215,6 +223,7 @@ pub async fn handle_normal_key(
         KeyCode::Char('5') => {}
         KeyCode::Char('6') if !matches!(state.view, View::Networks) => {
             super::refresh_networks(client, state).await;
+            state.network_scroll = 0;
             state.push_view(View::Networks);
         }
         KeyCode::Char('6') => {}
@@ -257,20 +266,24 @@ pub async fn handle_normal_key(
                 state.flash(format!("Word wrap {mode}"));
             }
         }
-        KeyCode::PageUp => {
-            if matches!(state.view, View::Logs { .. }) {
+        KeyCode::PageUp => match state.view {
+            View::Logs { .. } => {
                 state.service_scroll = state.service_scroll.saturating_add(20);
                 state.auto_refresh_logs = false;
             }
-        }
-        KeyCode::PageDown => {
-            if matches!(state.view, View::Logs { .. }) {
+            View::Networks => state.network_scroll = state.network_scroll.saturating_sub(10),
+            _ => {}
+        },
+        KeyCode::PageDown => match state.view {
+            View::Logs { .. } => {
                 state.service_scroll = state.service_scroll.saturating_sub(20);
                 if state.service_scroll == 0 {
                     state.auto_refresh_logs = true;
                 }
             }
-        }
+            View::Networks => state.network_scroll = state.network_scroll.saturating_add(10),
+            _ => {}
+        },
         _ => {}
     }
 }

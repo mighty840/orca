@@ -37,19 +37,40 @@ pub fn draw_secrets(f: &mut Frame, area: Rect, state: &AppState) {
         .filter(|r| matches!(r, FlatRow::Key { .. }))
         .count();
 
-    let rows: Vec<Row> = rows_data
+    // Window the flat list so the selection cursor stays on screen. Without
+    // this the Table widget renders top-of-list only — moving the cursor
+    // past the bottom of the visible area appears to "freeze" it because
+    // the highlight is being drawn off-screen.
+    //
+    // Reserve 3 rows for the surrounding Block borders + header.
+    let visible_rows = (area.height as usize).saturating_sub(3).max(1);
+    let scroll = compute_scroll(state.selected_secret, visible_rows, rows_data.len());
+    let end = (scroll + visible_rows).min(rows_data.len());
+
+    let rows: Vec<Row> = rows_data[scroll..end]
         .iter()
         .enumerate()
-        .map(|(i, r)| {
-            let selected = i == state.selected_secret;
+        .map(|(offset, r)| {
+            let actual = scroll + offset;
+            let selected = actual == state.selected_secret;
             render_row(r, selected)
         })
         .collect();
 
     let widths = [Constraint::Min(40), Constraint::Length(14)];
 
+    let title = if rows_data.len() > visible_rows {
+        format!(
+            " Secrets ({total_keys}) [{}/{}] ",
+            (scroll + 1).min(rows_data.len()),
+            rows_data.len()
+        )
+    } else {
+        format!(" Secrets ({total_keys}) ")
+    };
+
     let block = Block::default()
-        .title(format!(" Secrets ({total_keys}) "))
+        .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
@@ -57,6 +78,20 @@ pub fn draw_secrets(f: &mut Frame, area: Rect, state: &AppState) {
         Row::new(vec!["KEY", "REFERENCES"]).style(Style::default().add_modifier(Modifier::BOLD));
     let table = Table::new(rows, widths).header(header).block(block);
     f.render_widget(table, area);
+}
+
+/// Keep `selected` inside the visible window of `visible` rows. Mirrors the
+/// services view's scroll logic in `ui/table.rs` so cursor movement feels
+/// consistent across the two list views.
+fn compute_scroll(selected: usize, visible: usize, total: usize) -> usize {
+    if total <= visible {
+        return 0;
+    }
+    if selected < visible / 2 {
+        return 0;
+    }
+    let ideal = selected.saturating_sub(visible / 2);
+    ideal.min(total.saturating_sub(visible))
 }
 
 /// One render slot in the flat list. Group headers and key rows interleave so

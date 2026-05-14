@@ -95,31 +95,31 @@ pub async fn enumerate_orca_networks(docker: &Docker) -> Vec<DockerNetwork> {
         }
     };
 
-    for summary in containers {
-        let Some(names) = summary.names else {
-            continue;
-        };
-        let Some(raw) = names.first() else {
-            continue;
-        };
-        // Docker returns container names with a leading slash.
+    // Inspect every orca-* container concurrently. Sequential per-container
+    // calls used to dominate the dashboard load time on boxes with many
+    // services — `inspect_container` round-trips to the Docker socket, and
+    // 20+ serial calls felt like a UI hang.
+    use futures_util::future::join_all;
+    let inspect_jobs = containers.into_iter().filter_map(|summary| {
+        let names = summary.names?;
+        let raw = names.first()?;
         let container_name = raw.trim_start_matches('/').to_string();
         if !container_name.starts_with("orca-") {
-            continue;
+            return None;
         }
-        let Some(id) = summary.id else {
-            continue;
-        };
+        let id = summary.id?;
+        Some(async move {
+            let detail = docker
+                .inspect_container(&id, None::<bollard::container::InspectContainerOptions>)
+                .await
+                .ok()?;
+            let nets = detail.network_settings.and_then(|s| s.networks)?;
+            Some((container_name, nets))
+        })
+    });
 
-        let Ok(detail) = docker
-            .inspect_container(&id, None::<bollard::container::InspectContainerOptions>)
-            .await
-        else {
-            continue;
-        };
-        let Some(nets) = detail.network_settings.and_then(|s| s.networks) else {
-            continue;
-        };
+    for result in join_all(inspect_jobs).await.into_iter().flatten() {
+        let (container_name, nets) = result;
         for (net_name, endpoint) in nets {
             if !net_name.starts_with("orca-") {
                 continue;
