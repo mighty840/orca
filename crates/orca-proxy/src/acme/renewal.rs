@@ -114,7 +114,7 @@ mod tests {
         // Create a cert file with recent modification time (1 day ago)
         let cert_path = mgr.cert_path("fresh.example.com");
         fs::write(&cert_path, b"fake-cert-data").unwrap();
-        let recent_time = SystemTime::now() - Duration::from_secs(1 * 24 * 3600);
+        let recent_time = SystemTime::now() - Duration::from_secs(24 * 3600);
         filetime::set_file_mtime(
             &cert_path,
             filetime::FileTime::from_system_time(recent_time),

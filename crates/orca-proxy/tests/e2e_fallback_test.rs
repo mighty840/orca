@@ -138,3 +138,71 @@ async fn e2e_unmatched_host_404s_without_fallback() {
         resp.status()
     );
 }
+
+/// Spawn a TCP listener that accepts connections but never reads or writes.
+/// Simulates a hung backend whose `connect()` succeeds (so connect_timeout
+/// doesn't catch it) but which never sends a response.
+async fn spawn_blackhole_upstream() -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let Ok((stream, _)) = listener.accept().await else {
+                continue;
+            };
+            // Hold the socket so the kernel doesn't RST. Drop after a long
+            // delay; the test asserts the proxy gives up well before this.
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(900)).await;
+                drop(stream);
+            });
+        }
+    });
+    addr
+}
+
+/// Regression test for the missing-timeouts bug that required restarting the
+/// proxy to recover from a hung upstream. Routes an unmatched-host request
+/// through `fallback.http` to a black-hole backend and asserts the proxy
+/// returns an error within the request_timeout window, instead of parking
+/// the request indefinitely.
+///
+/// Long-running by design: the proxy's request_timeout is 300s, so this
+/// test takes ~5 minutes. Marked `#[ignore]` so it only runs in the nightly
+/// E2E suite.
+#[tokio::test]
+#[ignore]
+async fn e2e_hung_fallback_recovers_within_request_timeout() {
+    let blackhole = spawn_blackhole_upstream().await;
+    let route_table = Arc::new(RwLock::new(HashMap::new()));
+    let fallback = FallbackConfig {
+        http: Some(blackhole.to_string()),
+        tls: None,
+    };
+    let proxy_port = spawn_proxy(route_table, Some(fallback)).await;
+
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let start = std::time::Instant::now();
+    let resp = tokio::time::timeout(
+        Duration::from_secs(330),
+        client
+            .get(format!("http://127.0.0.1:{proxy_port}/anything"))
+            .header("Host", "unknown-host.example.com")
+            .send(),
+    )
+    .await
+    .expect("proxy must return within 330s, not hang forever")
+    .expect("the proxy itself must respond");
+    let elapsed = start.elapsed();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_GATEWAY,
+        "hung upstream should surface as 502, got {}",
+        resp.status()
+    );
+    assert!(
+        elapsed >= Duration::from_secs(280),
+        "expected ~300s wait (request_timeout), got {elapsed:?} — timeout may be miswired"
+    );
+}

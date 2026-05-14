@@ -53,12 +53,24 @@ pub(crate) async fn handle_websocket_proxy(
 
     // Connect to backend and complete the handshake NOW (before returning 101)
     // so we can extract Sec-WebSocket-Accept to forward to the browser.
-    let mut backend = match TcpStream::connect(&backend_addr).await {
-        Ok(s) => s,
-        Err(e) => {
+    // Bounded so a dead/slow backend can't park this task indefinitely.
+    let mut backend = match tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        TcpStream::connect(&backend_addr),
+    )
+    .await
+    {
+        Ok(Ok(s)) => s,
+        Ok(Err(e)) => {
             error!("WebSocket backend connect failed ({backend_addr}): {e}");
             let mut r = Response::new(http_body_util::Full::new(hyper::body::Bytes::new()));
             *r.status_mut() = StatusCode::BAD_GATEWAY;
+            return r;
+        }
+        Err(_) => {
+            error!("WebSocket backend connect timed out ({backend_addr})");
+            let mut r = Response::new(http_body_util::Full::new(hyper::body::Bytes::new()));
+            *r.status_mut() = StatusCode::GATEWAY_TIMEOUT;
             return r;
         }
     };
@@ -72,23 +84,35 @@ pub(crate) async fn handle_websocket_proxy(
 
     // Read backend's 101 header bytes (stop at \r\n\r\n) and extract
     // Sec-WebSocket-Accept so we can include it in our response to the browser.
+    // The whole header read is bounded so a backend that accepts but never
+    // replies can't hang this task.
     let mut hdr = Vec::with_capacity(512);
-    let mut byte = [0u8; 1];
-    loop {
-        if backend.read_exact(&mut byte).await.is_err() {
-            error!("WebSocket backend closed before 101");
+    let read_result = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let mut byte = [0u8; 1];
+        loop {
+            backend.read_exact(&mut byte).await?;
+            hdr.push(byte[0]);
+            if hdr.len() >= 4 && hdr[hdr.len() - 4..] == *b"\r\n\r\n" {
+                return Ok::<(), std::io::Error>(());
+            }
+            if hdr.len() > 8192 {
+                return Err(std::io::Error::other("response header too large"));
+            }
+        }
+    })
+    .await;
+    match read_result {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            error!("WebSocket backend header read failed: {e}");
             let mut r = Response::new(http_body_util::Full::new(hyper::body::Bytes::new()));
             *r.status_mut() = StatusCode::BAD_GATEWAY;
             return r;
         }
-        hdr.push(byte[0]);
-        if hdr.len() >= 4 && hdr[hdr.len() - 4..] == *b"\r\n\r\n" {
-            break;
-        }
-        if hdr.len() > 8192 {
-            error!("WebSocket backend response header too large");
+        Err(_) => {
+            error!("WebSocket backend header read timed out ({backend_addr})");
             let mut r = Response::new(http_body_util::Full::new(hyper::body::Bytes::new()));
-            *r.status_mut() = StatusCode::BAD_GATEWAY;
+            *r.status_mut() = StatusCode::GATEWAY_TIMEOUT;
             return r;
         }
     }
