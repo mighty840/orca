@@ -8,6 +8,7 @@
 orca-linux-x86_64
 migration/
 crates/orca-control/secrets.json
+crates/orca-control/backups/
 docs/node_modules/
 docs/dist/
 docs/docs-dist/

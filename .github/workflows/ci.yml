@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  schedule:
+    # Nightly E2E run at 06:00 UTC (~22:00 PT / 07:00 CET). Only the `e2e`
+    # job below runs on schedule; check/build-arm64 are PR/push-gated.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -62,14 +67,18 @@ jobs:
   e2e:
     name: E2E Tests (nightly)
     runs-on: ubuntu-latest
-    if: github.event_name == 'schedule'
+    # Runs on nightly cron and on manual workflow_dispatch only. Skipped on
+    # push/PR so PR latency stays unaffected by the long suite.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - name: Install protoc
+        run: sudo apt-get install -y protobuf-compiler
       - name: Build
         run: cargo build
       - name: E2E tests
-        run: ORCA_E2E=1 cargo test -- --ignored
+        run: cargo test --no-fail-fast -- --ignored
         env:
           ORCA_E2E: "1"

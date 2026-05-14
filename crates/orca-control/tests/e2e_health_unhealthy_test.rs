@@ -69,7 +69,11 @@ async fn e2e_health_checker_marks_unhealthy() {
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    // Deploy with a health path that will always 404
+    // Deploy with a liveness probe path that will always 404. Explicit
+    // `liveness.initial_delay_secs = 0` so `check_all` probes the instance
+    // immediately instead of skipping it for the default 5s initial-delay
+    // window — keeps the test deterministic regardless of how fast nginx
+    // starts.
     let client = reqwest::Client::new();
     let body = serde_json::json!({
         "services": [{
@@ -77,7 +81,10 @@ async fn e2e_health_checker_marks_unhealthy() {
             "image": "nginx:alpine",
             "replicas": 1,
             "port": 80,
-            "health": "/nonexistent-path-xyz"
+            "liveness": {
+                "path": "/nonexistent-path-xyz",
+                "initial_delay_secs": 0
+            }
         }]
     });
     let resp = client
