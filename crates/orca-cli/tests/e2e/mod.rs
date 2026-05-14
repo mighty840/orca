@@ -158,6 +158,21 @@ api_port = {api_port}
             .build()
             .expect("reqwest client build")
     }
+
+    /// Spawn the built `orca` binary with `args`, pointed at this server,
+    /// using `ORCA_TOKEN` so it authenticates with the test cluster's
+    /// pre-declared bearer. Returns the captured stdout/stderr/exit.
+    pub async fn run_cli(&self, args: &[&str]) -> std::process::Output {
+        let binary = Self::find_binary();
+        tokio::process::Command::new(&binary)
+            .args(args)
+            .arg("--api")
+            .arg(&self.api_url)
+            .env("ORCA_TOKEN", E2E_TOKEN)
+            .output()
+            .await
+            .unwrap_or_else(|e| panic!("failed to spawn {}: {e}", binary.display()))
+    }
 }
 
 impl Drop for OrcaServer {
