@@ -95,7 +95,9 @@ impl ClusterContext {
         out.push_str("- `orca exec <service> [cmd]` — interactive shell or one-shot command inside a running container\n");
         out.push_str("- `orca secrets set <KEY> <VALUE>` — set a secret referenced as `${secrets.KEY}` in service.toml env\n");
         out.push_str("- `orca secrets list` / `orca secrets get <KEY>` / `orca secrets remove <KEY>` — read/remove secrets\n");
-        out.push_str("- `orca deploy [service…]` — (re)apply service definitions from `services/`\n");
+        out.push_str(
+            "- `orca deploy [service…]` — (re)apply service definitions from `services/`\n",
+        );
         out.push_str("- `orca alerts list` / `orca alerts view <id>` / `orca alerts reply <id> <msg>` / `orca alerts dismiss|resolve <id>` — alert triage\n");
         out.push_str("- `orca backup` / `orca cleanup` / `orca nodes` — operational utilities\n\n");
         out.push_str("**Not supported (do not suggest):** `orca service <verb>` (the CLI is flat — there is no `service` subcommand). ");
