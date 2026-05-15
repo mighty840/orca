@@ -87,6 +87,11 @@ pub struct AppState {
     /// Pending deploy result waiters: service_name → oneshot sender.
     /// Inserted by queue_remote_deploy, resolved by ws_handler on DeployResult.
     pub pending_deploys: RwLock<HashMap<String, tokio::sync::oneshot::Sender<Result<(), String>>>>,
+    /// AI conversational-alert engine. `None` when `[ai]` is not configured.
+    /// `AiMonitor::run` (spawned in `lib::run_server_with_acme`) feeds it
+    /// `open_alert` calls; the HTTP `/api/v1/alerts/...` handlers mutate it
+    /// in response to operator actions.
+    pub alerts: Option<crate::alerts::SharedAlertEngine>,
 }
 
 pub use orca_core::api_types::LastBackupResult;
@@ -189,12 +194,20 @@ impl AppState {
             webhook_invocations: RwLock::new(HashMap::new()),
             exec_sessions: RwLock::new(HashMap::new()),
             pending_deploys: RwLock::new(HashMap::new()),
+            alerts: None,
         }
     }
 
     /// Set persistent store for service state.
     pub fn with_store(mut self, store: Arc<crate::store::ClusterStore>) -> Self {
         self.store = Some(store);
+        self
+    }
+
+    /// Attach the AI alert engine. Builder-style so startup code can wire it
+    /// only when `[ai]` is configured.
+    pub fn with_alerts(mut self, engine: crate::alerts::SharedAlertEngine) -> Self {
+        self.alerts = Some(engine);
         self
     }
 

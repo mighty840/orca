@@ -1,3 +1,4 @@
+pub mod alerts;
 pub mod api;
 pub mod auth;
 pub mod backup_scheduler;
@@ -80,6 +81,10 @@ pub async fn run_server_with_acme(
         app_state = app_state.with_acme(acme, resolver);
     }
 
+    if let Some(engine) = alerts::try_build_alert_engine(cluster_config.ai.as_ref()) {
+        app_state = app_state.with_alerts(engine);
+    }
+
     // Open persistent store
     let store_path = dirs_next::home_dir()
         .unwrap_or_else(|| ".".into())
@@ -132,6 +137,10 @@ pub async fn run_server_with_acme(
         && cleanup_scheduler::spawn_cleanup_scheduler(cleanup_cfg, state.clone()).is_some()
     {
         info!("Cleanup scheduler started");
+    }
+
+    if alerts::spawn_alert_monitor(state.clone()).is_some() {
+        info!("AI alert monitor started");
     }
 
     let app = api::router(state.clone());

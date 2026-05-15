@@ -41,6 +41,17 @@ pub fn router(state: Arc<AppState>) -> Router {
             post(handlers::trigger_cluster_backup),
         )
         .route("/api/v1/cluster/networks", get(handlers::cluster_networks))
+        .route("/api/v1/alerts", get(handlers::alerts::list))
+        .route("/api/v1/alerts/{id}", get(handlers::alerts::view))
+        .route("/api/v1/alerts/{id}/reply", post(handlers::alerts::reply))
+        .route(
+            "/api/v1/alerts/{id}/dismiss",
+            post(handlers::alerts::dismiss),
+        )
+        .route(
+            "/api/v1/alerts/{id}/resolve",
+            post(handlers::alerts::resolve),
+        )
         .route("/api/v1/secrets", get(handlers::secrets::list_secrets))
         .route(
             "/api/v1/secrets/usage",
