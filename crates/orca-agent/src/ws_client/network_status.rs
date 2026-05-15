@@ -131,6 +131,9 @@ pub async fn enumerate_orca_networks(docker: &Docker) -> Vec<DockerNetwork> {
                 .push(NetworkService {
                     name: container_name.clone(),
                     aliases,
+                    // Populated by the master's `annotate_missing_aliases`
+                    // pass once it cross-references env across services.
+                    missing_aliases: Vec::new(),
                 });
         }
     }
