@@ -1,18 +1,20 @@
 //! Email delivery via SMTP using `lettre`.
 //!
-//! Sends one plain-text email per alert event. STARTTLS by default
-//! (port 587); set `starttls = false` in cluster.toml for implicit TLS on
-//! port 465. Credentials resolve through the secrets store via
+//! Sends one multipart/alternative email per alert event — plain text plus
+//! an HTML version with the LLM's markdown rendered (tables, code blocks,
+//! bold). STARTTLS by default (port 587); set `tls = "implicit"` for port
+//! 465, or `tls = "none"` for plain SMTP against local dev catchers
+//! (mailpit). Credentials resolve through the secrets store via
 //! `${secrets.SMTP_PASSWORD}` in cluster.toml.
 
 use async_trait::async_trait;
-use lettre::message::Message;
+use lettre::message::{Message, MultiPart};
 use lettre::transport::smtp::AsyncSmtpTransport;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncTransport, Tokio1Executor};
 use std::time::Duration;
 
-use orca_core::config::EmailChannelConfig;
+use orca_core::config::{EmailChannelConfig, SmtpTls};
 use orca_core::types::{AlertConversation, AlertSender, AlertSeverity};
 
 use super::{AlertEvent, Channel};
@@ -24,18 +26,29 @@ pub struct EmailChannel {
 
 impl EmailChannel {
     pub fn new(cfg: EmailChannelConfig) -> Self {
-        let creds = Credentials::new(cfg.username.clone(), cfg.password.clone());
-        let builder = if cfg.starttls {
-            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.smtp_host)
-        } else {
-            AsyncSmtpTransport::<Tokio1Executor>::relay(&cfg.smtp_host)
+        let mut builder = match cfg.tls {
+            SmtpTls::Starttls => {
+                AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.smtp_host)
+                    .expect("build STARTTLS transport")
+            }
+            SmtpTls::Implicit => AsyncSmtpTransport::<Tokio1Executor>::relay(&cfg.smtp_host)
+                .expect("build implicit-TLS transport"),
+            // Plain SMTP — local dev only (e.g. mailpit catchers).
+            SmtpTls::None => {
+                AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.smtp_host)
+            }
         };
-        let transport = builder
-            .expect("build SMTP transport")
+        builder = builder
             .port(cfg.smtp_port)
-            .credentials(creds)
-            .timeout(Some(Duration::from_secs(15)))
-            .build();
+            .timeout(Some(Duration::from_secs(15)));
+        // Lettre refuses to send AUTH over a non-TLS channel by design (the
+        // credentials would be cleartext). Skip credentials entirely on plain
+        // SMTP — fine for catchers like mailpit, which accept anonymous mail.
+        if !matches!(cfg.tls, SmtpTls::None) {
+            builder =
+                builder.credentials(Credentials::new(cfg.username.clone(), cfg.password.clone()));
+        }
+        let transport = builder.build();
         Self { cfg, transport }
     }
 
@@ -87,16 +100,46 @@ impl Channel for EmailChannel {
 
     async fn deliver(&self, conv: &AlertConversation, event: AlertEvent) -> anyhow::Result<()> {
         let subject = Self::subject(conv, event);
-        let body = Self::body(conv, event);
+        let plain = Self::body(conv, event);
+        let html = Self::render_html(&plain);
         let mut builder = Message::builder()
             .from(self.cfg.from.parse()?)
             .subject(subject);
         for recipient in &self.cfg.to {
             builder = builder.to(recipient.parse()?);
         }
-        let email = builder.body(body)?;
+        // Multipart/alternative: clients that prefer HTML get the rendered
+        // version, plain-text clients (mutt, ops scripts) fall back cleanly.
+        let email = builder.multipart(MultiPart::alternative_plain_html(plain, html))?;
         self.transport.send(email).await?;
         Ok(())
+    }
+}
+
+impl EmailChannel {
+    /// Render the alert body's markdown to HTML (tables, code blocks, bold).
+    /// Wraps in a minimal document with inline CSS so common clients render
+    /// tables and code blocks without help.
+    fn render_html(body: &str) -> String {
+        let mut opts = comrak::Options::default();
+        opts.extension.table = true;
+        opts.extension.strikethrough = true;
+        opts.extension.tagfilter = true;
+        opts.extension.autolink = true;
+        let rendered = comrak::markdown_to_html(body, &opts);
+        format!(
+            "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>\
+             body{{font-family:-apple-system,system-ui,sans-serif;font-size:14px;color:#222;max-width:760px;margin:0 auto;padding:16px;line-height:1.5}}\
+             code{{background:#f4f4f4;border-radius:3px;padding:1px 4px;font-family:ui-monospace,Menlo,monospace}}\
+             pre{{background:#f4f4f4;border-radius:4px;padding:10px;overflow-x:auto;font-family:ui-monospace,Menlo,monospace;font-size:13px}}\
+             pre code{{background:transparent;padding:0}}\
+             table{{border-collapse:collapse;margin:8px 0}}\
+             th,td{{border:1px solid #ccc;padding:6px 10px;text-align:left}}\
+             th{{background:#f7f7f7}}\
+             h1,h2,h3{{margin-top:1em;margin-bottom:0.4em}}\
+             blockquote{{margin:0;padding-left:12px;border-left:3px solid #ddd;color:#666}}\
+             </style></head><body>{rendered}</body></html>"
+        )
     }
 }
 

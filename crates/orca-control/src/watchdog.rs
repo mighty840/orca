@@ -144,12 +144,18 @@ async fn check_and_prune(state: &AppState, service_name: &str, runtime_kind: Run
     }
 
     let mut removed = 0u32;
+    let mut failed_pruned = 0u32;
     svc.instances.retain(|inst| {
         if inst.handle.runtime_id.starts_with("remote-") {
             return true;
         }
         match inst.status {
-            WorkloadStatus::Stopped | WorkloadStatus::Failed => {
+            WorkloadStatus::Failed => {
+                removed += 1;
+                failed_pruned += 1;
+                false
+            }
+            WorkloadStatus::Stopped => {
                 removed += 1;
                 false
             }
@@ -165,6 +171,18 @@ async fn check_and_prune(state: &AppState, service_name: &str, runtime_kind: Run
             "Watchdog pruned stopped/failed instances"
         );
     }
+    // Drop the services lock before touching the event log so the two
+    // RwLocks never nest in opposite orders (lock-ordering hygiene).
+    drop(services);
+    for _ in 0..failed_pruned {
+        state.record_instance_failure(service_name).await;
+    }
+    // Re-acquire so the rest of the function (placement check + reconcile
+    // trigger) keeps working on the same service entry.
+    let services = state.services.read().await;
+    let Some(svc) = services.get(service_name) else {
+        return false;
+    };
 
     // Remote-placed services are reconciled by send_reconcile when the agent
     // connects. The watchdog must not trigger local reconcile for them —

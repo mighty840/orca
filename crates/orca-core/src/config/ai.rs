@@ -63,17 +63,27 @@ pub struct EmailChannelConfig {
     pub password: String,
     pub from: String,
     pub to: Vec<String>,
-    /// If true, use STARTTLS (port 587 default); else implicit TLS (port 465).
-    #[serde(default = "default_smtp_starttls")]
-    pub starttls: bool,
+    /// TLS handshake mode. Production should always use `starttls` (default).
+    /// `none` is for local dev/test against catchers like mailpit and must
+    /// not be used over an untrusted network — credentials go in cleartext.
+    #[serde(default)]
+    pub tls: SmtpTls,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SmtpTls {
+    /// STARTTLS upgrade on a plain connection (port 587 default).
+    #[default]
+    Starttls,
+    /// Implicit TLS from the start of the connection (port 465).
+    Implicit,
+    /// No TLS — plain SMTP. Local dev only.
+    None,
 }
 
 fn default_smtp_port() -> u16 {
     587
-}
-
-fn default_smtp_starttls() -> bool {
-    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

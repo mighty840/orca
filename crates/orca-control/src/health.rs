@@ -168,6 +168,9 @@ impl HealthChecker {
                         consecutive_failures = *count,
                         "Health check failed"
                     );
+                    self.state
+                        .record_instance_failure(&target.service_name)
+                        .await;
                     self.set_health(
                         &target.service_name,
                         &inst.runtime_id,
@@ -184,6 +187,9 @@ impl HealthChecker {
                             "Restarting after {} consecutive failures",
                             *count
                         );
+                        self.state
+                            .record_instance_restart(&target.service_name)
+                            .await;
                         self.restart_instance(
                             &target.service_name,
                             &inst.runtime_id,

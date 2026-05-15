@@ -1,8 +1,9 @@
 //! Shared application state for the control plane.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
+use chrono::{DateTime, Duration, Utc};
 use tokio::sync::RwLock;
 
 use orca_core::config::{ClusterConfig, ServiceConfig};
@@ -92,6 +93,63 @@ pub struct AppState {
     /// `open_alert` calls; the HTTP `/api/v1/alerts/...` handlers mutate it
     /// in response to operator actions.
     pub alerts: Option<crate::alerts::SharedAlertEngine>,
+    /// Per-service log of restart triggers and instance failures.
+    /// Read by the AI alert monitor to populate `restart_count_24h` and
+    /// `error_count_1h` in the cluster context. In-memory only; restart
+    /// wipes the log (the AI monitor reconstructs alerts as conditions
+    /// reappear, so a brief gap after restart is acceptable).
+    pub instance_events: RwLock<HashMap<String, InstanceEventLog>>,
+}
+
+/// Per-service ring of recent failure / restart timestamps. Pruning happens
+/// on every append: entries older than [`InstanceEventLog::WINDOW`] are
+/// dropped so the queues stay bounded to ~24h of activity regardless of
+/// service churn.
+#[derive(Debug, Default)]
+pub struct InstanceEventLog {
+    /// Timestamps of operator/watchdog-triggered restarts.
+    pub restarts: VecDeque<DateTime<Utc>>,
+    /// Timestamps of observed instance failures — non-zero exits and
+    /// individual health-check failures.
+    pub failures: VecDeque<DateTime<Utc>>,
+}
+
+impl InstanceEventLog {
+    /// Longest window any consumer needs; entries older than this are
+    /// pruned eagerly on append.
+    pub const WINDOW: Duration = Duration::hours(24);
+
+    pub fn record_restart(&mut self, now: DateTime<Utc>) {
+        self.restarts.push_back(now);
+        prune_older_than(&mut self.restarts, now - Self::WINDOW);
+    }
+
+    pub fn record_failure(&mut self, now: DateTime<Utc>) {
+        self.failures.push_back(now);
+        prune_older_than(&mut self.failures, now - Self::WINDOW);
+    }
+
+    /// Number of failure events recorded in the last `window` from `now`.
+    pub fn failures_in(&self, now: DateTime<Utc>, window: Duration) -> u64 {
+        let cutoff = now - window;
+        self.failures.iter().filter(|t| **t >= cutoff).count() as u64
+    }
+
+    /// Number of restart events recorded in the last `window` from `now`.
+    pub fn restarts_in(&self, now: DateTime<Utc>, window: Duration) -> u32 {
+        let cutoff = now - window;
+        self.restarts.iter().filter(|t| **t >= cutoff).count() as u32
+    }
+}
+
+fn prune_older_than(deque: &mut VecDeque<DateTime<Utc>>, cutoff: DateTime<Utc>) {
+    while let Some(front) = deque.front() {
+        if *front < cutoff {
+            deque.pop_front();
+        } else {
+            break;
+        }
+    }
 }
 
 pub use orca_core::api_types::LastBackupResult;
@@ -195,7 +253,26 @@ impl AppState {
             exec_sessions: RwLock::new(HashMap::new()),
             pending_deploys: RwLock::new(HashMap::new()),
             alerts: None,
+            instance_events: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Append a restart event for `service` and prune old entries.
+    /// Cheap (one `now()` + a few VecDeque ops); safe to call from hot paths.
+    pub async fn record_instance_restart(&self, service: &str) {
+        let mut log = self.instance_events.write().await;
+        log.entry(service.to_string())
+            .or_default()
+            .record_restart(Utc::now());
+    }
+
+    /// Append a failure event for `service` (non-zero exit or health-check
+    /// failure) and prune old entries.
+    pub async fn record_instance_failure(&self, service: &str) {
+        let mut log = self.instance_events.write().await;
+        log.entry(service.to_string())
+            .or_default()
+            .record_failure(Utc::now());
     }
 
     /// Set persistent store for service state.
@@ -331,5 +408,40 @@ mod tests {
             make_instance(WorkloadStatus::Failed),
         ];
         assert_eq!(state.running_count(), 2);
+    }
+
+    #[test]
+    fn instance_event_log_counts_inside_window() {
+        // Inject test data directly so we can simulate timestamps across the
+        // window boundary. Real callers go through `record_*` which always
+        // stamps with `Utc::now()` (monotonically increasing).
+        let now = Utc::now();
+        let mut log = InstanceEventLog::default();
+        log.failures.push_back(now - Duration::minutes(30));
+        log.failures.push_back(now - Duration::minutes(45));
+        log.failures.push_back(now - Duration::hours(2));
+        log.restarts.push_back(now - Duration::hours(48));
+        log.restarts.push_back(now - Duration::hours(20));
+        log.restarts.push_back(now - Duration::minutes(10));
+
+        assert_eq!(log.failures_in(now, Duration::hours(1)), 2);
+        assert_eq!(log.failures_in(now, Duration::hours(24)), 3);
+        assert_eq!(log.restarts_in(now, Duration::hours(1)), 1);
+        assert_eq!(log.restarts_in(now, Duration::hours(24)), 2);
+    }
+
+    #[test]
+    fn instance_event_log_prunes_on_append() {
+        // A real append at `now` should drop anything earlier than 24h.
+        let now = Utc::now();
+        let mut log = InstanceEventLog::default();
+        log.restarts.push_back(now - Duration::hours(48)); // pre-existing stale
+        log.restarts.push_back(now - Duration::hours(20));
+        log.record_restart(now);
+        assert_eq!(
+            log.restarts.len(),
+            2,
+            "the 48h-old entry must be pruned when a fresh `now` arrives"
+        );
     }
 }
