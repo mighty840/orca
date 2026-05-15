@@ -277,35 +277,24 @@ pub async fn handle_normal_key(
             super::refresh_alerts(client, state).await;
             state.selected_alert = 0;
         }
-        // Dismiss the selected alert (list) or the current one (detail).
-        // Lowercase `d` to match conventions; `R` (capital) resolves.
-        KeyCode::Char('d')
-            if matches!(state.view, View::Alerts | View::AlertDetail { .. })
-                && crate::ui::alerts::current_alert_id(state).is_some() =>
-        {
-            if let Some(id) = crate::ui::alerts::current_alert_id(state) {
-                match client.alerts_dismiss(&id).await {
-                    Ok(_) => {
-                        state.flash("Dismissed.".into());
-                        super::refresh_alerts(client, state).await;
-                    }
-                    Err(e) => state.error = Some(format!("Dismiss failed: {e}")),
-                }
-            }
+        // Dismiss / resolve the currently-targeted alert (selected row in
+        // list, or the conversation in detail). Lowercase `d` for dismiss,
+        // capital `R` for resolve — same convention as everywhere else.
+        KeyCode::Char('d') if matches!(state.view, View::Alerts | View::AlertDetail { .. }) => {
+            crate::chat_dispatch::alert_action(
+                state,
+                client,
+                crate::chat_dispatch::AlertAction::Dismiss,
+            )
+            .await;
         }
-        KeyCode::Char('R')
-            if matches!(state.view, View::Alerts | View::AlertDetail { .. })
-                && crate::ui::alerts::current_alert_id(state).is_some() =>
-        {
-            if let Some(id) = crate::ui::alerts::current_alert_id(state) {
-                match client.alerts_resolve(&id).await {
-                    Ok(_) => {
-                        state.flash("Resolved.".into());
-                        super::refresh_alerts(client, state).await;
-                    }
-                    Err(e) => state.error = Some(format!("Resolve failed: {e}")),
-                }
-            }
+        KeyCode::Char('R') if matches!(state.view, View::Alerts | View::AlertDetail { .. }) => {
+            crate::chat_dispatch::alert_action(
+                state,
+                client,
+                crate::chat_dispatch::AlertAction::Resolve,
+            )
+            .await;
         }
         // `a` adds a webhook (claimed only in the Webhooks view to avoid
         // colliding with future global shortcuts).

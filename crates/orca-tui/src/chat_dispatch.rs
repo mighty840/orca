@@ -1,8 +1,9 @@
-//! Background dispatch + completion polling for the chat view.
+//! Background dispatch + completion polling for the chat view, plus the
+//! shared alert dismiss/resolve action used by both the keymap and command
+//! dispatcher.
 //!
-//! Pulled out of `lib.rs` so the chat lifecycle (send → spawn → drain) is
-//! one focused thing to read and `lib.rs` stays under the file-size
-//! ceiling.
+//! Pulled out of `lib.rs` / `keys.rs` so each stays under the file-size
+//! ceiling and the related logic is one focused thing to read.
 
 use crate::api::ApiClient;
 use crate::state::{AppState, ChatRole, ChatTaskResult, ChatTurn};
@@ -86,4 +87,46 @@ pub(crate) fn drain_chat_result(state: &mut AppState) {
             state.chat_pending = false;
         }
     }
+}
+
+/// Dismiss or resolve the currently-targeted alert. Returns `true` if any
+/// action was attempted (so the caller can suppress the default key
+/// handler). Used by both the `d` / `R` keys and `:dismiss` / `:resolve`.
+pub(crate) async fn alert_action(
+    state: &mut AppState,
+    client: &ApiClient,
+    action: AlertAction,
+) -> bool {
+    let Some(id) = crate::ui::alerts::current_alert_id(state) else {
+        return false;
+    };
+    let result = match action {
+        AlertAction::Dismiss => client.alerts_dismiss(&id).await,
+        AlertAction::Resolve => client.alerts_resolve(&id).await,
+    };
+    match result {
+        Ok(_) => {
+            state.flash(match action {
+                AlertAction::Dismiss => "Dismissed.".into(),
+                AlertAction::Resolve => "Resolved.".into(),
+            });
+            crate::refresh_alerts(client, state).await;
+        }
+        Err(e) => {
+            state.error = Some(format!(
+                "{} failed: {e}",
+                match action {
+                    AlertAction::Dismiss => "Dismiss",
+                    AlertAction::Resolve => "Resolve",
+                }
+            ));
+        }
+    }
+    true
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum AlertAction {
+    Dismiss,
+    Resolve,
 }
