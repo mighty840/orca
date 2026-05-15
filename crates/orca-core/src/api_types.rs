@@ -271,12 +271,22 @@ pub struct DockerNetwork {
 pub struct NetworkService {
     pub name: String,
     pub aliases: Vec<String>,
+    /// Peer-service hostnames referenced in this service's env that have
+    /// no alias on a shared network. Empty means everything is wired up.
+    /// Populated by `cluster_networks` on the master, never by the agent.
+    #[serde(default)]
+    pub missing_aliases: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DomainRoute {
     pub domain: String,
     pub service: String,
+    /// A-record the domain resolves to, or `None` if resolution failed
+    /// within the dashboard's timeout. Spots "DNS points at the wrong box"
+    /// — the original motivation for this field in #17.
+    #[serde(default)]
+    pub resolved_ip: Option<String>,
 }
 
 #[cfg(test)]

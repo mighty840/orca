@@ -112,12 +112,24 @@ fn render_node(node: &NodeNetworks, out: &mut Vec<Line>) {
     if !node.domains.is_empty() {
         out.push(section_line("Public edge"));
         for d in &node.domains {
-            out.push(Line::from(vec![
+            let mut spans = vec![
                 Span::raw("    "),
                 Span::styled(d.domain.clone(), Style::default().fg(Color::White)),
                 Span::styled(" → ", Style::default().fg(Color::DarkGray)),
                 Span::raw(d.service.clone()),
-            ]));
+            ];
+            // Show the resolved A-record next to the domain. `?` when DNS
+            // didn't answer within the dashboard timeout — operators read
+            // that as "I should look at why this name doesn't resolve."
+            let (ip, ip_color) = match &d.resolved_ip {
+                Some(ip) => (ip.clone(), Color::DarkGray),
+                None => ("?".to_string(), Color::Yellow),
+            };
+            spans.push(Span::styled(
+                format!("  [A: {ip}]"),
+                Style::default().fg(ip_color),
+            ));
+            out.push(Line::from(spans));
         }
     }
 
@@ -161,6 +173,24 @@ fn render_node(node: &NodeNetworks, out: &mut Vec<Line>) {
                 Span::styled("  aliases: ", Style::default().fg(Color::DarkGray)),
                 Span::styled(aliases, Style::default().fg(alias_color)),
             ]));
+            // Missing-alias warning row. Drawn red so it pops in the green
+            // sea of aliases — this is the row that means "something
+            // references me by a name that won't resolve."
+            if !svc.missing_aliases.is_empty() {
+                let names = svc.missing_aliases.join(", ");
+                out.push(Line::from(vec![
+                    Span::raw("          "),
+                    Span::styled(
+                        "⚠ referenced as: ",
+                        Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(names, Style::default().fg(Color::Red)),
+                    Span::styled(
+                        "  (add to network aliases)",
+                        Style::default().fg(Color::DarkGray),
+                    ),
+                ]));
+            }
         }
     }
 }
