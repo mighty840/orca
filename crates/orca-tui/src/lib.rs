@@ -20,7 +20,7 @@ pub(crate) use webhook_actions::{
 use std::io;
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyEventKind};
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -105,6 +105,14 @@ async fn event_loop(
         };
         if key.kind != KeyEventKind::Press {
             continue;
+        }
+
+        // Ctrl+C is a universal escape hatch — works from any view, any
+        // input mode, even mid-LLM-call. Without this, the only way out
+        // of a hung TUI is killing the process.
+        if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
+            state.should_quit = true;
+            return Ok(());
         }
 
         // Snapshot the project filter so we can detect changes and persist
