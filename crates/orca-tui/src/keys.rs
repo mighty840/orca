@@ -97,6 +97,14 @@ pub async fn handle_normal_key(
                 }
             }
             View::Networks => state.network_scroll = state.network_scroll.saturating_add(1),
+            View::Alerts => {
+                if !state.alerts.is_empty() && state.selected_alert + 1 < state.alerts.len() {
+                    state.selected_alert += 1;
+                }
+            }
+            View::AlertDetail { .. } => {
+                state.alert_detail_scroll = state.alert_detail_scroll.saturating_add(1);
+            }
             _ => state.next_service(),
         },
         KeyCode::Char('k') | KeyCode::Up => match state.view {
@@ -117,6 +125,14 @@ pub async fn handle_normal_key(
                 }
             }
             View::Networks => state.network_scroll = state.network_scroll.saturating_sub(1),
+            View::Alerts => {
+                if state.selected_alert > 0 {
+                    state.selected_alert -= 1;
+                }
+            }
+            View::AlertDetail { .. } => {
+                state.alert_detail_scroll = state.alert_detail_scroll.saturating_sub(1);
+            }
             _ => state.prev_service(),
         },
         KeyCode::Char('g') => match state.view {
@@ -125,6 +141,8 @@ pub async fn handle_normal_key(
             View::BackupSnapshots { .. } => state.selected_backup_snapshot = 0,
             View::Webhooks => state.selected_webhook = 0,
             View::Networks => state.network_scroll = 0,
+            View::Alerts => state.selected_alert = 0,
+            View::AlertDetail { .. } => state.alert_detail_scroll = 0,
             _ => state.selected_service = 0,
         },
         KeyCode::Char('G') => match state.view {
@@ -150,6 +168,14 @@ pub async fn handle_normal_key(
                 // Snap to last line; render clamps to the visible window.
                 let total = super::ui::networks::rendered_line_count(state);
                 state.network_scroll = total.saturating_sub(1);
+            }
+            View::Alerts => {
+                if !state.alerts.is_empty() {
+                    state.selected_alert = state.alerts.len() - 1;
+                }
+            }
+            View::AlertDetail { .. } => {
+                state.alert_detail_scroll = state.alert_detail_scroll.saturating_add(100);
             }
             _ => {
                 let len = state.filtered_services().len();
@@ -192,6 +218,9 @@ pub async fn handle_normal_key(
                     super::refresh_secrets_usage(client, state).await
                 }
                 View::Networks => super::refresh_networks(client, state).await,
+                View::Alerts | View::AlertDetail { .. } => {
+                    super::refresh_alerts(client, state).await;
+                }
                 _ => {}
             }
             *last_refresh = tokio::time::Instant::now();
@@ -235,6 +264,49 @@ pub async fn handle_normal_key(
             state.push_view(View::Networks);
         }
         KeyCode::Char('6') => {}
+        KeyCode::Char('7') if !matches!(state.view, View::Alerts) => {
+            super::refresh_alerts(client, state).await;
+            state.selected_alert = 0;
+            state.push_view(View::Alerts);
+        }
+        KeyCode::Char('7') => {}
+        // Toggle active vs all in the Alerts view. The `a` key is already
+        // used by Webhooks for "add"; the matches!() guard keeps them apart.
+        KeyCode::Char('a') if matches!(state.view, View::Alerts) => {
+            state.alerts_show_all = !state.alerts_show_all;
+            super::refresh_alerts(client, state).await;
+            state.selected_alert = 0;
+        }
+        // Dismiss the selected alert (list) or the current one (detail).
+        // Lowercase `d` to match conventions; `R` (capital) resolves.
+        KeyCode::Char('d')
+            if matches!(state.view, View::Alerts | View::AlertDetail { .. })
+                && crate::ui::alerts::current_alert_id(state).is_some() =>
+        {
+            if let Some(id) = crate::ui::alerts::current_alert_id(state) {
+                match client.alerts_dismiss(&id).await {
+                    Ok(_) => {
+                        state.flash("Dismissed.".into());
+                        super::refresh_alerts(client, state).await;
+                    }
+                    Err(e) => state.error = Some(format!("Dismiss failed: {e}")),
+                }
+            }
+        }
+        KeyCode::Char('R')
+            if matches!(state.view, View::Alerts | View::AlertDetail { .. })
+                && crate::ui::alerts::current_alert_id(state).is_some() =>
+        {
+            if let Some(id) = crate::ui::alerts::current_alert_id(state) {
+                match client.alerts_resolve(&id).await {
+                    Ok(_) => {
+                        state.flash("Resolved.".into());
+                        super::refresh_alerts(client, state).await;
+                    }
+                    Err(e) => state.error = Some(format!("Resolve failed: {e}")),
+                }
+            }
+        }
         // `a` adds a webhook (claimed only in the Webhooks view to avoid
         // colliding with future global shortcuts).
         KeyCode::Char('a') if matches!(state.view, View::Webhooks) => {
@@ -385,6 +457,13 @@ async fn handle_enter(state: &mut AppState, client: &ApiClient) {
             if let Some(u) = crate::ui::secrets::selected_key(state) {
                 let key = u.key.clone();
                 state.push_view(View::SecretRefs { key });
+            }
+        }
+        View::Alerts => {
+            if let Some(a) = state.alerts.get(state.selected_alert) {
+                let id = a.id.to_string();
+                state.alert_detail_scroll = 0;
+                state.push_view(View::AlertDetail { id });
             }
         }
         _ => {}

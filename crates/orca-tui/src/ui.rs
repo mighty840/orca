@@ -1,5 +1,6 @@
 //! TUI rendering — k9s-style full-screen views with header/footer chrome.
 
+pub mod alerts;
 pub mod backup_snapshots;
 pub mod backups;
 pub mod chat;
@@ -78,6 +79,8 @@ fn draw_content(f: &mut Frame, area: Rect, state: &AppState) {
         View::SecretRefs { key } => secret_refs::draw_secret_refs(f, area, state, key),
         View::Networks => networks::draw_networks(f, area, state),
         View::Chat => chat::draw_chat(f, area, state),
+        View::Alerts => alerts::draw_alerts(f, area, state),
+        View::AlertDetail { id } => alerts::draw_alert_detail(f, area, state, id),
     }
 }
 
@@ -187,6 +190,8 @@ fn draw_breadcrumb(f: &mut Frame, area: Rect, state: &AppState) {
         View::SecretRefs { key } => format!("Secrets > {key} > Refs"),
         View::Networks => "Networks".to_string(),
         View::Chat => "Chat".to_string(),
+        View::Alerts => "Alerts".to_string(),
+        View::AlertDetail { id } => format!("Alerts > {}", &id[..8.min(id.len())]),
     };
     let line = Line::from(vec![
         Span::styled(" ", Style::default()),
@@ -290,6 +295,8 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
         }
         View::WebhookInvocations { .. } => "Esc:back r:refresh ?:help",
         View::Chat => "type:ask Enter:send PgUp/PgDn:scroll /cmd:jump 0-6:views Esc:clear ?:help",
+        View::Alerts => "Esc:back j/k:select ↵:detail a:all r:refresh d:dismiss R:resolve ?:help",
+        View::AlertDetail { .. } => "Esc:back j/k:scroll d:dismiss R:resolve :reply ?:help",
     };
     spans.push(Span::styled(keys, dim));
 

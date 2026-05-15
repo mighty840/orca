@@ -10,6 +10,7 @@ pub use orca_core::api_types::{
     SecretsUsageResponse, TriggerBackupResponse, WebhookEntry, WebhookInvocation,
     WebhookInvocationsResponse, WebhookListResponse,
 };
+pub use orca_core::types::{AlertConversation, AlertSender, AlertSeverity, AlertState};
 
 /// Fetches cluster data from the orca API.
 /// Cheaply cloneable so background tasks (chat dispatch) can own a handle
@@ -418,5 +419,55 @@ impl ApiClient {
         .await?
         .error_for_status()?;
         Ok(())
+    }
+
+    /// Fetch alert conversations. Returns `Ok(None)` when the server has no
+    /// `[ai]` configured (HTTP 503) so the caller can render a friendly
+    /// "not configured" state instead of treating it as an error.
+    pub async fn alerts_list(&self, all: bool) -> anyhow::Result<Option<Vec<AlertConversation>>> {
+        let url = format!("{}/api/v1/alerts?all={}", self.base_url, all);
+        let resp = self.auth(self.client.get(&url)).send().await?;
+        if resp.status().as_u16() == 503 {
+            return Ok(None);
+        }
+        let resp = resp.error_for_status()?;
+        #[derive(Deserialize)]
+        struct ListResp {
+            alerts: Vec<AlertConversation>,
+        }
+        let body: ListResp = resp.json().await?;
+        Ok(Some(body.alerts))
+    }
+
+    pub async fn alerts_reply(&self, id: &str, message: &str) -> anyhow::Result<AlertConversation> {
+        let url = format!("{}/api/v1/alerts/{}/reply", self.base_url, id);
+        let body = serde_json::json!({ "message": message });
+        let resp = self
+            .auth(self.client.post(&url))
+            .json(&body)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
+    }
+
+    pub async fn alerts_dismiss(&self, id: &str) -> anyhow::Result<AlertConversation> {
+        let url = format!("{}/api/v1/alerts/{}/dismiss", self.base_url, id);
+        let resp = self
+            .auth(self.client.post(&url))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
+    }
+
+    pub async fn alerts_resolve(&self, id: &str) -> anyhow::Result<AlertConversation> {
+        let url = format!("{}/api/v1/alerts/{}/resolve", self.base_url, id);
+        let resp = self
+            .auth(self.client.post(&url))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(resp.json().await?)
     }
 }

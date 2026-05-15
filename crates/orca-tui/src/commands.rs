@@ -51,11 +51,63 @@ pub async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str
             crate::refresh_networks(client, state).await;
             state.push_view(View::Networks);
         }
+        Some("alerts") => {
+            crate::refresh_alerts(client, state).await;
+            state.selected_alert = 0;
+            state.push_view(View::Alerts);
+        }
+        Some("reply") => cmd_alert_reply(state, client, &parts).await,
+        Some("dismiss") => cmd_alert_action(state, client, "dismiss").await,
+        Some("resolve") => cmd_alert_action(state, client, "resolve").await,
         Some("webhook-add") => cmd_webhook_add(state, client, &parts).await,
         Some("webhook-edit") => cmd_webhook_edit(state, client, &parts).await,
         Some("webhook-rm") => cmd_webhook_rm(state, client, &parts).await,
         Some(other) => state.flash(format!("Unknown command: {other}")),
         None => {}
+    }
+}
+
+/// `:reply <message...>` — operator follow-up turn on the currently-targeted
+/// alert conversation. The engine appends the operator message, re-runs the
+/// LLM with the full history + current context, and the AI's response shows
+/// up on the next state refresh.
+async fn cmd_alert_reply(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
+    let Some(id) = crate::ui::alerts::current_alert_id(state) else {
+        state.flash(":reply must be used from the Alerts view".into());
+        return;
+    };
+    if parts.len() < 2 {
+        state.flash("Usage: :reply <message...>".into());
+        return;
+    }
+    let message = parts[1..].join(" ");
+    match client.alerts_reply(&id, &message).await {
+        Ok(_) => {
+            state.flash("Reply sent — waiting for AI response.".into());
+            crate::refresh_alerts(client, state).await;
+        }
+        Err(e) => state.error = Some(format!("Reply failed: {e}")),
+    }
+}
+
+/// `:dismiss` / `:resolve` — same semantics as the `d` / `R` keys, but
+/// also reachable from any view via command mode.
+async fn cmd_alert_action(state: &mut AppState, client: &ApiClient, action: &str) {
+    let Some(id) = crate::ui::alerts::current_alert_id(state) else {
+        state.flash(format!(":{action} must be used from the Alerts view"));
+        return;
+    };
+    let result = match action {
+        "dismiss" => client.alerts_dismiss(&id).await,
+        "resolve" => client.alerts_resolve(&id).await,
+        _ => return,
+    };
+    match result {
+        Ok(_) => {
+            state.flash(format!("Alert {action}ed."));
+            crate::refresh_alerts(client, state).await;
+        }
+        Err(e) => state.error = Some(format!("{action} failed: {e}")),
     }
 }
 
