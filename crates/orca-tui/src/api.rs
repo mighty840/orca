@@ -110,9 +110,19 @@ impl ApiClient {
                 .map(|t| t.trim().to_string())
                 .filter(|t| !t.is_empty())
         });
+        // Aggressive timeouts: every TUI call runs inside the event loop,
+        // so a slow/dead server can hang the whole UI (no key handling, no
+        // Ctrl+C). Original symptom was "TUI stuck after pressing 7 and
+        // Ctrl+C doesn't help" — refresh() was awaiting forever on a
+        // stalled HTTP call. Short caps keep the loop alive.
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(3))
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("build reqwest client");
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
-            client: reqwest::Client::new(),
+            client,
             token,
         }
     }
