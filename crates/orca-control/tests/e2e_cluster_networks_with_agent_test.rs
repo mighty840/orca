@@ -71,6 +71,7 @@ async fn e2e_cluster_networks_includes_agent_response() {
             services: vec![NetworkService {
                 name: "orca-fake-svc".into(),
                 aliases: vec!["fake-svc".into(), "app".into()],
+                missing_aliases: Vec::new(),
             }],
         }],
     };
