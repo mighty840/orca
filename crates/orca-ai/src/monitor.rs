@@ -215,7 +215,9 @@ impl<B: LlmBackend> AiMonitor<B> {
                     && svc.error_count_1h == 0
                     && svc.restart_count_24h < 3
                 {
-                    engine.mark_remediated(id, "Issue self-resolved — metrics returned to normal");
+                    engine
+                        .mark_remediated(id, "Issue self-resolved — metrics returned to normal")
+                        .await;
                 }
             }
         }

@@ -43,14 +43,37 @@ fn default_analysis_interval() -> u64 {
     60
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AlertDeliveryChannels {
-    /// Webhook URL for alert conversation updates.
+    /// Generic webhook URL — receives JSON POST per alert event.
     pub webhook: Option<String>,
-    /// Slack webhook for threaded alert conversations.
+    /// Slack incoming-webhook URL — receives a formatted block per alert event.
     pub slack: Option<String>,
-    /// Email for alert digests.
-    pub email: Option<String>,
+    /// Email delivery via SMTP — sends one email per alert event.
+    pub email: Option<EmailChannelConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmailChannelConfig {
+    pub smtp_host: String,
+    #[serde(default = "default_smtp_port")]
+    pub smtp_port: u16,
+    pub username: String,
+    /// SMTP password. Use `${secrets.SMTP_PASSWORD}` to resolve from the secrets store.
+    pub password: String,
+    pub from: String,
+    pub to: Vec<String>,
+    /// If true, use STARTTLS (port 587 default); else implicit TLS (port 465).
+    #[serde(default = "default_smtp_starttls")]
+    pub starttls: bool,
+}
+
+fn default_smtp_port() -> u16 {
+    587
+}
+
+fn default_smtp_starttls() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
