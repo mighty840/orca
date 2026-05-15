@@ -12,6 +12,9 @@ pub use orca_core::api_types::{
 };
 
 /// Fetches cluster data from the orca API.
+/// Cheaply cloneable so background tasks (chat dispatch) can own a handle
+/// without sharing references with the event loop.
+#[derive(Clone)]
 pub struct ApiClient {
     base_url: String,
     client: reqwest::Client,
@@ -233,6 +236,36 @@ impl ApiClient {
 
     /// Fetch the cluster networks dashboard: per-node `orca-*` Docker bridge
     /// listing plus the master's public-edge route table.
+    /// POST a chat turn to `/api/v1/ask`. Returns `Ok(None)` when the server
+    /// has no `[ai]` configured (503), so the caller renders a placeholder
+    /// rather than treating it as a hard error.
+    pub async fn ask(
+        &self,
+        question: &str,
+        history: &[(String, String)],
+    ) -> anyhow::Result<Option<String>> {
+        let url = format!("{}/api/v1/ask", self.base_url);
+        let history_json: Vec<serde_json::Value> = history
+            .iter()
+            .map(|(role, content)| serde_json::json!({ "role": role, "content": content }))
+            .collect();
+        let body = serde_json::json!({
+            "question": question,
+            "history": history_json,
+        });
+        let resp = self.auth(self.client.post(&url)).json(&body).send().await?;
+        if resp.status().as_u16() == 503 {
+            return Ok(None);
+        }
+        let resp = resp.error_for_status()?;
+        #[derive(Deserialize)]
+        struct AskResp {
+            response: String,
+        }
+        let body: AskResp = resp.json().await?;
+        Ok(Some(body.response))
+    }
+
     pub async fn cluster_networks(&self) -> anyhow::Result<ClusterNetworksResponse> {
         let resp = self
             .auth(

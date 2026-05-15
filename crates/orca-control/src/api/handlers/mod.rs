@@ -12,6 +12,7 @@ use crate::reconciler;
 use crate::state::AppState;
 
 pub(crate) mod alerts;
+pub(crate) mod ask;
 pub(crate) mod exec;
 mod ops;
 pub(crate) mod secrets;

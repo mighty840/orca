@@ -1,5 +1,9 @@
 pub mod api;
+mod chat_dispatch;
+mod chat_input;
 mod commands;
+
+pub(crate) use chat_dispatch::{drain_chat_result, send_chat_message};
 mod keys;
 mod metrics;
 mod persist;
@@ -87,6 +91,9 @@ async fn event_loop(
 
         state.tick = state.tick.wrapping_add(1);
         state.maybe_clear_flash();
+        // Pick up any completed background chat request before we render
+        // — so the assistant's reply shows up the same tick it lands.
+        drain_chat_result(state);
 
         terminal.draw(|f| ui::draw(f, state))?;
 
