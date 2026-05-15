@@ -2,6 +2,7 @@
 
 pub mod backup_snapshots;
 pub mod backups;
+pub mod chat;
 pub mod detail;
 pub mod help;
 pub mod logs;
@@ -76,6 +77,7 @@ fn draw_content(f: &mut Frame, area: Rect, state: &AppState) {
         }
         View::SecretRefs { key } => secret_refs::draw_secret_refs(f, area, state, key),
         View::Networks => networks::draw_networks(f, area, state),
+        View::Chat => chat::draw_chat(f, area, state),
     }
 }
 
@@ -184,6 +186,7 @@ fn draw_breadcrumb(f: &mut Frame, area: Rect, state: &AppState) {
         View::WebhookInvocations { service } => format!("Webhooks > {service} > Invocations"),
         View::SecretRefs { key } => format!("Secrets > {key} > Refs"),
         View::Networks => "Networks".to_string(),
+        View::Chat => "Chat".to_string(),
     };
     let line = Line::from(vec![
         Span::styled(" ", Style::default()),
@@ -286,6 +289,7 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
             "Esc:back j/k:select ↵:invocations a:add e:edit x:delete r:refresh ?:help"
         }
         View::WebhookInvocations { .. } => "Esc:back r:refresh ?:help",
+        View::Chat => "type:ask Enter:send PgUp/PgDn:scroll /cmd:jump 0-6:views Esc:clear ?:help",
     };
     spans.push(Span::styled(keys, dim));
 

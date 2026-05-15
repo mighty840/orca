@@ -12,6 +12,9 @@ pub use crate::metrics::{MetricHistory, parse_human_bytes};
 /// Full-screen views (k9s style — each replaces the entire screen).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum View {
+    /// Default landing page — `orca ask`-style chat with the cluster AI.
+    /// Conversation lives only for the session; quitting wipes it.
+    Chat,
     Services,
     Nodes,
     Logs {
@@ -129,6 +132,43 @@ pub struct AppState {
     /// Scroll offset (in rendered lines) for the Networks view. The view has
     /// no selection cursor — j/k just shift the viewport.
     pub network_scroll: usize,
+    /// Session chat transcript for `View::Chat`. Cleared on quit.
+    pub chat: Vec<ChatTurn>,
+    /// Composition buffer for the next chat message. Single-line in v1.
+    pub chat_input: String,
+    /// Scroll offset (lines from top) for the chat transcript pane.
+    pub chat_scroll: usize,
+    /// True while a `/api/v1/ask` request is in flight.
+    pub chat_pending: bool,
+    /// True when the ask API returned 503 (no `[ai]` configured).
+    pub chat_unavailable: bool,
+    /// Receiver for the result of an in-flight chat request, dispatched as
+    /// a tokio task so the event loop stays responsive while the LLM is
+    /// thinking. `None` between requests.
+    pub chat_result_rx: Option<tokio::sync::mpsc::UnboundedReceiver<ChatTaskResult>>,
+}
+
+/// Result of a background chat dispatch — handed back to the event loop
+/// via `chat_result_rx` so the main loop can mutate state on completion.
+#[derive(Debug)]
+pub enum ChatTaskResult {
+    Reply(String),
+    Unavailable,
+    Error(String),
+}
+
+/// One turn in the chat transcript. The API mirror in `orca_ai::ops::ChatTurn`
+/// uses string roles; we keep an enum here so renderer / handlers can match.
+#[derive(Debug, Clone)]
+pub struct ChatTurn {
+    pub role: ChatRole,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatRole {
+    User,
+    Assistant,
 }
 
 impl Default for AppState {
@@ -140,7 +180,7 @@ impl Default for AppState {
 impl AppState {
     pub fn new() -> Self {
         Self {
-            view: View::Services,
+            view: View::Chat,
             view_stack: Vec::new(),
             cluster_name: "connecting...".into(),
             services: Vec::new(),
@@ -180,6 +220,12 @@ impl AppState {
             secrets_usage: Vec::new(),
             networks: None,
             network_scroll: 0,
+            chat: Vec::new(),
+            chat_input: String::new(),
+            chat_scroll: 0,
+            chat_pending: false,
+            chat_unavailable: false,
+            chat_result_rx: None,
         }
     }
 
@@ -361,6 +407,7 @@ impl AppState {
     /// View name for display in status bar.
     pub fn view_name(&self) -> &str {
         match &self.view {
+            View::Chat => "Chat",
             View::Services => "Services",
             View::Nodes => "Nodes",
             View::Logs { .. } => "Logs",

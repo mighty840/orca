@@ -7,6 +7,10 @@ pub async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str
     let parts: Vec<&str> = cmd.split_whitespace().collect();
     match parts.first().copied() {
         Some("q" | "quit") => state.should_quit = true,
+        Some("chat") => {
+            state.view_stack.clear();
+            state.view = View::Chat;
+        }
         Some("services" | "svc") => {
             state.view_stack.clear();
             state.view = View::Services;

@@ -58,6 +58,10 @@ pub async fn handle_normal_key(
     code: KeyCode,
     last_refresh: &mut tokio::time::Instant,
 ) {
+    if matches!(state.view, View::Chat) {
+        crate::chat_input::handle_chat_key(state, client, code).await;
+        return;
+    }
     match code {
         KeyCode::Char('q') => state.should_quit = true,
         KeyCode::Char(':') => {
@@ -195,6 +199,10 @@ pub async fn handle_normal_key(
         }
 
         // View shortcuts
+        KeyCode::Char('0') => {
+            state.view_stack.clear();
+            state.view = View::Chat;
+        }
         KeyCode::Char('1') => {
             state.view_stack.clear();
             state.view = View::Services;

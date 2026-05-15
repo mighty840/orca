@@ -105,6 +105,66 @@ pub async fn ask(
     Ok(response.content)
 }
 
+/// One turn in a chat transcript. The TUI / API caller owns the history;
+/// the backend just passes it through to the LLM.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ChatTurn {
+    /// "user" or "assistant".
+    pub role: String,
+    pub content: String,
+}
+
+/// Multi-turn chat with cluster context as the system prompt.
+///
+/// `history` is the prior transcript (oldest first). `question` is the new
+/// user message. Cluster status/logs are merged into the system prompt
+/// so the LLM grounds answers in real state.
+pub async fn chat(
+    config: &AiConfig,
+    history: &[ChatTurn],
+    question: &str,
+    status_text: &str,
+    logs_text: &str,
+) -> anyhow::Result<String> {
+    let backend = build_backend(config)?;
+
+    let system = format!(
+        "{ASK_SYSTEM_PROMPT}\n\n## Current cluster status\n{status}\n\n## Recent logs\n{logs}",
+        status = if status_text.is_empty() {
+            "(no status available)"
+        } else {
+            status_text
+        },
+        logs = if logs_text.is_empty() {
+            "(no recent logs)"
+        } else {
+            logs_text
+        },
+    );
+
+    let mut messages = vec![ChatMessage {
+        role: Role::System,
+        content: system,
+    }];
+    for turn in history {
+        let role = match turn.role.as_str() {
+            "assistant" => Role::Assistant,
+            _ => Role::User,
+        };
+        messages.push(ChatMessage {
+            role,
+            content: turn.content.clone(),
+        });
+    }
+    messages.push(ChatMessage {
+        role: Role::User,
+        content: question.to_string(),
+    });
+
+    let response = backend.chat(&messages).await?;
+    Ok(response.content)
+}
+
 /// Generate a service.toml configuration from a natural language description.
 pub async fn generate(config: &AiConfig, description: &str) -> anyhow::Result<String> {
     let backend = build_backend(config)?;
@@ -188,5 +248,33 @@ mod tests {
         let input = "[[service]]\nname = \"pg\"";
         let result = extract_toml_block(input);
         assert_eq!(result, input);
+    }
+
+    #[test]
+    fn chat_turn_serde_round_trip() {
+        // Pin the wire format the TUI's `/api/v1/ask` client speaks: a
+        // lowercase string `role` and a `content` string. The same shape is
+        // accepted server-side and forwarded into the LLM messages list.
+        let turn = ChatTurn {
+            role: "user".into(),
+            content: "why is api down?".into(),
+        };
+        let json = serde_json::to_string(&turn).unwrap();
+        assert_eq!(json, r#"{"role":"user","content":"why is api down?"}"#);
+        let back: ChatTurn = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.role, "user");
+        assert_eq!(back.content, "why is api down?");
+    }
+
+    #[test]
+    fn chat_turn_unknown_role_is_treated_as_user() {
+        // Defensive: if a caller stuffs a typo into `role`, we shouldn't
+        // panic — `chat()` maps anything that isn't "assistant" to
+        // `Role::User`, so the LLM still gets a coherent transcript.
+        // (Verified at the mapping site; this test pins the parse step.)
+        let json = r#"{"role":"orca","content":"hi"}"#;
+        let parsed: ChatTurn = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.role, "orca"); // pass-through, mapping happens later
+        assert_eq!(parsed.content, "hi");
     }
 }
