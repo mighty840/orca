@@ -80,6 +80,28 @@ impl ClusterContext {
         out.push_str("You have access to real-time cluster state. Diagnose issues, suggest fixes as `orca` CLI commands, and explain your reasoning.\n");
         out.push_str("When suggesting fixes, output the exact command. When unsure, say so.\n\n");
 
+        // Authoritative command surface. The LLM otherwise invents plausible
+        // but non-existent commands like `orca service restart` (this CLI is
+        // flat — verbs are top-level, not nested under `service`).
+        out.push_str("## Available `orca` commands\n");
+        out.push_str("Use ONLY these. Do NOT invent subcommands.\n\n");
+        out.push_str("- `orca status` — cluster + service overview\n");
+        out.push_str("- `orca logs <service> [--tail N] [--summarize]` — tail logs; `--summarize` runs them through the AI\n");
+        out.push_str("- `orca redeploy <service>` — force fresh image pull + container recreate (this is the 'restart' verb)\n");
+        out.push_str("- `orca rollback <service>` — roll back to the previous successful deploy\n");
+        out.push_str("- `orca scale <service> --replicas N` — change replica count\n");
+        out.push_str("- `orca stop <service>` — stop a service (omit for all)\n");
+        out.push_str("- `orca promote <service>` — promote canary instances to stable\n");
+        out.push_str("- `orca exec <service> [cmd]` — interactive shell or one-shot command inside a running container\n");
+        out.push_str("- `orca secrets set <KEY> <VALUE>` — set a secret referenced as `${secrets.KEY}` in service.toml env\n");
+        out.push_str("- `orca secrets list` / `orca secrets get <KEY>` / `orca secrets remove <KEY>` — read/remove secrets\n");
+        out.push_str("- `orca deploy [service…]` — (re)apply service definitions from `services/`\n");
+        out.push_str("- `orca alerts list` / `orca alerts view <id>` / `orca alerts reply <id> <msg>` / `orca alerts dismiss|resolve <id>` — alert triage\n");
+        out.push_str("- `orca backup` / `orca cleanup` / `orca nodes` — operational utilities\n\n");
+        out.push_str("**Not supported (do not suggest):** `orca service <verb>` (the CLI is flat — there is no `service` subcommand). ");
+        out.push_str("There is also no `set-env` / `update --cmd` / `update --image` / `update --port` — env vars, image tag, command, and ports live in `services/<project>/service.toml` and apply on `orca deploy`. ");
+        out.push_str("If a fix requires editing a service definition, say so plainly (e.g. 'edit services/<project>/service.toml: change `image = ...`, then `orca deploy`').\n\n");
+
         out.push_str("## Nodes\n");
         for n in &self.nodes {
             out.push_str(&format!(
@@ -197,5 +219,24 @@ mod tests {
         assert!(prompt.contains("## Recent Events"));
         assert!(prompt.contains("node-1"));
         assert!(prompt.contains("api"));
+    }
+
+    #[test]
+    fn test_system_prompt_includes_command_reference() {
+        let ctx = ClusterContext {
+            cluster_name: "x".into(),
+            nodes: vec![],
+            services: vec![],
+            recent_events: vec![],
+            active_alerts: vec![],
+        };
+        let prompt = ctx.to_system_prompt();
+        assert!(prompt.contains("## Available `orca` commands"));
+        assert!(prompt.contains("orca redeploy"));
+        assert!(prompt.contains("orca logs"));
+        assert!(prompt.contains("orca rollback"));
+        assert!(prompt.contains("Not supported"));
+        // The hallucinated forms must be called out as wrong.
+        assert!(prompt.contains("`orca service <verb>`"));
     }
 }
