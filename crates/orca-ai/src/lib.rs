@@ -1,4 +1,5 @@
 pub mod backend;
+pub mod channels;
 pub(crate) mod command_parser;
 pub mod context;
 pub mod conversation;

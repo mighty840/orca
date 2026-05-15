@@ -9,7 +9,9 @@ use crate::error::{OrcaError, Result};
 // -- Re-exports --
 
 pub use crate::backup::{BackupConfig, BackupTarget};
-pub use ai::{AiAlertConfig, AiConfig, AlertDeliveryChannels, AutoRemediateConfig};
+pub use ai::{
+    AiAlertConfig, AiConfig, AlertDeliveryChannels, AutoRemediateConfig, EmailChannelConfig,
+};
 pub use cluster::NetworkConfig;
 pub use cluster::{
     AlertChannelConfig, ApiToken, CleanupConfig, ClusterConfig, ClusterMeta, FallbackConfig,
@@ -48,6 +50,16 @@ impl ClusterConfig {
         if let Some(ai) = &mut self.ai {
             resolve(&mut ai.api_key);
             resolve(&mut ai.endpoint);
+            if let Some(alerts) = &mut ai.alerts
+                && let Some(channels) = &mut alerts.channels
+                && let Some(email) = &mut channels.email
+            {
+                let mut p = Some(email.password.clone());
+                resolve(&mut p);
+                if let Some(resolved) = p {
+                    email.password = resolved;
+                }
+            }
         }
         // Network config
         if let Some(net) = &mut self.network {

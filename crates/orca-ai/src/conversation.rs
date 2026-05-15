@@ -2,6 +2,7 @@ use chrono::Utc;
 use uuid::Uuid;
 
 use crate::backend::{ChatMessage, LlmBackend, Role};
+use crate::channels::{AlertEvent, Dispatcher};
 use crate::context::ClusterContext;
 use orca_core::types::{
     AlertConversation, AlertMessage, AlertSender, AlertSeverity, AlertState, ConversationId,
@@ -12,6 +13,7 @@ use orca_core::types::{
 pub struct ConversationEngine<B: LlmBackend> {
     backend: B,
     conversations: Vec<AlertConversation>,
+    dispatcher: Dispatcher,
 }
 
 impl<B: LlmBackend> ConversationEngine<B> {
@@ -19,6 +21,15 @@ impl<B: LlmBackend> ConversationEngine<B> {
         Self {
             backend,
             conversations: Vec::new(),
+            dispatcher: Dispatcher::empty(),
+        }
+    }
+
+    pub fn with_dispatcher(backend: B, dispatcher: Dispatcher) -> Self {
+        Self {
+            backend,
+            conversations: Vec::new(),
+            dispatcher,
         }
     }
 
@@ -78,8 +89,14 @@ impl<B: LlmBackend> ConversationEngine<B> {
             ],
         };
 
+        let id = conversation.id;
         self.conversations.push(conversation);
-        Ok(self.conversations.last().unwrap())
+        self.dispatch_for(id, AlertEvent::Opened).await;
+        Ok(self
+            .conversations
+            .iter()
+            .find(|c| c.id == id)
+            .expect("just pushed"))
     }
 
     /// Operator responds to an alert conversation (ask follow-up, approve fix, dismiss).
@@ -113,7 +130,13 @@ impl<B: LlmBackend> ConversationEngine<B> {
                 content: "Alert dismissed by operator.".to_string(),
                 suggested_command: None,
             });
-            return Ok(conv);
+            self.dispatch_for(conversation_id, AlertEvent::Dismissed)
+                .await;
+            return Ok(self
+                .conversations
+                .iter()
+                .find(|c| c.id == conversation_id)
+                .expect("just mutated"));
         }
 
         if lower == "resolve" || lower == "resolved" {
@@ -125,7 +148,13 @@ impl<B: LlmBackend> ConversationEngine<B> {
                 content: "Alert marked as resolved by operator.".to_string(),
                 suggested_command: None,
             });
-            return Ok(conv);
+            self.dispatch_for(conversation_id, AlertEvent::Resolved)
+                .await;
+            return Ok(self
+                .conversations
+                .iter()
+                .find(|c| c.id == conversation_id)
+                .expect("just mutated"));
         }
 
         // Build chat history for continued conversation
@@ -160,7 +189,13 @@ impl<B: LlmBackend> ConversationEngine<B> {
             suggested_command,
         });
 
-        Ok(conv)
+        self.dispatch_for(conversation_id, AlertEvent::Updated)
+            .await;
+        Ok(self
+            .conversations
+            .iter()
+            .find(|c| c.id == conversation_id)
+            .expect("just mutated"))
     }
 
     /// Feed new data into an existing conversation (e.g., the issue got worse, or metrics changed).
@@ -180,12 +215,12 @@ impl<B: LlmBackend> ConversationEngine<B> {
     }
 
     /// Mark an alert as remediated (auto-fix was applied).
-    pub fn mark_remediated(&mut self, conversation_id: ConversationId, action_taken: &str) {
-        if let Some(conv) = self
+    pub async fn mark_remediated(&mut self, conversation_id: ConversationId, action_taken: &str) {
+        let found = self
             .conversations
             .iter_mut()
-            .find(|c| c.id == conversation_id)
-        {
+            .find(|c| c.id == conversation_id);
+        if let Some(conv) = found {
             conv.state = AlertState::Remediated;
             conv.resolved_at = Some(Utc::now());
             conv.messages.push(AlertMessage {
@@ -194,6 +229,20 @@ impl<B: LlmBackend> ConversationEngine<B> {
                 content: format!("Auto-remediation applied: {action_taken}"),
                 suggested_command: None,
             });
+            self.dispatch_for(conversation_id, AlertEvent::Remediated)
+                .await;
+        }
+    }
+
+    /// Fan a delivery event for the conversation with `id`. Looks the
+    /// conversation up by id and clones a snapshot so we don't hold a borrow
+    /// across the dispatcher's await.
+    async fn dispatch_for(&self, id: ConversationId, event: AlertEvent) {
+        if self.dispatcher.is_empty() {
+            return;
+        }
+        if let Some(snapshot) = self.conversations.iter().find(|c| c.id == id).cloned() {
+            self.dispatcher.dispatch(&snapshot, event).await;
         }
     }
 
