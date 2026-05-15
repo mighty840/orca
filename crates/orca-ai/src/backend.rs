@@ -30,6 +30,21 @@ pub trait LlmBackend: Send + Sync + 'static {
     fn name(&self) -> &str;
 }
 
+/// Forward `LlmBackend` through a `Box`, so callers can use
+/// `Box<dyn LlmBackend>` wherever `B: LlmBackend` is required. Without this,
+/// `ConversationEngine<Box<dyn LlmBackend>>` won't compile because async-trait
+/// does not emit a blanket impl for boxed trait objects.
+#[async_trait]
+impl LlmBackend for Box<dyn LlmBackend> {
+    async fn chat(&self, messages: &[ChatMessage]) -> anyhow::Result<ChatResponse> {
+        let inner: &dyn LlmBackend = self.as_ref();
+        inner.chat(messages).await
+    }
+    fn name(&self) -> &str {
+        self.as_ref().name()
+    }
+}
+
 /// OpenAI-compatible backend (works with LiteLLM, Ollama, vLLM, OpenAI, Anthropic proxy, etc.)
 pub struct OpenAiCompatibleBackend {
     client: reqwest::Client,

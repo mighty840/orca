@@ -2584,6 +2584,7 @@ dependencies = [
  "http-body-util",
  "openraft",
  "orca-agent",
+ "orca-ai",
  "orca-core",
  "orca-proxy",
  "prost",
