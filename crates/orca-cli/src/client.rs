@@ -4,6 +4,8 @@ use orca_core::api_types::{
     DeployRequest, DeployResponse, ScaleRequest, ScaleResponse, StatusResponse,
 };
 use orca_core::config::ServicesConfig;
+use orca_core::types::AlertConversation;
+use serde::Deserialize;
 
 /// Client for the orca control plane API.
 pub struct OrcaClient {
@@ -121,6 +123,65 @@ impl OrcaClient {
         Ok(())
     }
 
+    pub async fn alerts_list(&self, all: bool) -> anyhow::Result<Vec<AlertConversation>> {
+        let path = format!("/api/v1/alerts?all={all}");
+        let resp = self.auth(self.client.get(self.url(&path))).send().await?;
+        let resp = unwrap_alert_error(resp).await?;
+        #[derive(Deserialize)]
+        struct ListResp {
+            alerts: Vec<AlertConversation>,
+        }
+        let body: ListResp = resp.json().await?;
+        Ok(body.alerts)
+    }
+
+    pub async fn alerts_view(&self, id: &str) -> anyhow::Result<AlertConversation> {
+        let resp = self
+            .auth(self.client.get(self.url(&format!("/api/v1/alerts/{id}"))))
+            .send()
+            .await?;
+        let resp = unwrap_alert_error(resp).await?;
+        Ok(resp.json().await?)
+    }
+
+    pub async fn alerts_reply(&self, id: &str, message: &str) -> anyhow::Result<AlertConversation> {
+        let body = serde_json::json!({ "message": message });
+        let resp = self
+            .auth(
+                self.client
+                    .post(self.url(&format!("/api/v1/alerts/{id}/reply"))),
+            )
+            .json(&body)
+            .send()
+            .await?;
+        let resp = unwrap_alert_error(resp).await?;
+        Ok(resp.json().await?)
+    }
+
+    pub async fn alerts_dismiss(&self, id: &str) -> anyhow::Result<AlertConversation> {
+        let resp = self
+            .auth(
+                self.client
+                    .post(self.url(&format!("/api/v1/alerts/{id}/dismiss"))),
+            )
+            .send()
+            .await?;
+        let resp = unwrap_alert_error(resp).await?;
+        Ok(resp.json().await?)
+    }
+
+    pub async fn alerts_resolve(&self, id: &str) -> anyhow::Result<AlertConversation> {
+        let resp = self
+            .auth(
+                self.client
+                    .post(self.url(&format!("/api/v1/alerts/{id}/resolve"))),
+            )
+            .send()
+            .await?;
+        let resp = unwrap_alert_error(resp).await?;
+        Ok(resp.json().await?)
+    }
+
     pub async fn promote(&self, service: &str) -> anyhow::Result<()> {
         self.auth(
             self.client
@@ -184,4 +245,26 @@ impl OrcaClient {
             .error_for_status()?;
         Ok(resp.json().await?)
     }
+}
+
+/// Translate 503 (`[ai]` unconfigured) and 404 (unknown id) into clean
+/// anyhow errors so the CLI can print one-line messages instead of raw
+/// HTTP status codes.
+async fn unwrap_alert_error(resp: reqwest::Response) -> anyhow::Result<reqwest::Response> {
+    let status = resp.status();
+    if status.is_success() {
+        return Ok(resp);
+    }
+    let body: serde_json::Value = resp.json().await.unwrap_or_default();
+    let msg = body
+        .get("error")
+        .and_then(|e| e.as_str())
+        .unwrap_or("(no error message in response)");
+    if status.as_u16() == 503 {
+        anyhow::bail!("{msg}");
+    }
+    if status.as_u16() == 404 {
+        anyhow::bail!("{msg}");
+    }
+    anyhow::bail!("alerts API returned HTTP {status}: {msg}")
 }

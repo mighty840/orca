@@ -16,6 +16,9 @@ pub enum AlertsAction {
     Dismiss {
         id: String,
     },
+    Resolve {
+        id: String,
+    },
     Fix {
         id: String,
     },
