@@ -94,7 +94,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Command::Ask { question } => handlers::ai_ops::handle_ask(question, cli.api).await?,
         Command::Generate { description } => handlers::ai_ops::handle_generate(description).await?,
-        Command::Alerts { action } => handlers::ops::handle_alerts(action),
+        Command::Alerts { action } => handlers::ops::handle_alerts(action, cli.api).await?,
         Command::Secrets { action } => handlers::ops::handle_secrets(action),
         Command::Import { source } => handlers::import::handle_import(source),
         Command::Webhooks { action } => handlers::ops::handle_webhooks(action, cli.api).await?,

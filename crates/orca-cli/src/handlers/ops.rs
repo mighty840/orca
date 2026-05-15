@@ -116,19 +116,123 @@ pub async fn handle_scale(service: String, replicas: u32, api: String) -> anyhow
     Ok(())
 }
 
-pub fn handle_alerts(action: AlertsAction) {
+pub async fn handle_alerts(action: AlertsAction, api: String) -> anyhow::Result<()> {
+    let client = OrcaClient::new(api);
     match action {
         AlertsAction::List { all } => {
-            let scope = if all { "all" } else { "active" };
-            println!("No {scope} alert conversations.");
+            let alerts = client.alerts_list(all).await?;
+            if alerts.is_empty() {
+                let scope = if all { "all" } else { "active" };
+                println!("No {scope} alert conversations.");
+                return Ok(());
+            }
+            println!(
+                "{:<36}  {:<20}  {:<9}  {:<16}  Started",
+                "ID", "Service", "Severity", "State"
+            );
+            for a in alerts {
+                println!(
+                    "{:<36}  {:<20}  {:<9?}  {:<16?}  {}",
+                    a.id,
+                    truncate(&a.service, 20),
+                    a.severity,
+                    a.state,
+                    a.started_at.format("%Y-%m-%d %H:%M:%S")
+                );
+            }
         }
-        AlertsAction::View { id } => println!("Alert {id}: not yet connected."),
+        AlertsAction::View { id } => {
+            let conv = client.alerts_view(&id).await?;
+            print_conversation(&conv);
+        }
         AlertsAction::Reply { id, message } => {
             let msg = message.join(" ");
-            println!("Reply to alert {id}: {msg}");
+            if msg.trim().is_empty() {
+                anyhow::bail!("reply message cannot be empty");
+            }
+            let conv = client.alerts_reply(&id, &msg).await?;
+            println!("Reply sent. Latest exchange:");
+            print_latest_exchange(&conv);
         }
-        AlertsAction::Dismiss { id } => println!("Dismissed alert {id}."),
-        AlertsAction::Fix { id } => println!("Applying fix for alert {id}..."),
+        AlertsAction::Dismiss { id } => {
+            client.alerts_dismiss(&id).await?;
+            println!("Dismissed alert {id}.");
+        }
+        AlertsAction::Resolve { id } => {
+            client.alerts_resolve(&id).await?;
+            println!("Resolved alert {id}.");
+        }
+        AlertsAction::Fix { id } => {
+            let conv = client.alerts_view(&id).await?;
+            let cmd = conv
+                .messages
+                .iter()
+                .rev()
+                .find_map(|m| m.suggested_command.as_deref());
+            match cmd {
+                Some(c) => {
+                    println!("Suggested fix for alert {id}:\n  {c}");
+                    println!(
+                        "\nReview before running. To apply: `orca alerts reply {id} approve` once interactive\n\
+                         confirm is wired, or run the command directly."
+                    );
+                }
+                None => println!("No suggested command on alert {id}."),
+            }
+        }
+    }
+    Ok(())
+}
+
+fn print_conversation(conv: &orca_core::types::AlertConversation) {
+    println!("Alert {} — {}", conv.id, conv.service);
+    println!(
+        "Severity: {:?}  State: {:?}  Started: {}",
+        conv.severity,
+        conv.state,
+        conv.started_at.format("%Y-%m-%d %H:%M:%S")
+    );
+    if let Some(resolved) = conv.resolved_at {
+        println!("Resolved: {}", resolved.format("%Y-%m-%d %H:%M:%S"));
+    }
+    println!("\nConversation:");
+    for msg in &conv.messages {
+        let who = match msg.sender {
+            orca_core::types::AlertSender::Orca => "orca",
+            orca_core::types::AlertSender::Operator => "you",
+            orca_core::types::AlertSender::System => "system",
+        };
+        println!(
+            "  [{} {}] {}",
+            msg.timestamp.format("%H:%M:%S"),
+            who,
+            msg.content
+        );
+        if let Some(cmd) = &msg.suggested_command {
+            println!("    fix: {cmd}");
+        }
+    }
+}
+
+fn print_latest_exchange(conv: &orca_core::types::AlertConversation) {
+    for msg in conv.messages.iter().rev().take(2).rev() {
+        let who = match msg.sender {
+            orca_core::types::AlertSender::Orca => "orca",
+            orca_core::types::AlertSender::Operator => "you",
+            orca_core::types::AlertSender::System => "system",
+        };
+        println!("  [{who}] {}", msg.content);
+        if let Some(cmd) = &msg.suggested_command {
+            println!("    fix: {cmd}");
+        }
+    }
+}
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", &s[..max.saturating_sub(1)])
     }
 }
 
