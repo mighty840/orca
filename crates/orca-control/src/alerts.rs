@@ -11,6 +11,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use chrono::{Duration, Utc};
 use tokio::sync::RwLock;
 use tracing::info;
 
@@ -96,6 +97,10 @@ impl ContextProvider for StateContextProvider {
         let cluster_name = self.state.cluster_config.cluster.name.clone();
 
         let services = self.state.services.read().await;
+        let events = self.state.instance_events.read().await;
+        let now = Utc::now();
+        let one_hour = Duration::hours(1);
+        let day = Duration::hours(24);
         let services: Vec<ServiceSummary> = services
             .values()
             .map(|svc| {
@@ -111,6 +116,10 @@ impl ContextProvider for StateContextProvider {
                 } else {
                     "degraded".into()
                 };
+                let (errors_1h, restarts_24h) = events
+                    .get(&svc.config.name)
+                    .map(|log| (log.failures_in(now, one_hour), log.restarts_in(now, day)))
+                    .unwrap_or((0, 0));
                 ServiceSummary {
                     name: svc.config.name.clone(),
                     runtime: match svc.config.runtime {
@@ -122,8 +131,8 @@ impl ContextProvider for StateContextProvider {
                     status,
                     uses_gpu: false,
                     recent_logs: Vec::new(),
-                    error_count_1h: 0,
-                    restart_count_24h: 0,
+                    error_count_1h: errors_1h,
+                    restart_count_24h: restarts_24h,
                 }
             })
             .collect();

@@ -11,6 +11,7 @@ use crate::error::{OrcaError, Result};
 pub use crate::backup::{BackupConfig, BackupTarget};
 pub use ai::{
     AiAlertConfig, AiConfig, AlertDeliveryChannels, AutoRemediateConfig, EmailChannelConfig,
+    SmtpTls,
 };
 pub use cluster::NetworkConfig;
 pub use cluster::{
