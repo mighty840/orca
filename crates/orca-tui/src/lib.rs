@@ -282,6 +282,26 @@ async fn refresh_networks(client: &ApiClient, state: &mut AppState) {
     }
 }
 
+/// Fetch alerts via the control plane. 503 (no `[ai]` configured) sets the
+/// `alerts_unavailable` flag so the view shows a friendly message. Selection
+/// is clamped to the new list size.
+pub(crate) async fn refresh_alerts(client: &ApiClient, state: &mut AppState) {
+    match client.alerts_list(state.alerts_show_all).await {
+        Ok(Some(alerts)) => {
+            state.alerts = alerts;
+            state.alerts_unavailable = false;
+            if state.selected_alert >= state.alerts.len() {
+                state.selected_alert = state.alerts.len().saturating_sub(1);
+            }
+        }
+        Ok(None) => {
+            state.alerts = Vec::new();
+            state.alerts_unavailable = true;
+        }
+        Err(e) => state.error = Some(format!("Alerts fetch failed: {e}")),
+    }
+}
+
 /// Fetch the secrets organizer view (key → referencing-services index).
 /// Refreshed on entry and on `r`; never polled. Also called after
 /// `:set`/`:rm` flows that may change the visible counts.

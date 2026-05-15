@@ -44,6 +44,13 @@ pub enum View {
         key: String,
     },
     Networks,
+    /// AI alert conversations (`/api/v1/alerts`). Acts as a list view; press
+    /// Enter on a row to drill down to [`View::AlertDetail`].
+    Alerts,
+    /// Drill-down: the full transcript for one alert conversation.
+    AlertDetail {
+        id: String,
+    },
 }
 
 /// Input mode for the TUI.
@@ -146,6 +153,19 @@ pub struct AppState {
     /// a tokio task so the event loop stays responsive while the LLM is
     /// thinking. `None` between requests.
     pub chat_result_rx: Option<tokio::sync::mpsc::UnboundedReceiver<ChatTaskResult>>,
+    /// Cached alert conversations from `GET /api/v1/alerts`. Polled on the
+    /// regular status tick when the view is open; otherwise stale.
+    pub alerts: Vec<crate::api::AlertConversation>,
+    /// Selected row in the Alerts list.
+    pub selected_alert: usize,
+    /// Scroll offset for the AlertDetail conversation view.
+    pub alert_detail_scroll: usize,
+    /// Whether the Alerts list includes resolved/dismissed/remediated rows
+    /// (toggled with `a` for "show all").
+    pub alerts_show_all: bool,
+    /// True when the alerts API returned 503 (no `[ai]` configured). Lets
+    /// the view show a friendly message instead of an empty table.
+    pub alerts_unavailable: bool,
 }
 
 /// Result of a background chat dispatch — handed back to the event loop
@@ -226,6 +246,11 @@ impl AppState {
             chat_pending: false,
             chat_unavailable: false,
             chat_result_rx: None,
+            alerts: Vec::new(),
+            selected_alert: 0,
+            alert_detail_scroll: 0,
+            alerts_show_all: false,
+            alerts_unavailable: false,
         }
     }
 
@@ -420,6 +445,8 @@ impl AppState {
             View::WebhookInvocations { .. } => "Invocations",
             View::SecretRefs { .. } => "Secret Refs",
             View::Networks => "Networks",
+            View::Alerts => "Alerts",
+            View::AlertDetail { .. } => "Alert Detail",
         }
     }
 }
