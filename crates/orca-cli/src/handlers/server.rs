@@ -70,33 +70,39 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
     let wasm_as_trait: Option<Arc<dyn orca_core::runtime::Runtime>> =
         wasm_runtime.map(|wr| wr as Arc<dyn orca_core::runtime::Runtime>);
 
-    // Collect domains for ACME cert provisioning
+    // Collect domains for ACME cert provisioning. Skip domains whose service
+    // placement explicitly targets a different node — those services are
+    // edge-served by the agent, so the agent (not master) provisions and
+    // serves the cert. Master attempting ACME for them would deadlock the
+    // HTTPS startup loop on the LE HTTP-01 challenge, since DNS for those
+    // domains points elsewhere.
     let acme_email = cluster_config.cluster.acme_email.clone();
+    let master_node = master_hostname();
+    let collect_master_domains = |s: orca_core::config::ServicesConfig| -> Vec<String> {
+        s.service
+            .iter()
+            .filter(|svc| is_master_placed(svc, &master_node))
+            .filter_map(|svc| svc.domain.clone())
+            .collect()
+    };
     let services_dir = std::path::Path::new("services");
     let domains: Vec<String> = if services_dir.is_dir() {
         orca_core::config::ServicesConfig::load_dir(services_dir)
             .ok()
-            .map(|s| {
-                s.service
-                    .iter()
-                    .filter_map(|svc| svc.domain.clone())
-                    .collect()
-            })
+            .map(collect_master_domains)
             .unwrap_or_default()
     } else {
         std::path::Path::new("services.toml")
             .exists()
             .then(|| orca_core::config::ServicesConfig::load("services.toml".as_ref()).ok())
             .flatten()
-            .map(|s| {
-                s.service
-                    .iter()
-                    .filter_map(|svc| svc.domain.clone())
-                    .collect()
-            })
+            .map(collect_master_domains)
             .unwrap_or_default()
     };
-    info!("Domain detection: {} domains found", domains.len());
+    info!(
+        "Domain detection: {} master-placed domain(s) found (node={master_node})",
+        domains.len()
+    );
 
     // Start proxy and get ACME components for hot cert provisioning
     let proxy_routes = route_table.clone();
@@ -277,4 +283,94 @@ pub fn read_token(flag: Option<&str>) -> Option<String> {
         .ok()
         .map(|t| t.trim().to_string())
         .filter(|t| !t.is_empty())
+}
+
+/// Master's identity for placement matching. Mirrors the helper in
+/// `orca_control::api::handlers::ops::networks` so master and the API report
+/// the same string.
+fn master_hostname() -> String {
+    std::fs::read_to_string("/etc/hostname")
+        .map(|s| s.trim().to_string())
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "master".to_string())
+}
+
+/// True if a service should be ACME-provisioned on master.
+///
+/// Returns true when placement is unconstrained (`None`) or explicitly targets
+/// this master node. Returns false when placement targets a different node —
+/// in that case the agent serves the cert, and master would deadlock on the
+/// LE HTTP-01 challenge if it tried to provision (DNS for the domain points
+/// at the agent, not the master).
+fn is_master_placed(svc: &orca_core::config::ServiceConfig, master_hostname: &str) -> bool {
+    match svc.placement.as_ref().and_then(|p| p.node.as_deref()) {
+        Some(node) => node == master_hostname,
+        None => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orca_core::config::ServicesConfig;
+
+    fn parse_svc(toml: &str) -> orca_core::config::ServiceConfig {
+        let cfg: ServicesConfig = ::toml::from_str(toml).expect("valid toml");
+        cfg.service.into_iter().next().expect("one service")
+    }
+
+    #[test]
+    fn unconstrained_placement_is_master_placed() {
+        let svc = parse_svc(
+            r#"
+            [[service]]
+            name = "test"
+            image = "nginx:latest"
+            "#,
+        );
+        assert!(is_master_placed(&svc, "master-host"));
+    }
+
+    #[test]
+    fn matching_placement_is_master_placed() {
+        let svc = parse_svc(
+            r#"
+            [[service]]
+            name = "test"
+            image = "nginx:latest"
+            [service.placement]
+            node = "master-host"
+            "#,
+        );
+        assert!(is_master_placed(&svc, "master-host"));
+    }
+
+    #[test]
+    fn other_node_placement_is_not_master_placed() {
+        let svc = parse_svc(
+            r#"
+            [[service]]
+            name = "test"
+            image = "nginx:latest"
+            [service.placement]
+            node = "zeroclaw"
+            "#,
+        );
+        assert!(!is_master_placed(&svc, "master-host"));
+    }
+
+    #[test]
+    fn placement_with_only_labels_is_master_placed() {
+        let svc = parse_svc(
+            r#"
+            [[service]]
+            name = "test"
+            image = "nginx:latest"
+            [service.placement]
+            [service.placement.labels]
+            zone = "us-east"
+            "#,
+        );
+        assert!(is_master_placed(&svc, "master-host"));
+    }
 }

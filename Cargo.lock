@@ -2288,6 +2288,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite 0.29.0",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "urlencoding",
