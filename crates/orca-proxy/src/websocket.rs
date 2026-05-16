@@ -29,7 +29,7 @@ pub(crate) fn is_websocket_upgrade(req: &Request<Incoming>) -> bool {
 pub(crate) async fn handle_websocket_proxy(
     mut req: Request<Incoming>,
     backend_addr: &str,
-) -> Response<http_body_util::Full<hyper::body::Bytes>> {
+) -> Response<crate::body::ProxyBody> {
     // Capture the upgrade future before consuming the request.
     let upgrade_fut = hyper::upgrade::on(&mut req);
     let backend_addr = backend_addr.to_string();
@@ -63,13 +63,13 @@ pub(crate) async fn handle_websocket_proxy(
         Ok(Ok(s)) => s,
         Ok(Err(e)) => {
             error!("WebSocket backend connect failed ({backend_addr}): {e}");
-            let mut r = Response::new(http_body_util::Full::new(hyper::body::Bytes::new()));
+            let mut r = Response::new(crate::body::empty_body());
             *r.status_mut() = StatusCode::BAD_GATEWAY;
             return r;
         }
         Err(_) => {
             error!("WebSocket backend connect timed out ({backend_addr})");
-            let mut r = Response::new(http_body_util::Full::new(hyper::body::Bytes::new()));
+            let mut r = Response::new(crate::body::empty_body());
             *r.status_mut() = StatusCode::GATEWAY_TIMEOUT;
             return r;
         }
@@ -77,7 +77,7 @@ pub(crate) async fn handle_websocket_proxy(
 
     if let Err(e) = backend.write_all(raw_req.as_bytes()).await {
         error!("WebSocket write to backend failed: {e}");
-        let mut r = Response::new(http_body_util::Full::new(hyper::body::Bytes::new()));
+        let mut r = Response::new(crate::body::empty_body());
         *r.status_mut() = StatusCode::BAD_GATEWAY;
         return r;
     }
@@ -105,13 +105,13 @@ pub(crate) async fn handle_websocket_proxy(
         Ok(Ok(())) => {}
         Ok(Err(e)) => {
             error!("WebSocket backend header read failed: {e}");
-            let mut r = Response::new(http_body_util::Full::new(hyper::body::Bytes::new()));
+            let mut r = Response::new(crate::body::empty_body());
             *r.status_mut() = StatusCode::BAD_GATEWAY;
             return r;
         }
         Err(_) => {
             error!("WebSocket backend header read timed out ({backend_addr})");
-            let mut r = Response::new(http_body_util::Full::new(hyper::body::Bytes::new()));
+            let mut r = Response::new(crate::body::empty_body());
             *r.status_mut() = StatusCode::GATEWAY_TIMEOUT;
             return r;
         }
@@ -122,7 +122,7 @@ pub(crate) async fn handle_websocket_proxy(
     let first_line = first_line.lines().next().unwrap_or("");
     if !first_line.contains("101") {
         error!("WebSocket backend refused upgrade: {first_line}");
-        let mut r = Response::new(http_body_util::Full::new(hyper::body::Bytes::new()));
+        let mut r = Response::new(crate::body::empty_body());
         *r.status_mut() = StatusCode::BAD_GATEWAY;
         return r;
     }
@@ -152,7 +152,7 @@ pub(crate) async fn handle_websocket_proxy(
     // Return 101 to the client including the Sec-WebSocket-Accept the backend
     // computed. Hyper sends this and then yields the raw connection to the
     // upgrade future we spawned above.
-    let mut resp = Response::new(http_body_util::Full::new(hyper::body::Bytes::new()));
+    let mut resp = Response::new(crate::body::empty_body());
     *resp.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
     resp.headers_mut()
         .insert("upgrade", "websocket".parse().expect("valid header value"));

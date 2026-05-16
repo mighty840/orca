@@ -5,6 +5,7 @@
 //! Supports automatic TLS via ACME/Let's Encrypt (Caddy-style zero-config).
 
 pub mod acme;
+mod body;
 mod forward;
 mod handler;
 pub mod rate_limit;

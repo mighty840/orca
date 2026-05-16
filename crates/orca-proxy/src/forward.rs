@@ -4,6 +4,7 @@ use hyper::{Response, StatusCode};
 use tracing::{debug, error};
 
 use crate::RouteTarget;
+use crate::body::{ProxyBody, full_body, stream_body};
 
 /// Select a target index using weighted round-robin.
 ///
@@ -49,7 +50,7 @@ pub(crate) async fn forward_with_retry(
     host: &str,
     is_tls: bool,
     client_ip: String,
-) -> Response<http_body_util::Full<hyper::body::Bytes>> {
+) -> Response<ProxyBody> {
     let max_attempts = if matched.len() > 1 { 2 } else { 1 };
 
     for attempt in 0..max_attempts {
@@ -128,8 +129,20 @@ pub(crate) async fn forward_with_retry(
             Ok(resp) => {
                 let status = resp.status();
                 let backend_headers = resp.headers().clone();
-                let resp_body = resp.bytes().await.unwrap_or_default();
-                let mut response = Response::new(http_body_util::Full::new(resp_body));
+                // Stream the upstream body straight through instead of
+                // buffering with resp.bytes().await. For a Docker registry
+                // blob pull (100MB+) buffering doubles end-to-end latency
+                // AND parks ~100MB in the proxy task — when several streams
+                // pile up, the proxy's accept loop runs out of headroom and
+                // new TLS handshakes from concurrent clients (`docker login`,
+                // browser hits) start timing out. See PR description / the
+                // v0.2.9-rc.2 streaming-bodies memory for the full incident.
+                //
+                // 502 retry is preserved: status is checked above before we
+                // consume the body, so a 502 still falls through to the
+                // next iteration without writing anything to the client.
+                let body = stream_body(resp.bytes_stream());
+                let mut response = Response::new(body);
                 *response.status_mut() = status;
                 // Forward backend headers (skip hop-by-hop only).
                 // content-length is preserved — clients need it.
@@ -169,12 +182,9 @@ pub(crate) async fn forward_with_retry(
 }
 
 /// Build a 301 redirect response to HTTPS.
-pub(crate) fn redirect_to_https(
-    host: &str,
-    path: &str,
-) -> Response<http_body_util::Full<hyper::body::Bytes>> {
+pub(crate) fn redirect_to_https(host: &str, path: &str) -> Response<ProxyBody> {
     let location = format!("https://{host}{path}");
-    let body = http_body_util::Full::new(hyper::body::Bytes::from(format!("Moved to {location}")));
+    let body = full_body(hyper::body::Bytes::from(format!("Moved to {location}")));
     let mut resp = Response::new(body);
     *resp.status_mut() = StatusCode::MOVED_PERMANENTLY;
     resp.headers_mut().insert(

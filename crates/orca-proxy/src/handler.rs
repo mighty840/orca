@@ -13,6 +13,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, error, info};
 
 use crate::acme::AcmeManager;
+use crate::body::{ProxyBody, full_body};
 use crate::forward::{forward_with_retry, redirect_to_https};
 use crate::rate_limit::RateLimiter;
 use crate::routing::{find_matching_trigger, select_path_targets};
@@ -43,7 +44,7 @@ fn fallback_target(fallback: Option<&FallbackConfig>) -> Option<RouteTarget> {
 pub(crate) async fn handle_acme_challenge(
     req: &Request<Incoming>,
     acme: Option<&AcmeManager>,
-) -> Option<Response<http_body_util::Full<hyper::body::Bytes>>> {
+) -> Option<Response<ProxyBody>> {
     let path = req.uri().path();
     if !path.starts_with(ACME_CHALLENGE_PREFIX) {
         return None;
@@ -57,18 +58,14 @@ pub(crate) async fn handle_acme_challenge(
     };
 
     match manager.get_challenge_response(token).await {
-        Some(authorization) => {
-            let body = http_body_util::Full::new(hyper::body::Bytes::from(authorization));
-            Some(Response::new(body))
-        }
+        Some(authorization) => Some(Response::new(full_body(hyper::body::Bytes::from(
+            authorization,
+        )))),
         None => {
             // Also check the webroot directory for certbot-placed challenge files
             let webroot_path = format!("/tmp/orca-acme/.well-known/acme-challenge/{token}");
             match tokio::fs::read_to_string(&webroot_path).await {
-                Ok(content) => {
-                    let body = http_body_util::Full::new(hyper::body::Bytes::from(content));
-                    Some(Response::new(body))
-                }
+                Ok(content) => Some(Response::new(full_body(hyper::body::Bytes::from(content)))),
                 Err(_) => Some(error_response(
                     StatusCode::NOT_FOUND,
                     "ACME challenge token not found",
@@ -91,7 +88,7 @@ pub(crate) async fn handle_request(
     rate_limiter: &RateLimiter,
     peer: SocketAddr,
     fallback: Option<&FallbackConfig>,
-) -> Result<Response<http_body_util::Full<hyper::body::Bytes>>, hyper::Error> {
+) -> Result<Response<ProxyBody>, hyper::Error> {
     let start = Instant::now();
     let path = req.uri().path().to_string();
     let method = req.method().to_string();
@@ -128,8 +125,9 @@ pub(crate) async fn handle_request(
 
             match invoker(runtime_id, method, path, body_str).await {
                 Ok(response_body) => {
-                    let body = http_body_util::Full::new(hyper::body::Bytes::from(response_body));
-                    return Ok(Response::new(body));
+                    return Ok(Response::new(full_body(hyper::body::Bytes::from(
+                        response_body,
+                    ))));
                 }
                 Err(e) => {
                     error!("Wasm invocation failed: {e}");
@@ -270,12 +268,8 @@ pub(crate) async fn handle_request(
 }
 
 /// Build a simple error response.
-pub(crate) fn error_response(
-    status: StatusCode,
-    msg: &str,
-) -> Response<http_body_util::Full<hyper::body::Bytes>> {
-    let body = http_body_util::Full::new(hyper::body::Bytes::from(msg.to_string()));
-    let mut resp = Response::new(body);
+pub(crate) fn error_response(status: StatusCode, msg: &str) -> Response<ProxyBody> {
+    let mut resp = Response::new(full_body(hyper::body::Bytes::from(msg.to_string())));
     *resp.status_mut() = status;
     resp
 }
