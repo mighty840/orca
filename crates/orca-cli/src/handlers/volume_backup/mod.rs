@@ -298,8 +298,6 @@ mod tests {
     /// deleted before a new one exists.
     #[test]
     fn prune_does_not_remove_recent_backup_dirs() {
-        use helpers::prune_old_backup_dirs;
-
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path().join(".orca/backups");
 

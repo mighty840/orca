@@ -210,13 +210,29 @@ pub async fn run_proxy_with_acme_and_fallback(
     let https_handle = tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-        // Provision all initial domain certs
+        // Provision all initial domain certs. Each call gets its own 60s
+        // timeout: without it, a single domain whose LE HTTP-01 challenge
+        // hangs (DNS pointing elsewhere, port 80 firewalled, LE rate limit
+        // backoff) blocks the entire HTTPS listener startup forever. 60s is
+        // generous — a healthy LE order completes in 5-15s — so a timeout
+        // here is a real problem, but we'd rather serve the other domains
+        // than serve nothing.
+        const PER_DOMAIN_PROVISION_TIMEOUT: std::time::Duration =
+            std::time::Duration::from_secs(60);
         for domain in &domains {
-            if let Err(e) = acme_mgr
-                .ensure_cert_for_resolver(domain, &resolver_clone)
-                .await
-            {
-                error!(domain = %domain, error = %e, "Failed to provision cert");
+            let fut = acme_mgr.ensure_cert_for_resolver(domain, &resolver_clone);
+            match tokio::time::timeout(PER_DOMAIN_PROVISION_TIMEOUT, fut).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    error!(domain = %domain, error = %e, "Failed to provision cert");
+                }
+                Err(_) => {
+                    warn!(
+                        domain = %domain,
+                        timeout_secs = PER_DOMAIN_PROVISION_TIMEOUT.as_secs(),
+                        "Cert provisioning timed out — skipping (HTTPS will start without this cert; reconciler may retry on demand)"
+                    );
+                }
             }
         }
 

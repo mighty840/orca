@@ -62,6 +62,7 @@ impl TestClient {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn get(&self, path: &str) -> reqwest::Response {
         self.client
             .get(format!("{}{path}", self.base))

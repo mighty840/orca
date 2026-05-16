@@ -1,7 +1,5 @@
 //! Tests for project isolation: directory-based service grouping.
 
-use std::collections::HashMap;
-
 use orca_core::config::ServicesConfig;
 
 /// load_dir should set the `project` field from the directory name.

@@ -188,13 +188,12 @@ mod tests {
         let result = {
             let services = state.services.read().await;
             let svc = services.get("myapp").unwrap();
-            let remote_node_id = svc.instances.iter().find_map(|i| {
+            svc.instances.iter().find_map(|i| {
                 i.handle
                     .runtime_id
                     .strip_prefix("remote-")
                     .and_then(|s| s.parse::<u64>().ok())
-            });
-            remote_node_id
+            })
         };
         assert_eq!(result, Some(node_id));
 

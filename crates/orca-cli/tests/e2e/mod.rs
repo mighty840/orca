@@ -26,6 +26,7 @@ pub const E2E_TOKEN: &str = "e2e-test-token";
 pub struct OrcaServer {
     child: Child,
     _config_path: PathBuf,
+    #[allow(dead_code)]
     pub api_port: u16,
     pub api_url: String,
 }
@@ -194,6 +195,5 @@ impl Drop for OrcaServer {
 pub fn require_e2e_env() {
     if std::env::var("ORCA_E2E").is_err() {
         eprintln!("Skipping E2E test: set ORCA_E2E=1 to run");
-        return;
     }
 }
