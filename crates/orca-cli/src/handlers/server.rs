@@ -12,13 +12,7 @@ use super::port::{
 pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> {
     check_privileged_port(proxy_port);
     cleanup_stale_redirects();
-    let cluster_config = match orca_core::config::ClusterConfig::load(config.as_ref()) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!("No cluster.toml found ({e}), using defaults");
-            orca_core::config::ClusterConfig::default()
-        }
-    };
+    let cluster_config = load_cluster_config_or_fail(std::path::Path::new(config))?;
     // Auto-generate cluster token if none configured
     let mut cluster_config = cluster_config;
     if cluster_config.api_tokens.is_empty() {
@@ -309,6 +303,33 @@ fn is_master_placed(svc: &orca_core::config::ServiceConfig, master_hostname: &st
     }
 }
 
+/// Load cluster config, distinguishing "file absent" from "file broken".
+///
+/// - File absent: log a warning and return defaults. A fresh install with no
+///   cluster.toml is a legitimate scenario; auto-generated tokens + zero-config
+///   defaults give the operator a starting point.
+/// - File present but malformed (parse error, schema mismatch, unreadable):
+///   return an error so `orca server` aborts startup. Falling back to
+///   defaults when the operator clearly intended a config to take effect is
+///   how prod silently lost TLS on 2026-05-16 — a v0.2.9 schema landed in
+///   cluster.toml while a v0.2.8 binary was running, parse failed, defaults
+///   kicked in, `acme_email` went `None`, the proxy never started HTTPS.
+fn load_cluster_config_or_fail(
+    path: &std::path::Path,
+) -> anyhow::Result<orca_core::config::ClusterConfig> {
+    if path.exists() {
+        orca_core::config::ClusterConfig::load(path).map_err(|e| {
+            anyhow::anyhow!(
+                "refusing to start: {e}\nFix the config or remove {} to start with defaults.",
+                path.display()
+            )
+        })
+    } else {
+        tracing::warn!("Config file {} not found, using defaults", path.display());
+        Ok(orca_core::config::ClusterConfig::default())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,5 +393,73 @@ mod tests {
             "#,
         );
         assert!(is_master_placed(&svc, "master-host"));
+    }
+
+    #[test]
+    fn missing_config_returns_defaults() {
+        let path = std::path::Path::new("/tmp/orca-test-does-not-exist-xyz.toml");
+        let cfg = load_cluster_config_or_fail(path).expect("missing file should use defaults");
+        assert!(cfg.api_tokens.is_empty()); // default has no tokens
+    }
+
+    #[test]
+    fn valid_config_loads() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(
+            tmp.path(),
+            r#"
+[cluster]
+name = "test"
+acme_email = "ops@example.com"
+"#,
+        )
+        .unwrap();
+        let cfg = load_cluster_config_or_fail(tmp.path()).expect("valid config should load");
+        assert_eq!(cfg.cluster.name, "test");
+        assert_eq!(cfg.cluster.acme_email.as_deref(), Some("ops@example.com"));
+    }
+
+    #[test]
+    fn malformed_config_aborts() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(tmp.path(), "this is not toml { [ broken").unwrap();
+        let result = load_cluster_config_or_fail(tmp.path());
+        assert!(
+            result.is_err(),
+            "malformed config must NOT fall back to defaults"
+        );
+        let err = format!("{}", result.unwrap_err());
+        assert!(
+            err.contains("refusing to start"),
+            "error should make the abort reason explicit: {err}"
+        );
+    }
+
+    #[test]
+    fn type_mismatch_in_known_section_aborts() {
+        // Mirrors the prod failure: cluster_meta.acme_email is `Option<String>`
+        // but we hand it a table. serde rejects with "expected string, got map"
+        // — exactly the v0.2.8 vs v0.2.9 [ai.alerts.channels.email] case.
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(
+            tmp.path(),
+            r#"
+[cluster]
+name = "test"
+[cluster.acme_email]
+nested = "shouldnt-be-a-table"
+"#,
+        )
+        .unwrap();
+        let result = load_cluster_config_or_fail(tmp.path());
+        assert!(
+            result.is_err(),
+            "type mismatch must abort, not silently default"
+        );
+        let err = format!("{}", result.unwrap_err());
+        assert!(
+            err.contains("refusing to start"),
+            "abort reason must be explicit: {err}"
+        );
     }
 }
