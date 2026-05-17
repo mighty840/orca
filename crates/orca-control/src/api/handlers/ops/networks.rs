@@ -58,18 +58,47 @@ pub(crate) async fn cluster_networks(State(state): State<Arc<AppState>>) -> impl
 /// the master). Routes whose service isn't in the services map (e.g. stale
 /// route after a service was removed) fall under `None` defensively.
 async fn group_routes_by_placement(state: &AppState) -> HashMap<Option<String>, Vec<DomainRoute>> {
-    let services = state.services.read().await;
-    let routes = state.route_table.read().await;
+    // Snapshot the data we need under tight, scoped reads, then drop both
+    // guards before any further work. Holding `state.route_table.read()`
+    // across iteration was the primary lock-contention source that stalled
+    // proxy TLS handshakes by up to 20 seconds — tokio::sync::RwLock uses
+    // write-priority, so once *any* writer (update_container_routes from
+    // the reconciler/watchdog) queues behind this long-running reader, all
+    // subsequent readers (including the serve-loop check that happens
+    // between peek_sni and acceptor.accept) queue behind the writer too.
+    // See project_v0_2_9_rc2_proxy_lock_contention for the diagnosis.
+    let service_placements: HashMap<String, Option<String>> = {
+        let services = state.services.read().await;
+        services
+            .values()
+            .map(|s| {
+                (
+                    s.config.name.clone(),
+                    s.config.placement.as_ref().and_then(|p| p.node.clone()),
+                )
+            })
+            .collect()
+    };
+    let route_snapshot: Vec<(String, Vec<String>)> = {
+        let routes = state.route_table.read().await;
+        routes
+            .iter()
+            .map(|(domain, targets)| {
+                (
+                    domain.clone(),
+                    targets.iter().map(|t| t.service_name.clone()).collect(),
+                )
+            })
+            .collect()
+    };
+
     let mut out: HashMap<Option<String>, Vec<DomainRoute>> = HashMap::new();
-    for (domain, targets) in routes.iter() {
-        for t in targets {
-            let node = services
-                .get(&t.service_name)
-                .and_then(|s| s.config.placement.as_ref())
-                .and_then(|p| p.node.clone());
+    for (domain, service_names) in &route_snapshot {
+        for service_name in service_names {
+            let node = service_placements.get(service_name).cloned().flatten();
             out.entry(node).or_default().push(DomainRoute {
                 domain: domain.clone(),
-                service: t.service_name.clone(),
+                service: service_name.clone(),
                 resolved_ip: None,
             });
         }

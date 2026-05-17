@@ -154,11 +154,15 @@ pub(crate) async fn handle_request(
         ));
     };
 
-    // HTTP -> HTTPS redirect: if not TLS and host has routes, redirect
+    // HTTP -> HTTPS redirect: if not TLS and host has routes, redirect.
+    // Take the read in a tight scope so the lock releases before further
+    // awaits — see comment below.
     if !is_tls {
-        let routes = route_table.read().await;
-        if routes.contains_key(&host) {
-            drop(routes);
+        let known = {
+            let routes = route_table.read().await;
+            routes.contains_key(&host)
+        };
+        if known {
             return Ok(redirect_to_https(&host, &path));
         }
     }
@@ -169,33 +173,32 @@ pub(crate) async fn handle_request(
     // vec pointing at the fallback so the existing forward path handles it
     // uniformly. This is what makes orca able to coexist with another
     // reverse proxy on the same edge.
-    let routes = route_table.read().await;
-    let matched: Vec<RouteTarget> = match routes.get(&host) {
-        Some(targets) if targets.is_empty() => {
-            drop(routes);
+    //
+    // Lock discipline: take a snapshot of the matched targets inside a
+    // tight scope and release the read guard BEFORE any further await (body
+    // collect / forward / websocket upgrade). Holding the guard across
+    // those awaits lets a long-lived request (Matrix `/sync`'s 30s long-
+    // poll, gitea CI runner long-polls) keep the lock for tens of seconds.
+    // Once a writer queues behind that reader, tokio::sync::RwLock's
+    // write-priority semantics make every new reader wait too — which on
+    // a busy master manifests as 17-20-second stalls on the TLS handshake
+    // path (the serve-loop also reads route_table before acceptor.accept).
+    let lookup: Option<Vec<RouteTarget>> = {
+        let routes = route_table.read().await;
+        match routes.get(&host) {
+            Some(targets) if targets.is_empty() => None, // explicit-empty sentinel
+            Some(targets) => Some(select_path_targets(targets, &path)),
+            None => Some(Vec::new()), // host unknown — try fallback
+        }
+    };
+    let matched: Vec<RouteTarget> = match lookup {
+        None => {
             return Ok(error_response(
                 StatusCode::SERVICE_UNAVAILABLE,
                 &format!("no backends for host: {host}"),
             ));
         }
-        Some(targets) => {
-            let sel = select_path_targets(targets, &path);
-            if sel.is_empty() {
-                drop(routes);
-                if let Some(target) = fallback_target(fallback) {
-                    vec![target]
-                } else {
-                    return Ok(error_response(
-                        StatusCode::NOT_FOUND,
-                        &format!("no backend for path: {path} on host: {host}"),
-                    ));
-                }
-            } else {
-                sel
-            }
-        }
-        None => {
-            drop(routes);
+        Some(sel) if sel.is_empty() => {
             if let Some(target) = fallback_target(fallback) {
                 vec![target]
             } else {
@@ -205,9 +208,9 @@ pub(crate) async fn handle_request(
                 ));
             }
         }
+        Some(sel) => sel,
     };
     let base_idx = counter.fetch_add(1, Ordering::Relaxed);
-    // `routes` was dropped in each branch above; nothing more to release.
 
     // WebSocket upgrade: tunnel via raw TCP instead of HTTP proxying
     if crate::websocket::is_websocket_upgrade(&req) {
