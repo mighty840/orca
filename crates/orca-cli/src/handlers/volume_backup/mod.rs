@@ -1,7 +1,9 @@
 //! Docker volume backup and restore using bollard.
 
+mod bind_mounts;
 mod helpers;
 
+use bind_mounts::warn_unbacked_bind_mounts;
 use bollard::Docker;
 use helpers::{
     create_backup_dir, find_latest_backup_dir, list_orca_volumes, prune_old_backup_dirs,
@@ -40,37 +42,42 @@ async fn attempt_backup(backup_cfg: &orca_core::backup::BackupConfig) {
 
     if volumes.is_empty() {
         println!("No orca volumes found.");
-        return;
-    }
+    } else {
+        let hooks = load_service_hooks();
 
-    let hooks = load_service_hooks();
+        println!("Backing up {} volume(s) to {}", volumes.len(), backup_dir);
+        let mut count = 0u32;
 
-    println!("Backing up {} volume(s) to {}", volumes.len(), backup_dir);
-    let mut count = 0u32;
-
-    for vol in &volumes {
-        print!("  {vol} ... ");
-        // Volume name is "orca-{service_name}" — derive service name for hook lookup.
-        let service_name = vol.strip_prefix("orca-").unwrap_or(vol.as_str());
-        if let Some(hook) = hooks.get(service_name) {
-            let container = format!("orca-{service_name}");
-            if let Err(e) = run_pre_hook(&docker, &container, hook).await {
-                println!("FAILED (pre-hook): {e}");
-                continue;
+        for vol in &volumes {
+            print!("  {vol} ... ");
+            // Volume name is "orca-{service_name}" — derive service name for hook lookup.
+            let service_name = vol.strip_prefix("orca-").unwrap_or(vol.as_str());
+            if let Some(hook) = hooks.get(service_name) {
+                let container = format!("orca-{service_name}");
+                if let Err(e) = run_pre_hook(&docker, &container, hook).await {
+                    println!("FAILED (pre-hook): {e}");
+                    continue;
+                }
+            }
+            match run_backup_container(&docker, vol, &backup_dir).await {
+                Ok(()) => {
+                    println!("done");
+                    count += 1;
+                }
+                Err(e) => println!("FAILED: {e}"),
             }
         }
-        match run_backup_container(&docker, vol, &backup_dir).await {
-            Ok(()) => {
-                println!("done");
-                count += 1;
-            }
-            Err(e) => println!("FAILED: {e}"),
-        }
+
+        println!("Volume backup complete: {count}/{} volumes.", volumes.len());
+
+        upload_volumes_to_s3(backup_cfg, &volumes, &backup_dir);
     }
 
-    println!("Volume backup complete: {count}/{} volumes.", volumes.len());
-
-    upload_volumes_to_s3(backup_cfg, &volumes, &backup_dir);
+    // Warn about host bind mounts, which the volume backup above does not
+    // capture (#83). Run this even when there are no named volumes — a service
+    // can have bind mounts and no volume, exactly the case that previously
+    // exited silently with "No orca volumes found."
+    warn_unbacked_bind_mounts(&docker).await;
 }
 
 /// Upload each volume tarball from a completed local backup to all S3 targets.

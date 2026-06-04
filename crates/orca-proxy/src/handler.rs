@@ -14,7 +14,7 @@ use tracing::{debug, error, info};
 
 use crate::acme::AcmeManager;
 use crate::body::{ProxyBody, full_body};
-use crate::forward::{forward_with_retry, redirect_to_https};
+use crate::forward::{forward_streaming, forward_with_retry, redirect_to_https};
 use crate::rate_limit::RateLimiter;
 use crate::routing::{find_matching_trigger, select_path_targets};
 use crate::{RouteTarget, SharedWasmTriggers, WasmInvoker};
@@ -220,7 +220,7 @@ pub(crate) async fn handle_request(
         return Ok(crate::websocket::handle_websocket_proxy(req, &target.address).await);
     }
 
-    // Read body once for forwarding (and potential retry)
+    // Snapshot request metadata before consuming the body below.
     let method_reqwest: reqwest::Method = req.method().clone();
     let headers = req.headers().clone();
     let pq = req
@@ -230,31 +230,49 @@ pub(crate) async fn handle_request(
         .unwrap_or("/")
         .to_string();
 
-    let body_bytes = match req.into_body().collect().await {
-        Ok(collected) => collected.to_bytes(),
-        Err(e) => {
-            error!("Failed to read request body: {e}");
-            return Ok(error_response(
-                StatusCode::BAD_GATEWAY,
-                "failed to read request body",
-            ));
-        }
+    // Single-target route: stream the request body straight through with no
+    // buffering. There's no alternate backend, so giving up 502-retry (a
+    // streamed body is single-use) costs nothing, and a 100MB+ registry blob
+    // push never has to materialize in the proxy task. Multi-target routes
+    // buffer the body so it can be replayed against a second backend on 502.
+    let resp = if matched.len() == 1 {
+        forward_streaming(
+            client,
+            &matched[0],
+            &method_reqwest,
+            &headers,
+            req.into_body(),
+            &pq,
+            &host,
+            is_tls,
+            peer.ip().to_string(),
+        )
+        .await
+    } else {
+        let body_bytes = match req.into_body().collect().await {
+            Ok(collected) => collected.to_bytes(),
+            Err(e) => {
+                error!("Failed to read request body: {e}");
+                return Ok(error_response(
+                    StatusCode::BAD_GATEWAY,
+                    "failed to read request body",
+                ));
+            }
+        };
+        forward_with_retry(
+            client,
+            &matched,
+            base_idx,
+            &method_reqwest,
+            &headers,
+            &body_bytes,
+            &pq,
+            &host,
+            is_tls,
+            peer.ip().to_string(),
+        )
+        .await
     };
-
-    // Forward with retry on 502
-    let resp = forward_with_retry(
-        client,
-        &matched,
-        base_idx,
-        &method_reqwest,
-        &headers,
-        &body_bytes,
-        &pq,
-        &host,
-        is_tls,
-        peer.ip().to_string(),
-    )
-    .await;
 
     let elapsed_ms = start.elapsed().as_millis();
     let status = resp.status().as_u16();
