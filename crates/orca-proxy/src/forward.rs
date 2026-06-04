@@ -1,5 +1,7 @@
 //! Backend forwarding with retry logic and HTTPS redirect helpers.
 
+use http_body_util::BodyDataStream;
+use hyper::body::Incoming;
 use hyper::{Response, StatusCode};
 use tracing::{debug, error};
 
@@ -36,8 +38,126 @@ pub(crate) fn weighted_index(targets: &[RouteTarget], counter: usize) -> usize {
     targets.len() - 1
 }
 
+/// Apply per-target prefix stripping so backends that expect a clean URL
+/// (e.g. `/users`) don't see the full routed path (e.g. `/admin/users`).
+/// No-op when `strip_prefix` is `None`.
+fn strip_target_prefix<'a>(
+    target: &RouteTarget,
+    path_and_query: &'a str,
+) -> std::borrow::Cow<'a, str> {
+    match &target.strip_prefix {
+        Some(prefix) if path_and_query.starts_with(prefix.as_str()) => {
+            let rest = &path_and_query[prefix.len()..];
+            if rest.is_empty() {
+                std::borrow::Cow::Borrowed("/")
+            } else if rest.starts_with('/') {
+                std::borrow::Cow::Borrowed(rest)
+            } else {
+                std::borrow::Cow::Owned(format!("/{rest}"))
+            }
+        }
+        _ => std::borrow::Cow::Borrowed(path_and_query),
+    }
+}
+
+/// Build the forwarded reqwest request for `target` — method, URI (with
+/// prefix stripping), client headers, and the X-Forwarded-* set — but WITHOUT
+/// a body attached. Shared by the buffered retry path and the single-target
+/// streaming path. Returns the builder and the resolved upstream URI (for
+/// logging). The caller attaches the body.
+#[allow(clippy::too_many_arguments)]
+fn build_forward_request(
+    client: &reqwest::Client,
+    target: &RouteTarget,
+    method: &reqwest::Method,
+    headers: &hyper::HeaderMap,
+    path_and_query: &str,
+    host: &str,
+    is_tls: bool,
+    client_ip: &str,
+) -> (reqwest::RequestBuilder, String) {
+    let forwarded_path = strip_target_prefix(target, path_and_query);
+    let uri = format!("http://{}{}", target.address, forwarded_path);
+
+    let mut forward_req = client.request(method.clone(), &uri);
+    let mut saw_xff = false;
+    let mut saw_proto = false;
+    let mut saw_fhost = false;
+    for (key, value) in headers {
+        let name = key.as_str().to_lowercase();
+        if name == "host" {
+            // Skip the original Host header — reqwest sets it from URI.
+            // We preserve the original host via X-Forwarded-Host below,
+            // but also set Host to the original so backends (litellm,
+            // keycloak) that build redirect URLs from Host see the
+            // external domain, not the internal 127.0.0.1:port.
+            continue;
+        }
+        if name == "x-forwarded-for" {
+            saw_xff = true;
+        } else if name == "x-forwarded-proto" {
+            saw_proto = true;
+        } else if name == "x-forwarded-host" {
+            saw_fhost = true;
+        }
+        forward_req = forward_req.header(key, value);
+    }
+    // Override the Host header to the original external host so backends that
+    // build redirect URLs from Host (litellm /ui, keycloak OIDC) use the
+    // correct public-facing domain.
+    forward_req = forward_req.header("Host", host);
+    // Inject X-Forwarded-* for upstream apps behind TLS termination.
+    let scheme = if is_tls { "https" } else { "http" };
+    if !saw_proto {
+        forward_req = forward_req.header("X-Forwarded-Proto", scheme);
+    }
+    if !saw_fhost {
+        forward_req = forward_req.header("X-Forwarded-Host", host);
+    }
+    if !saw_xff {
+        forward_req = forward_req.header("X-Forwarded-For", client_ip);
+    }
+    (forward_req, uri)
+}
+
+/// Convert an upstream reqwest response into the proxy's streaming response,
+/// copying backend headers (minus hop-by-hop) and streaming the body straight
+/// through instead of buffering with `resp.bytes().await`. For a Docker
+/// registry blob pull (100MB+) buffering doubles end-to-end latency AND parks
+/// ~100MB in the proxy task — when several pile up, the accept loop loses the
+/// headroom to complete new TLS handshakes (`docker login`, browser hits) and
+/// they time out. See the v0.2.9-rc.2 streaming-bodies memory.
+fn build_response(resp: reqwest::Response) -> Response<ProxyBody> {
+    let status = resp.status();
+    let backend_headers = resp.headers().clone();
+    let body = stream_body(resp.bytes_stream());
+    let mut response = Response::new(body);
+    *response.status_mut() = status;
+    // Forward backend headers (skip hop-by-hop only). content-length is
+    // preserved — clients need it.
+    for (k, v) in backend_headers.iter() {
+        let name = k.as_str().to_lowercase();
+        if !matches!(
+            name.as_str(),
+            "connection"
+                | "keep-alive"
+                | "proxy-authenticate"
+                | "proxy-authorization"
+                | "te"
+                | "trailers"
+                | "transfer-encoding"
+                | "upgrade"
+        ) {
+            response.headers_mut().append(k.clone(), v.clone());
+        }
+    }
+    response
+}
+
 /// Forward a request to a backend, retrying once on 502 with a different
-/// backend if multiple exist.
+/// backend if multiple exist. Buffers the request body (`body`) so it can be
+/// replayed on retry — used for multi-target routes. Single-target routes use
+/// [`forward_streaming`] instead, which avoids buffering entirely.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn forward_with_retry(
     client: &reqwest::Client,
@@ -61,109 +181,28 @@ pub(crate) async fn forward_with_retry(
             (weighted_index(matched, base_idx) + 1) % matched.len()
         };
         let target = &matched[idx];
-        // Apply per-target prefix stripping so backends that expect a
-        // clean URL (e.g. /users) don't see the full routed path
-        // (e.g. /admin/users). No-op when `strip_prefix` is None.
-        let forwarded_path: std::borrow::Cow<'_, str> = match &target.strip_prefix {
-            Some(prefix) if path_and_query.starts_with(prefix.as_str()) => {
-                let rest = &path_and_query[prefix.len()..];
-                if rest.is_empty() {
-                    std::borrow::Cow::Borrowed("/")
-                } else if rest.starts_with('/') {
-                    std::borrow::Cow::Borrowed(rest)
-                } else {
-                    std::borrow::Cow::Owned(format!("/{rest}"))
-                }
-            }
-            _ => std::borrow::Cow::Borrowed(path_and_query),
-        };
-        let uri = format!("http://{}{}", target.address, forwarded_path);
-
+        let (forward_req, uri) = build_forward_request(
+            client,
+            target,
+            method,
+            headers,
+            path_and_query,
+            host,
+            is_tls,
+            &client_ip,
+        );
         debug!("Proxying {host}{path_and_query} -> {uri} (attempt {attempt})");
-
-        let mut forward_req = client.request(method.clone(), &uri);
-        let mut saw_xff = false;
-        let mut saw_proto = false;
-        let mut saw_fhost = false;
-        for (key, value) in headers {
-            let name = key.as_str().to_lowercase();
-            if name == "host" {
-                // Skip the original Host header — reqwest sets it from URI.
-                // We preserve the original host via X-Forwarded-Host below,
-                // but also set Host to the original so backends (litellm,
-                // keycloak) that build redirect URLs from Host see the
-                // external domain, not the internal 127.0.0.1:port.
-                continue;
-            }
-            if name == "x-forwarded-for" {
-                saw_xff = true;
-            } else if name == "x-forwarded-proto" {
-                saw_proto = true;
-            } else if name == "x-forwarded-host" {
-                saw_fhost = true;
-            }
-            forward_req = forward_req.header(key, value);
-        }
-        // Override the Host header to the original external host so
-        // backends that build redirect URLs from Host (litellm /ui,
-        // keycloak OIDC) use the correct public-facing domain.
-        forward_req = forward_req.header("Host", host);
-        // Inject X-Forwarded-* for upstream apps behind TLS termination
-        let scheme = if is_tls { "https" } else { "http" };
-        if !saw_proto {
-            forward_req = forward_req.header("X-Forwarded-Proto", scheme);
-        }
-        if !saw_fhost {
-            forward_req = forward_req.header("X-Forwarded-Host", host);
-        }
-        if !saw_xff {
-            forward_req = forward_req.header("X-Forwarded-For", &client_ip);
-        }
-        forward_req = forward_req.body(body.clone());
+        let forward_req = forward_req.body(body.clone());
 
         match forward_req.send().await {
             Ok(resp) if resp.status() == StatusCode::BAD_GATEWAY && attempt + 1 < max_attempts => {
                 debug!("Got 502 from {}, retrying", target.address);
                 continue;
             }
-            Ok(resp) => {
-                let status = resp.status();
-                let backend_headers = resp.headers().clone();
-                // Stream the upstream body straight through instead of
-                // buffering with resp.bytes().await. For a Docker registry
-                // blob pull (100MB+) buffering doubles end-to-end latency
-                // AND parks ~100MB in the proxy task — when several streams
-                // pile up, the proxy's accept loop runs out of headroom and
-                // new TLS handshakes from concurrent clients (`docker login`,
-                // browser hits) start timing out. See PR description / the
-                // v0.2.9-rc.2 streaming-bodies memory for the full incident.
-                //
-                // 502 retry is preserved: status is checked above before we
-                // consume the body, so a 502 still falls through to the
-                // next iteration without writing anything to the client.
-                let body = stream_body(resp.bytes_stream());
-                let mut response = Response::new(body);
-                *response.status_mut() = status;
-                // Forward backend headers (skip hop-by-hop only).
-                // content-length is preserved — clients need it.
-                for (k, v) in backend_headers.iter() {
-                    let name = k.as_str().to_lowercase();
-                    if !matches!(
-                        name.as_str(),
-                        "connection"
-                            | "keep-alive"
-                            | "proxy-authenticate"
-                            | "proxy-authorization"
-                            | "te"
-                            | "trailers"
-                            | "transfer-encoding"
-                            | "upgrade"
-                    ) {
-                        response.headers_mut().append(k.clone(), v.clone());
-                    }
-                }
-                return response;
-            }
+            // 502 retry is preserved: status is checked above before we
+            // consume the body, so a 502 falls through to the next attempt
+            // without writing anything to the client.
+            Ok(resp) => return build_response(resp),
             Err(e) if attempt + 1 < max_attempts => {
                 debug!("Backend error from {}: {e}, retrying", target.address);
                 continue;
@@ -179,6 +218,52 @@ pub(crate) async fn forward_with_retry(
     }
 
     super::handler::error_response(StatusCode::BAD_GATEWAY, "all backends failed")
+}
+
+/// Forward a single-target request, streaming the request body straight to the
+/// backend with no intermediate buffer (symmetric to the response streaming in
+/// [`build_response`] / #63).
+///
+/// A single-target route has no alternate backend, so the loss of 502-retry —
+/// a streamed body is single-use — costs nothing. This covers the >90% of
+/// routes with exactly one target, notably Docker registry blob *pushes*
+/// (100MB+ layers) which previously buffered fully in the proxy task and were a
+/// contributing factor in the accept-loop starvation seen in v0.2.9-rc.2.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn forward_streaming(
+    client: &reqwest::Client,
+    target: &RouteTarget,
+    method: &reqwest::Method,
+    headers: &hyper::HeaderMap,
+    body: Incoming,
+    path_and_query: &str,
+    host: &str,
+    is_tls: bool,
+    client_ip: String,
+) -> Response<ProxyBody> {
+    let (forward_req, uri) = build_forward_request(
+        client,
+        target,
+        method,
+        headers,
+        path_and_query,
+        host,
+        is_tls,
+        &client_ip,
+    );
+    debug!("Proxying (stream) {host}{path_and_query} -> {uri}");
+
+    // Wrap the incoming hyper body as a byte stream for reqwest — data frames
+    // flow through without ever materializing the full body in memory.
+    let forward_req = forward_req.body(reqwest::Body::wrap_stream(BodyDataStream::new(body)));
+
+    match forward_req.send().await {
+        Ok(resp) => build_response(resp),
+        Err(e) => {
+            error!("Proxy error to {}: {e}", target.address);
+            super::handler::error_response(StatusCode::BAD_GATEWAY, &format!("backend error: {e}"))
+        }
+    }
 }
 
 /// Build a 301 redirect response to HTTPS.
