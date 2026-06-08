@@ -11,7 +11,7 @@ use orca_core::types::WorkloadSpec;
 
 use helpers::{
     build_all_binds, build_gpu_passthrough, build_labels, build_log_config, build_port_config,
-    parse_resource_limits,
+    parse_extra_port, parse_resource_limits,
 };
 
 /// Build a Docker container [`Config`] from a workload spec.
@@ -19,23 +19,21 @@ pub(crate) fn build_container_config(spec: &WorkloadSpec) -> Config<String> {
     let env: Vec<String> = spec.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
 
     let (mut port_bindings, mut exposed_ports) = build_port_config(spec.port, spec.host_port);
-    // `extra_ports` accepts both `host:container` (defaults to tcp) and
-    // `host:container/proto`, e.g. `10000:10000/udp` for Jitsi JVB media.
+    // `extra_ports` accepts the docker-compose forms:
+    //   `host:container`               (defaults to 0.0.0.0 + tcp)
+    //   `host:container/proto`         (e.g. `10000:10000/udp` for Jitsi JVB media)
+    //   `host_ip:host:container[/proto]` (bind to a specific host address)
     for entry in &spec.extra_ports {
-        let Some((host, rest)) = entry.split_once(':') else {
+        let Some(parsed) = parse_extra_port(entry) else {
             continue;
         };
-        let (container, proto) = match rest.rsplit_once('/') {
-            Some((c, p)) => (c, p),
-            None => (rest, "tcp"),
-        };
-        let key = format!("{container}/{proto}");
+        let key = format!("{}/{}", parsed.container_port, parsed.proto);
         exposed_ports.insert(key.clone(), HashMap::new());
         port_bindings.insert(
             key,
             Some(vec![PortBinding {
-                host_ip: Some("0.0.0.0".to_string()),
-                host_port: Some(host.to_string()),
+                host_ip: Some(parsed.host_ip),
+                host_port: Some(parsed.host_port),
             }]),
         );
     }

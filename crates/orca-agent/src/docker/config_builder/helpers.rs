@@ -11,6 +11,58 @@ use orca_core::types::WorkloadSpec;
 pub(super) type PortBindings = HashMap<String, Option<Vec<PortBinding>>>;
 pub(super) type ExposedPorts = HashMap<String, HashMap<(), ()>>;
 
+/// Parsed `extra_ports` entry: (host_ip, host_port, container_port, proto).
+pub(super) struct ExtraPort {
+    pub host_ip: String,
+    pub host_port: String,
+    pub container_port: String,
+    pub proto: String,
+}
+
+/// Parse a single `extra_ports` entry.
+///
+/// Accepted forms (matching docker-compose):
+///   - `host:container`                 → 0.0.0.0:host → container/tcp
+///   - `host:container/proto`           → 0.0.0.0:host → container/proto
+///   - `host_ip:host:container`         → host_ip:host → container/tcp
+///   - `host_ip:host:container/proto`   → host_ip:host → container/proto
+///
+/// The 3-segment form lets a service bind to a specific host address
+/// instead of the wildcard `0.0.0.0`. Needed when another listener
+/// (systemd-resolved, netbird, etc.) already holds a specific-IP bind
+/// on the same port — a wildcard bind from docker would collide.
+///
+/// Returns `None` for malformed entries so the caller can skip them.
+pub(super) fn parse_extra_port(entry: &str) -> Option<ExtraPort> {
+    let (port_spec, proto) = match entry.rsplit_once('/') {
+        Some((spec, p)) => (spec, p.to_string()),
+        None => (entry, "tcp".to_string()),
+    };
+    let parts: Vec<&str> = port_spec.split(':').collect();
+    match parts.as_slice() {
+        [host, container] if !host.is_empty() && !container.is_empty() => Some(ExtraPort {
+            host_ip: "0.0.0.0".to_string(),
+            host_port: (*host).to_string(),
+            container_port: (*container).to_string(),
+            proto,
+        }),
+        [host_ip, host, container]
+            if !host_ip.is_empty()
+                && !host.is_empty()
+                && !container.is_empty()
+                && host_ip.parse::<std::net::Ipv4Addr>().is_ok() =>
+        {
+            Some(ExtraPort {
+                host_ip: (*host_ip).to_string(),
+                host_port: (*host).to_string(),
+                container_port: (*container).to_string(),
+                proto,
+            })
+        }
+        _ => None,
+    }
+}
+
 pub(super) fn build_port_config(
     port: Option<u16>,
     host_port: Option<u16>,
@@ -348,5 +400,69 @@ mod tests {
         assert!(gpu.device_requests.is_empty());
         assert!(gpu.devices.is_empty());
         assert!(gpu.group_add.is_empty());
+    }
+
+    #[test]
+    fn extra_port_two_segment_defaults_to_wildcard_tcp() {
+        let p = parse_extra_port("3000:3000").expect("should parse");
+        assert_eq!(p.host_ip, "0.0.0.0");
+        assert_eq!(p.host_port, "3000");
+        assert_eq!(p.container_port, "3000");
+        assert_eq!(p.proto, "tcp");
+    }
+
+    #[test]
+    fn extra_port_two_segment_with_proto() {
+        let p = parse_extra_port("10000:10000/udp").expect("should parse");
+        assert_eq!(p.host_ip, "0.0.0.0");
+        assert_eq!(p.host_port, "10000");
+        assert_eq!(p.container_port, "10000");
+        assert_eq!(p.proto, "udp");
+    }
+
+    #[test]
+    fn extra_port_three_segment_binds_specific_ip() {
+        let p = parse_extra_port("46.225.100.82:53:53").expect("should parse");
+        assert_eq!(p.host_ip, "46.225.100.82");
+        assert_eq!(p.host_port, "53");
+        assert_eq!(p.container_port, "53");
+        assert_eq!(p.proto, "tcp");
+    }
+
+    #[test]
+    fn extra_port_three_segment_with_proto() {
+        let p = parse_extra_port("46.225.100.82:53:53/udp").expect("should parse");
+        assert_eq!(p.host_ip, "46.225.100.82");
+        assert_eq!(p.host_port, "53");
+        assert_eq!(p.container_port, "53");
+        assert_eq!(p.proto, "udp");
+    }
+
+    #[test]
+    fn extra_port_three_segment_rejects_non_ip_first_field() {
+        // Without a valid IPv4 in the first slot, 3-segment form is ambiguous —
+        // we refuse rather than silently misroute.
+        assert!(parse_extra_port("not-an-ip:53:53").is_none());
+    }
+
+    #[test]
+    fn extra_port_rejects_empty_parts() {
+        assert!(parse_extra_port(":53:53").is_none());
+        assert!(parse_extra_port("53:").is_none());
+        assert!(parse_extra_port(":53").is_none());
+    }
+
+    #[test]
+    fn extra_port_rejects_no_colon() {
+        assert!(parse_extra_port("3000").is_none());
+        assert!(parse_extra_port("garbage").is_none());
+    }
+
+    #[test]
+    fn extra_port_loopback_ipv4_accepted() {
+        // Common pattern: bind only to 127.0.0.1 so a port stays node-local
+        // even when the host has a public interface.
+        let p = parse_extra_port("127.0.0.1:8081:8081").expect("should parse");
+        assert_eq!(p.host_ip, "127.0.0.1");
     }
 }
