@@ -195,9 +195,10 @@ pub struct ManagedContainer {
     /// `orca.port` label — the in-container port the service listens on.
     #[serde(default)]
     pub port: Option<u16>,
-    /// `orca.domain` label — the public hostname, if any.
+    /// Public hostname(s) — from the `orca.domains` label (or single
+    /// `orca.domain`). Empty when the container has no domain.
     #[serde(default)]
-    pub domain: Option<String>,
+    pub domains: Vec<String>,
     /// `orca.network` label — the bridge network the container joined.
     #[serde(default)]
     pub network: Option<String>,
@@ -305,7 +306,7 @@ mod tests {
                     status: "running".into(),
                     container_id: "abc123".into(),
                     port: Some(80),
-                    domain: Some("web.example.com".into()),
+                    domains: vec!["web.example.com".into()],
                     network: Some("orca-app".into()),
                     routes: vec!["/api".into()],
                     strip_prefix: None,
@@ -350,6 +351,7 @@ mod tests {
             port: Some(80),
             host_port: None,
             domain: Some("example.com".into()),
+            domains: vec![],
             routes: vec![],
             health: None,
             readiness: None,

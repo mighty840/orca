@@ -76,7 +76,7 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
         s.service
             .iter()
             .filter(|svc| is_master_placed(svc, &master_node))
-            .filter_map(|svc| svc.domain.clone())
+            .flat_map(|svc| svc.all_domains())
             .collect()
     };
     let services_dir = std::path::Path::new("services");

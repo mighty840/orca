@@ -97,7 +97,15 @@ pub struct ServiceConfig {
     /// Host port to bind (e.g., 443 for edge proxies). If omitted, ephemeral.
     pub host_port: Option<u16>,
     /// Domain for reverse proxy routing (orca proxy handles TLS).
+    /// Mutually exclusive with `domains`.
     pub domain: Option<String>,
+    /// Multiple domains for the same service/container (e.g. apex + www,
+    /// regional aliases, or a dual-TLD migration). Mutually exclusive with
+    /// `domain`. Each entry gets its own cert + SNI route to the same backend,
+    /// so you no longer have to duplicate the `[[service]]` block (which would
+    /// spawn a redundant container) just to serve a second hostname.
+    #[serde(default)]
+    pub domains: Vec<String>,
     /// Path routes under the domain (e.g., ["/api/*", "/admin/*"]).
     /// Default: ["/*"] (catch-all).
     #[serde(default)]
@@ -163,6 +171,37 @@ pub struct ServiceConfig {
 }
 
 impl ServiceConfig {
+    /// All hostnames this service should be served on, normalizing the single
+    /// `domain` and multi `domains` forms into one list. `domains` wins when
+    /// set; otherwise the single `domain` (if any) is returned as a 1-element
+    /// list. Empty when neither is set.
+    pub fn all_domains(&self) -> Vec<String> {
+        if !self.domains.is_empty() {
+            self.domains.clone()
+        } else {
+            self.domain.iter().cloned().collect()
+        }
+    }
+
+    /// The primary hostname — the first of `all_domains()`. Used where a single
+    /// representative domain is wanted (e.g. the `orca.domain` label, a status
+    /// summary column).
+    pub fn primary_domain(&self) -> Option<String> {
+        self.all_domains().into_iter().next()
+    }
+
+    /// Validate cross-field invariants. Currently rejects setting both `domain`
+    /// and `domains`, which would be ambiguous.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.domain.is_some() && !self.domains.is_empty() {
+            return Err(format!(
+                "service '{}': set either `domain` or `domains`, not both",
+                self.name
+            ));
+        }
+        Ok(())
+    }
+
     /// Returns `true` if the deployment-relevant fields of two configs match.
     ///
     /// Used by the reconciler to decide whether a running service needs to
@@ -175,7 +214,7 @@ impl ServiceConfig {
             && self.cmd == other.cmd
             && self.port == other.port
             && self.host_port == other.host_port
-            && self.domain == other.domain
+            && self.all_domains() == other.all_domains()
             && self.routes == other.routes
             && self.volume == other.volume
             && self.mounts == other.mounts
@@ -203,6 +242,7 @@ mod tests {
             port: Some(80),
             host_port: None,
             domain: Some("test.example.com".into()),
+            domains: vec![],
             routes: vec!["/*".into()],
             health: Some("/healthz".into()),
             readiness: None,
@@ -286,6 +326,66 @@ mod tests {
         let mut b = base_config();
         b.domain = Some("new.example.com".into());
         assert!(!a.spec_matches(&b));
+    }
+
+    #[test]
+    fn all_domains_normalizes_both_forms() {
+        let mut c = base_config();
+        // Single `domain` → 1-element list.
+        assert_eq!(c.all_domains(), vec!["test.example.com".to_string()]);
+        // `domains` wins when set.
+        c.domain = None;
+        c.domains = vec!["a.com".into(), "b.com".into()];
+        assert_eq!(c.all_domains(), vec!["a.com".to_string(), "b.com".into()]);
+        assert_eq!(c.primary_domain().as_deref(), Some("a.com"));
+        // Neither set → empty.
+        c.domains = vec![];
+        assert!(c.all_domains().is_empty());
+        assert_eq!(c.primary_domain(), None);
+    }
+
+    #[test]
+    fn multi_domain_change_detected() {
+        let mut a = base_config();
+        let mut b = base_config();
+        a.domain = None;
+        b.domain = None;
+        a.domains = vec!["a.com".into(), "b.com".into()];
+        b.domains = vec!["a.com".into()];
+        assert!(!a.spec_matches(&b));
+    }
+
+    #[test]
+    fn validate_rejects_both_domain_and_domains() {
+        let mut c = base_config();
+        c.domain = Some("a.com".into());
+        c.domains = vec!["b.com".into()];
+        assert!(c.validate().is_err());
+        // Either alone is fine.
+        c.domains = vec![];
+        assert!(c.validate().is_ok());
+        c.domain = None;
+        c.domains = vec!["b.com".into()];
+        assert!(c.validate().is_ok());
+    }
+
+    #[test]
+    fn parse_domains_array_from_toml() {
+        let toml = r#"
+            [[service]]
+            name = "web"
+            image = "nginx:latest"
+            domains = ["apex.example.com", "www.example.com"]
+        "#;
+        let cfg: ServicesConfig = toml::from_str(toml).unwrap();
+        assert_eq!(cfg.service.len(), 1);
+        assert_eq!(
+            cfg.service[0].all_domains(),
+            vec![
+                "apex.example.com".to_string(),
+                "www.example.com".to_string()
+            ]
+        );
     }
 
     #[test]

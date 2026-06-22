@@ -73,7 +73,7 @@ async fn adoption_cycle_registers_orphan_from_agent() {
                             status: "running".into(),
                             container_id: "deadbeef".into(),
                             port: Some(8080),
-                            domain: Some("orphan.example.com".into()),
+                            domains: vec!["orphan.example.com".into()],
                             network: None,
                             routes: vec![],
                             strip_prefix: None,
@@ -100,7 +100,10 @@ async fn adoption_cycle_registers_orphan_from_agent() {
         .get("orphan-svc")
         .expect("orphan should be adopted into the registry");
     assert_eq!(svc.config.image.as_deref(), Some("nginx:1.27"));
-    assert_eq!(svc.config.domain.as_deref(), Some("orphan.example.com"));
+    assert_eq!(
+        svc.config.all_domains(),
+        vec!["orphan.example.com".to_string()]
+    );
     assert_eq!(
         svc.config
             .placement

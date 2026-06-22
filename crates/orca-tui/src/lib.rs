@@ -364,6 +364,7 @@ mod tests {
             running_replicas: 1,
             status: "running".into(),
             domain: None,
+            domains: vec![],
             project: project.map(String::from),
             memory_usage: None,
             cpu_percent: None,

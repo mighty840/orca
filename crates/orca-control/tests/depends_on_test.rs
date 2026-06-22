@@ -17,6 +17,7 @@ fn make_service(name: &str, depends_on: Vec<&str>) -> ServiceConfig {
         port: Some(80),
         host_port: None,
         domain: None,
+        domains: vec![],
         routes: vec![],
         health: None,
         readiness: None,

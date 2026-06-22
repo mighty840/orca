@@ -33,9 +33,10 @@ pub async fn deploy_and_report(
     let success = result.is_ok();
     let error = result.err().map(|e| e.to_string());
 
-    // If the spec has a domain, notify for proxy route registration.
+    // Notify the proxy of every domain for this service (each → same backend).
+    let domains = spec.all_domains();
     if success
-        && let Some(domain) = &spec.domain
+        && !domains.is_empty()
         && let Ok(Some(port)) = runtime
             .resolve_host_port(
                 &WorkloadHandle {
@@ -47,9 +48,9 @@ pub async fn deploy_and_report(
             )
             .await
     {
-        let _ = domain_tx
-            .send((spec.name.clone(), domain.clone(), port))
-            .await;
+        for domain in domains {
+            let _ = domain_tx.send((spec.name.clone(), domain, port)).await;
+        }
     }
 
     if success {

@@ -14,6 +14,7 @@ fn minimal_config(image: Option<String>, module: Option<String>) -> ServiceConfi
         replicas: Replicas::Fixed(1),
         port: Some(8080),
         domain: Some("test.example.com".to_string()),
+        domains: vec![],
         health: None,
         readiness: None,
         liveness: None,
@@ -50,6 +51,20 @@ fn config_to_spec_with_image() {
     assert_eq!(spec.image, "nginx:latest");
     assert_eq!(spec.port, Some(8080));
     assert_eq!(spec.domain.as_deref(), Some("test.example.com"));
+}
+
+#[test]
+fn config_to_spec_carries_all_domains() {
+    let mut config = minimal_config(Some("nginx:latest".to_string()), None);
+    config.domain = None;
+    config.domains = vec!["a.example.com".into(), "b.example.com".into()];
+    let spec = service_config_to_spec(&config).unwrap();
+    // Primary mirrors the first; the full list is preserved for the agent.
+    assert_eq!(spec.domain.as_deref(), Some("a.example.com"));
+    assert_eq!(
+        spec.domains,
+        vec!["a.example.com".to_string(), "b.example.com".into()]
+    );
 }
 
 #[test]

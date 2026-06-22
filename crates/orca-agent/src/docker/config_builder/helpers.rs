@@ -219,11 +219,16 @@ pub(super) fn build_labels(spec: &WorkloadSpec) -> HashMap<String, String> {
     if let Some(net) = &spec.network {
         labels.insert("orca.network".to_string(), net.clone());
     }
-    // Stamp the domain and container port directly onto the container so
+    // Stamp the domain(s) and container port directly onto the container so
     // a node-local proxy on a joined node can rebuild its route table
     // by inspecting docker labels — no separate state file needed.
+    // `orca.domain` carries the primary (back-compat with single-domain
+    // readers); `orca.domains` carries the full comma-joined list.
     if let Some(domain) = &spec.domain {
         labels.insert("orca.domain".to_string(), domain.clone());
+    }
+    if !spec.domains.is_empty() {
+        labels.insert("orca.domains".to_string(), spec.domains.join(","));
     }
     if let Some(port) = spec.port {
         labels.insert("orca.port".to_string(), port.to_string());
@@ -255,6 +260,7 @@ mod tests {
             port: None,
             host_port: None,
             domain: None,
+            domains: vec![],
             routes: vec![],
             health: None,
             readiness: None,

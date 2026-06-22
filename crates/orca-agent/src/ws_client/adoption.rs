@@ -66,28 +66,39 @@ async fn list_managed_containers(docker: &Docker) -> Vec<ManagedContainer> {
             Some(s) if !s.is_empty() => s.clone(),
             _ => continue,
         };
-        let routes = labels
-            .get("orca.routes")
-            .map(|s| {
-                s.split(',')
-                    .filter(|s| !s.is_empty())
-                    .map(String::from)
-                    .collect()
-            })
-            .unwrap_or_default();
+        let routes = split_label(labels.get("orca.routes"));
+        // Prefer the multi-domain list; fall back to the single `orca.domain`.
+        let mut domains = split_label(labels.get("orca.domains"));
+        if domains.is_empty()
+            && let Some(d) = labels.get("orca.domain")
+        {
+            domains.push(d.clone());
+        }
         out.push(ManagedContainer {
             service_name,
             image: c.image.unwrap_or_default(),
             status: c.state.unwrap_or_default(),
             container_id: c.id.unwrap_or_default(),
             port: labels.get("orca.port").and_then(|p| p.parse::<u16>().ok()),
-            domain: labels.get("orca.domain").cloned(),
+            domains,
             network: labels.get("orca.network").cloned(),
             routes,
             strip_prefix: labels.get("orca.strip_prefix").cloned(),
         });
     }
     out
+}
+
+/// Split a comma-joined label value into a clean list, dropping empties.
+fn split_label(value: Option<&String>) -> Vec<String> {
+    value
+        .map(|s| {
+            s.split(',')
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn node_hostname() -> String {

@@ -76,6 +76,62 @@ async fn test_deploy_service_name_special_chars() {
 }
 
 #[tokio::test]
+async fn test_deploy_rejects_both_domain_and_domains() {
+    let state = test_app_state();
+    let body = serde_json::json!({
+        "services": [{
+            "name": "dual",
+            "image": "nginx:latest",
+            "replicas": 1,
+            "port": 80,
+            "domain": "a.example.com",
+            "domains": ["b.example.com"]
+        }]
+    });
+    let (status, json) = deploy_json(&state, &body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "got {json}");
+    let err = json["errors"][0].as_str().unwrap_or_default();
+    assert!(
+        err.contains("domain") && err.contains("domains"),
+        "error should name both fields, got: {err}"
+    );
+    // Nothing should have been deployed.
+    assert!(state.services.read().await.is_empty());
+}
+
+#[tokio::test]
+async fn test_deploy_domains_array_routes_every_host() {
+    let state = test_app_state();
+    let body = serde_json::json!({
+        "services": [{
+            "name": "multi",
+            "image": "nginx:latest",
+            "replicas": 1,
+            "port": 80,
+            "domains": ["apex.example.com", "www.example.com"]
+        }]
+    });
+    let (status, json) = deploy_json(&state, &body).await;
+    assert!(
+        status == StatusCode::OK || status == StatusCode::PARTIAL_CONTENT,
+        "multi-domain deploy should succeed, got {status} {json}"
+    );
+
+    // Both hostnames must route to the same backend.
+    let routes = state.route_table.read().await;
+    assert!(
+        routes.contains_key("apex.example.com"),
+        "apex route missing: {:?}",
+        routes.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        routes.contains_key("www.example.com"),
+        "www route missing: {:?}",
+        routes.keys().collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
 async fn test_deploy_missing_image_and_module() {
     let state = test_app_state();
     let body = serde_json::json!({

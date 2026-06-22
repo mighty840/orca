@@ -39,6 +39,7 @@ fn config_placed_on(name: &str, node: &str) -> ServiceConfig {
         port: Some(8080),
         host_port: None,
         domain: None,
+        domains: vec![],
         routes: vec![],
         health: None,
         readiness: None,

@@ -15,6 +15,11 @@ pub async fn handle_status(api: String) -> anyhow::Result<()> {
                 );
                 println!("{header}");
                 for svc in &resp.services {
+                    let domain = if svc.domains.is_empty() {
+                        svc.domain.clone().unwrap_or_else(|| "-".to_string())
+                    } else {
+                        svc.domains.join(", ")
+                    };
                     println!(
                         "{:<20} {:<12} {}/{:<7} {:<10} {}",
                         svc.name,
@@ -22,7 +27,7 @@ pub async fn handle_status(api: String) -> anyhow::Result<()> {
                         svc.running_replicas,
                         svc.desired_replicas,
                         svc.status,
-                        svc.domain.as_deref().unwrap_or("-")
+                        domain
                     );
                 }
             }

@@ -16,7 +16,13 @@ pub struct WorkloadSpec {
     pub port: Option<u16>,
     /// Host port to bind (specific port on host, e.g. 443).
     pub host_port: Option<u16>,
+    /// Primary domain (first of `domains`); kept for back-compat with single-
+    /// domain consumers. See `domains` for the full list.
     pub domain: Option<String>,
+    /// All domains the service is served on. Each gets its own cert + SNI
+    /// route to the same container. Empty when the service has no domain.
+    #[serde(default)]
+    pub domains: Vec<String>,
     /// Path routes under the domain (e.g., ["/api/*"]).
     pub routes: Vec<String>,
     pub health: Option<String>,
@@ -56,6 +62,18 @@ pub struct WorkloadSpec {
     /// Image pull policy.
     #[serde(default)]
     pub pull_policy: super::PullPolicy,
+}
+
+impl WorkloadSpec {
+    /// All hostnames this workload is served on — `domains` when set, else the
+    /// single `domain` as a 1-element list, else empty.
+    pub fn all_domains(&self) -> Vec<String> {
+        if !self.domains.is_empty() {
+            self.domains.clone()
+        } else {
+            self.domain.iter().cloned().collect()
+        }
+    }
 }
 
 /// Replica count: either a fixed number or "auto" for auto-scaling.

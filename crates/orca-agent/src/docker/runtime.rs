@@ -216,10 +216,22 @@ impl ContainerRuntime {
                 Some(l) => l,
                 None => continue,
             };
-            let domain = match labels.get("orca.domain") {
-                Some(d) => d.clone(),
-                None => continue,
-            };
+            // Prefer the multi-domain `orca.domains` list; fall back to the
+            // single `orca.domain` for containers labeled before multi-domain.
+            let domains: Vec<String> = labels
+                .get("orca.domains")
+                .map(|s| {
+                    s.split(',')
+                        .filter(|s| !s.is_empty())
+                        .map(String::from)
+                        .collect()
+                })
+                .filter(|v: &Vec<String>| !v.is_empty())
+                .or_else(|| labels.get("orca.domain").map(|d| vec![d.clone()]))
+                .unwrap_or_default();
+            if domains.is_empty() {
+                continue;
+            }
             let port = match labels.get("orca.port").and_then(|p| p.parse::<u16>().ok()) {
                 Some(p) => p,
                 None => continue,
@@ -227,7 +239,7 @@ impl ContainerRuntime {
             let service = labels
                 .get("orca.service")
                 .cloned()
-                .unwrap_or_else(|| domain.clone());
+                .unwrap_or_else(|| domains[0].clone());
             let route_patterns: Vec<String> = labels
                 .get("orca.routes")
                 .map(|s| {
@@ -238,15 +250,18 @@ impl ContainerRuntime {
                 })
                 .unwrap_or_default();
             let strip_prefix = labels.get("orca.strip_prefix").cloned();
-            // Resolve the dynamic host port assignment for this container's port.
+            // Resolve the dynamic host port assignment once, then emit one
+            // route per domain (all pointing at the same container).
             if let Ok(Some(host_port)) = self.get_host_port(&id, port).await {
-                routes.push(LocalRoute {
-                    service,
-                    domain,
-                    host_port,
-                    routes: route_patterns,
-                    strip_prefix,
-                });
+                for domain in domains {
+                    routes.push(LocalRoute {
+                        service: service.clone(),
+                        domain,
+                        host_port,
+                        routes: route_patterns.clone(),
+                        strip_prefix: strip_prefix.clone(),
+                    });
+                }
             }
         }
         Ok(routes)

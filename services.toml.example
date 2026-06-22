@@ -18,6 +18,16 @@ cpu = 0.5
 strategy = "rolling"
 max_unavailable = 1
 
+# -- Multiple domains on one container (apex + www, dual-TLD migration) --
+# Use `domains = [..]` instead of `domain = ".."` to serve several hostnames
+# from the SAME container — each gets its own TLS cert + route. Setting both
+# `domain` and `domains` is rejected.
+[[service]]
+name = "marketing"
+image = "ghcr.io/myorg/marketing:latest"
+port = 8080
+domains = ["example.com", "www.example.com", "example.org"]
+
 # -- GPU workload (LLM inference) --
 [[service]]
 name = "llm-inference"

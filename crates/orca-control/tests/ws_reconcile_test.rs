@@ -83,6 +83,7 @@ async fn ws_sends_reconcile_on_connect() {
             port: Some(80),
             host_port: None,
             domain: Some("web.example.com".into()),
+            domains: vec![],
             routes: vec![],
             health: None,
             readiness: None,

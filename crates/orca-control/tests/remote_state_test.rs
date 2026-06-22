@@ -44,6 +44,7 @@ fn make_config(name: &str) -> ServiceConfig {
         port: Some(8080),
         host_port: None,
         domain: None,
+        domains: vec![],
         routes: vec![],
         health: None,
         readiness: None,
