@@ -8,6 +8,7 @@ pub mod cleanup_scheduler;
 pub mod cluster_api;
 pub(crate) mod cluster_handlers;
 pub mod cluster_state;
+pub mod declarative;
 pub mod deploy_history;
 pub mod failures;
 pub mod health;
@@ -129,6 +130,9 @@ pub async fn run_server_with_acme(
     stats::spawn_stats_collector(state.clone());
     if adoption::spawn_adoption_reconciler(state.clone()) {
         info!("Orphan-adoption reconciler started");
+    }
+    if declarative::spawn_declarative_reconciler(state.clone()) {
+        info!("Declarative reconciler started");
     }
 
     // Spawn scheduled backup task if configured (needs state for agent dispatch).

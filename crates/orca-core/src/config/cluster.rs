@@ -35,6 +35,28 @@ pub struct ClusterConfig {
     /// Remote-deploy timeouts (agent ACK over WebSocket).
     #[serde(default)]
     pub deploy: DeployConfig,
+    /// Declarative reconciliation: the master watches a config dir and
+    /// continuously applies declared services (K8s-style), no manual deploy.
+    #[serde(default)]
+    pub reconcile: Option<ReconcileConfig>,
+}
+
+/// Declarative-reconciliation configuration. When `config_dir` is set, the
+/// master periodically loads service definitions from it and applies any that
+/// are new or changed — so adding a service is just dropping its `service.toml`
+/// in the dir, no `orca deploy` needed. Unchanged services are left alone.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReconcileConfig {
+    /// Directory (of `<project>/service.toml` files) or a single
+    /// `services.toml` the master continuously applies. Unset = disabled.
+    pub config_dir: Option<String>,
+    /// Seconds between reconcile passes over `config_dir`. Default 30.
+    #[serde(default = "default_reconcile_interval")]
+    pub interval_secs: u64,
+}
+
+fn default_reconcile_interval() -> u64 {
+    30
 }
 
 /// Remote-deploy timeout configuration. Controls how long the master waits
