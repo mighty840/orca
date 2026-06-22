@@ -71,18 +71,14 @@ health = "/"
 orca deploy && orca status
 ```
 
-## What's New in v0.2.3
+## What's New in v0.2.11
 
-- **Secrets in `cluster.toml`** -- `${secrets.X}` now resolves in `ai.api_key`, `ai.endpoint`, and `network.setup_key`, so cluster config is safe to commit (#22).
-- **Per-service stats for remote nodes** -- live CPU and memory for every container on every agent, streamed over the WS heartbeat (#13).
-- **`orca logs <svc> --summarize`** -- AI-summarised log digest with likely causes and next steps (#23).
-- **Multi-arg CLI** -- `orca deploy svc1 svc2 svc3`, `orca redeploy svc1 svc2`, `orca stop svc1 svc2`.
-- **Shell completions** -- `orca completions <bash|zsh|fish|powershell>`.
-- **Find-up config resolution** -- run `orca` from any subdirectory; it walks up to find `cluster.toml` and `services/`.
-- **AMD ROCm GPU passthrough** -- `vendor = "amd"` mounts `/dev/kfd` + `/dev/dri` with auto-detected `video`/`render` GIDs.
-- **Remote placement fix** -- `placement.node = "<agent>"` now resolves correctly over WS, so pinned services start without a master restart.
-- **Proxy preserves Host header** -- fixes apps that emit absolute URLs (e.g. LiteLLM `/ui` redirects).
-- **`orca webhooks add --secret --infra`** flags now wired through the CLI.
+- **Reliable deploys of large images** -- the remote-deploy ack is split into a fast *receipt* ack and a long *completion* wait, so a multi-GB first-time pull no longer hits a bogus 30s timeout, and the agent's real `image not found` / pull error reaches the operator instead of a bare timeout (#88, #94).
+- **Self-healing orphan adoption** -- the master periodically scans agents for `orca.managed` containers missing from its registry and re-registers them, so a container left running by a mid-deploy restart shows up in `orca status` automatically instead of needing a manual `docker rm -f` (#95).
+- **Multiple domains per service** -- `domains = ["a.com", "b.com"]` serves one container on several hostnames, each with its own cert + route. No more duplicating the `[[service]]` block (which spawned a redundant container) for apex+www or dual-TLD migrations (#93).
+- **`orca status` explains failures, K8s-style** -- degraded/stopped services show *why*: classified deploy errors (`ImagePullError`, `DeployTimeout`, …) and runtime crashes (`CrashLoopBackOff`) with exit code, restart count, and a `docker logs` tail.
+- **Declarative reconciliation** -- point `[reconcile].config_dir` at a folder of `service.toml` files and the master continuously applies new/changed services, no manual `orca deploy`.
+- **Large uploads through the proxy** -- registry blob pushes >2 GB no longer die mid-transfer; the proxy uses an inactivity timeout instead of a total request deadline.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 

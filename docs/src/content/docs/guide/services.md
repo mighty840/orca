@@ -78,6 +78,23 @@ internal = true
 | `internal = true` | Reachable only within the cluster |
 | Both | Public route + internal alias |
 
+### Multiple Domains
+
+Use `domains` (instead of `domain`) to serve one container on several
+hostnames — each gets its own TLS cert and route to the same backend. Useful
+for apex + www, regional aliases, or running two TLDs in parallel during a
+migration:
+
+```toml
+[[service]]
+name = "marketing"
+image = "myorg/marketing:latest"
+port = 8080
+domains = ["meghsakha.com", "www.meghsakha.com", "breakpilot.com"]
+```
+
+`domain` and `domains` are mutually exclusive; setting both fails validation at deploy.
+
 ## Dual Runtime
 
 Orca runs both containers and WebAssembly modules as first-class workloads:
