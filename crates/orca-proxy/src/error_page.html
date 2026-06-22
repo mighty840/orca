@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{STATUS}} · {{TITLE}} · Orca</title>
+<style>
+  :root {
+    --bg: #0f172a; --fg: #e2e8f0; --muted: #94a3b8;
+    --accent: #06b6d4; --accent2: #0891b2;
+    --card: #111c33; --border: #1e293b;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: radial-gradient(1200px 600px at 50% -10%, #14233f 0%, var(--bg) 55%);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 2rem;
+  }
+  .card { max-width: 560px; width: 100%; text-align: center; }
+  .logo { width: 88px; height: 88px; margin: 0 auto 1.5rem; display: block; }
+  .status { color: var(--accent); font-weight: 600; letter-spacing: .08em; text-transform: uppercase; font-size: .78rem; }
+  h1 { font-size: 1.6rem; margin: .4rem 0 .6rem; font-weight: 650; }
+  p { color: var(--muted); line-height: 1.6; margin: 0 0 1.25rem; }
+  .host {
+    display: inline-block; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    background: var(--card); border: 1px solid var(--border); color: var(--fg);
+    padding: .4rem .75rem; border-radius: 8px; font-size: .9rem; margin-bottom: 1.75rem; word-break: break-all;
+  }
+  .links { display: flex; gap: .65rem; justify-content: center; flex-wrap: wrap; }
+  a.btn {
+    text-decoration: none; color: var(--fg); background: var(--card);
+    border: 1px solid var(--border); padding: .55rem 1rem; border-radius: 10px;
+    font-size: .9rem; transition: border-color .15s ease, color .15s ease;
+  }
+  a.btn:hover { border-color: var(--accent); color: var(--accent); }
+  a.btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); color: #06121a; border: none; font-weight: 600; }
+  footer { margin-top: 2.25rem; color: var(--muted); font-size: .8rem; }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <svg class="logo" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Orca">
+      <defs>
+        <linearGradient id="body" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="#06B6D4"/>
+          <stop offset="100%" stop-color="#0891B2"/>
+        </linearGradient>
+      </defs>
+      <rect width="512" height="512" rx="80" fill="#0F172A"/>
+      <path d="M 130 310 C 135 230, 185 170, 260 155 C 310 145, 355 155, 385 180 C 415 210, 425 260, 415 305 C 405 340, 375 360, 340 368 L 280 372 C 230 374, 180 365, 155 345 C 138 332, 130 320, 130 310Z" fill="url(#body)"/>
+      <path d="M 275 155 C 268 110, 290 65, 310 52 C 305 90, 308 125, 318 155Z" fill="url(#body)"/>
+      <path d="M 130 310 C 115 298, 88 270, 78 252 C 92 268, 108 280, 120 286 C 106 298, 94 312, 80 328 C 100 326, 118 318, 130 310Z" fill="url(#body)"/>
+      <ellipse cx="365" cy="215" rx="18" ry="13" fill="#0F172A"/>
+      <ellipse cx="367" cy="213" rx="7" ry="5" fill="#E2E8F0"/>
+      <path d="M 240 368 C 265 348, 310 345, 335 365 C 305 362, 265 362, 240 368Z" fill="#E2E8F0" opacity="0.35"/>
+    </svg>
+    <div class="status">{{STATUS}} · {{TITLE}}</div>
+    <h1>{{TITLE}}</h1>
+    <p>{{MESSAGE}}</p>
+    <div class="host">{{HOST}}</div>
+    <div class="links">
+      <a class="btn primary" href="{{DOCS}}">Documentation</a>
+      <a class="btn" href="{{REPO}}">GitHub</a>
+      <a class="btn" href="{{DOCS}}/guide/getting-started">Getting started</a>
+    </div>
+    <footer>Served by <a href="{{REPO}}">Orca</a> — container + Wasm orchestrator</footer>
+  </main>
+</body>
+</html>

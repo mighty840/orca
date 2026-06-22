@@ -193,18 +193,18 @@ pub(crate) async fn handle_request(
     };
     let matched: Vec<RouteTarget> = match lookup {
         None => {
-            return Ok(error_response(
+            return Ok(crate::error_page::branded_error(
                 StatusCode::SERVICE_UNAVAILABLE,
-                &format!("no backends for host: {host}"),
+                &host,
             ));
         }
         Some(sel) if sel.is_empty() => {
             if let Some(target) = fallback_target(fallback) {
                 vec![target]
             } else {
-                return Ok(error_response(
+                return Ok(crate::error_page::branded_error(
                     StatusCode::NOT_FOUND,
-                    &format!("no service for host: {host}"),
+                    &host,
                 ));
             }
         }

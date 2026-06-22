@@ -10,7 +10,7 @@ include = ["src/**/*", "build.rs", "proto/**/*", "Cargo.toml"]
 
 [dependencies]
 orca-core = { workspace = true }
-orca-agent = { path = "../orca-agent", version = "0.2.11-rc.3" }
+orca-agent = { path = "../orca-agent", version = "0.2.11-rc.4" }
 orca-ai = { workspace = true }
 orca-proxy = { workspace = true }
 tokio = { workspace = true }

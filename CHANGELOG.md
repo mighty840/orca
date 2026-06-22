@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11-rc.4] - 2026-06-22
+
+### Added
+
+- **Branded fallback page for unrouted hosts.** When the proxy can't route a request it used to return a bare plain-text body (`no service for host: <host>`). It now serves a self-contained, docs-themed HTML page (inline CSS + logo, no external assets — renders even on a degraded/offline box) with the requested host and links to the docs and GitHub. Two variants: **404** for an unknown host (`no service for host`) and **503** for a known host with no healthy backend (`no backends for host`). The requested host is HTML-escaped (it's attacker-controllable via the `Host` header). The existing `[fallback].http` forward-to-a-target behavior is unchanged — the page only appears when no fallback target is configured. (#111)
+
 ## [0.2.11-rc.3] - 2026-06-22
 
 ### Added

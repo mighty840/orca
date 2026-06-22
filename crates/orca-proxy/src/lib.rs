@@ -6,6 +6,7 @@
 
 pub mod acme;
 mod body;
+mod error_page;
 mod forward;
 mod handler;
 pub mod rate_limit;
