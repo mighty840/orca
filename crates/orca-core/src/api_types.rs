@@ -32,6 +32,27 @@ pub struct StatusResponse {
     pub services: Vec<ServiceStatus>,
 }
 
+/// Why a service most recently failed — deploy-time or a runtime crash.
+/// K8s-describe-style: a short reason, a detail message (often the last log
+/// lines), plus the container's exit code and restart count when known.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FailureInfo {
+    /// Short machine-ish reason, e.g. "ImagePullError", "DeployTimeout",
+    /// "AgentUnreachable", "CrashLoopBackOff", "OOMKilled", "Error".
+    pub reason: String,
+    /// Human-readable detail: the deploy error, or the tail of the container
+    /// logs for a crash.
+    pub message: String,
+    /// Container exit code, if it terminated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i64>,
+    /// Number of times the container has restarted.
+    #[serde(default)]
+    pub restart_count: u32,
+    /// When this failure was observed.
+    pub observed_at: chrono::DateTime<chrono::Utc>,
+}
+
 /// Status summary for a single service.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceStatus {
@@ -74,6 +95,11 @@ pub struct ServiceStatus {
     /// the sample peak.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_limit_bytes: Option<u64>,
+    /// Why the service most recently failed, if it's currently degraded or
+    /// stopped. `None` for healthy services. Populated from deploy-time errors
+    /// and from agent-reported container crashes (exit code + log tail).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_failure: Option<FailureInfo>,
 }
 
 /// Request body for `POST /api/v1/services/{name}/scale`.

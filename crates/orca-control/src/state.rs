@@ -99,6 +99,11 @@ pub struct AppState {
     /// a short receipt-ack timeout (catch a dead agent fast) independently of
     /// the long completion timeout (cover multi-GB image pulls). See #88/#94.
     pub pending_deploy_acks: RwLock<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
+    /// Most recent failure per service — deploy-time errors and agent-reported
+    /// container crashes (exit code + log tail). Surfaced in `orca status` so an
+    /// operator sees *why* a service is degraded. Inserted on deploy error and
+    /// on a non-running heartbeat report; cleared on a successful deploy.
+    pub last_failures: RwLock<HashMap<String, orca_core::api_types::FailureInfo>>,
     /// AI conversational-alert engine. `None` when `[ai]` is not configured.
     /// `AiMonitor::run` (spawned in `lib::run_server_with_acme`) feeds it
     /// `open_alert` calls; the HTTP `/api/v1/alerts/...` handlers mutate it
@@ -265,6 +270,7 @@ impl AppState {
             exec_sessions: RwLock::new(HashMap::new()),
             pending_deploys: RwLock::new(HashMap::new()),
             pending_deploy_acks: RwLock::new(HashMap::new()),
+            last_failures: RwLock::new(HashMap::new()),
             alerts: None,
             instance_events: RwLock::new(HashMap::new()),
         }

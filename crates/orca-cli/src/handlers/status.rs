@@ -29,6 +29,21 @@ pub async fn handle_status(api: String) -> anyhow::Result<()> {
                         svc.status,
                         domain
                     );
+                    // K8s-style failure detail for degraded/stopped services.
+                    if let Some(f) = &svc.last_failure {
+                        let first_line = f.message.lines().next().unwrap_or("").trim();
+                        let mut detail = f.reason.clone();
+                        if let Some(code) = f.exit_code {
+                            detail.push_str(&format!(" (exit {code})"));
+                        }
+                        if f.restart_count > 0 {
+                            detail.push_str(&format!(" ×{} restarts", f.restart_count));
+                        }
+                        if !first_line.is_empty() {
+                            detail.push_str(&format!(": {first_line}"));
+                        }
+                        println!("    ↳ {detail}");
+                    }
                 }
             }
         }
