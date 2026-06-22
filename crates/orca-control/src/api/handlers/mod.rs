@@ -87,6 +87,7 @@ pub(crate) async fn status(
 ) -> impl IntoResponse {
     let services = state.services.read().await;
     let stats_cache = state.container_stats.read().await;
+    let failures = state.last_failures.read().await;
 
     let service_statuses: Vec<ServiceStatus> = services
         .values()
@@ -133,6 +134,13 @@ pub(crate) async fn status(
                     .as_ref()
                     .and_then(|r| r.memory.as_deref())
                     .and_then(parse_memory_limit),
+                // Only surface a failure reason while the service is actually
+                // degraded/stopped — a healthy service shouldn't show stale crashes.
+                last_failure: if overall_status == "running" {
+                    None
+                } else {
+                    failures.get(&svc.config.name).cloned()
+                },
             }
         })
         .collect();

@@ -9,6 +9,7 @@ pub mod cluster_api;
 pub(crate) mod cluster_handlers;
 pub mod cluster_state;
 pub mod deploy_history;
+pub mod failures;
 pub mod health;
 pub(crate) mod instance;
 pub mod metrics;

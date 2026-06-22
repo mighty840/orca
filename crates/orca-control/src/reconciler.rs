@@ -39,12 +39,21 @@ pub async fn reconcile(state: &AppState, services: &[ServiceConfig]) -> (Vec<Str
     for svc_config in &ordered {
         match reconcile_service(state, svc_config).await {
             Ok(()) => {
-                // Record successful deploy in history
-                let mut history = state.deploy_history.write().await;
-                history.record(svc_config);
+                // Record successful deploy in history and clear any prior failure.
+                state.deploy_history.write().await.record(svc_config);
+                state.last_failures.write().await.remove(&svc_config.name);
                 deployed.push(svc_config.name.clone());
             }
-            Err(e) => errors.push(format!("{}: {e}", svc_config.name)),
+            Err(e) => {
+                let msg = e.to_string();
+                // Capture the failure reason so `orca status` can explain it
+                // instead of the operator having to scrape logs (#status).
+                state.last_failures.write().await.insert(
+                    svc_config.name.clone(),
+                    crate::failures::from_deploy_error(&msg),
+                );
+                errors.push(format!("{}: {msg}", svc_config.name));
+            }
         }
     }
 

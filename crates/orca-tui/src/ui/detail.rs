@@ -147,7 +147,7 @@ fn draw_info(f: &mut Frame, area: Rect, svc: &crate::api::ServiceStatus) {
         Color::Red
     };
 
-    let info_lines = vec![
+    let mut info_lines = vec![
         Line::from(""),
         Line::from(vec![
             Span::styled("  Name:      ", label),
@@ -191,6 +191,27 @@ fn draw_info(f: &mut Frame, area: Rect, svc: &crate::api::ServiceStatus) {
             Span::styled(cpu, val),
         ]),
     ];
+
+    // K8s-style failure detail when the service is degraded/stopped.
+    if let Some(f) = &svc.last_failure {
+        let mut reason = f.reason.clone();
+        if let Some(code) = f.exit_code {
+            reason.push_str(&format!(" (exit {code})"));
+        }
+        if f.restart_count > 0 {
+            reason.push_str(&format!(" ×{} restarts", f.restart_count));
+        }
+        info_lines.push(Line::from(vec![
+            Span::styled("  Failure:   ", label),
+            Span::styled(reason, Style::default().fg(Color::Red)),
+        ]));
+        for line in f.message.lines().take(6) {
+            info_lines.push(Line::from(vec![
+                Span::styled("    ", label),
+                Span::styled(line.to_string(), Style::default().fg(Color::DarkGray)),
+            ]));
+        }
+    }
 
     let block = Block::default()
         .title(format!(" {} ", svc.name))

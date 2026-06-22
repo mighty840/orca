@@ -39,6 +39,17 @@ pub struct LogOpts {
     pub timestamps: bool,
 }
 
+/// Last-exit diagnostics for a workload, used to explain crashes.
+#[derive(Debug, Clone, Default)]
+pub struct ContainerExit {
+    /// Exit code of the last run, if it has terminated.
+    pub exit_code: Option<i64>,
+    /// How many times the container has restarted.
+    pub restart_count: u32,
+    /// Whether the last termination was an OOM kill.
+    pub oom_killed: bool,
+}
+
 /// Result of executing a command inside a workload.
 #[derive(Debug)]
 pub struct ExecResult {
@@ -82,6 +93,13 @@ pub trait Runtime: AsAny + Send + Sync + 'static {
 
     /// Get current resource usage stats.
     async fn stats(&self, handle: &WorkloadHandle) -> Result<ResourceStats>;
+
+    /// Last-exit diagnostics for a (typically not-running) workload: exit code,
+    /// restart count, and OOM flag. Used to explain crashes K8s-style. Default
+    /// returns an empty record for runtimes that don't track this.
+    async fn last_exit(&self, _handle: &WorkloadHandle) -> Result<ContainerExit> {
+        Ok(ContainerExit::default())
+    }
 
     /// Resolve the host-accessible port for a workload after it has been started.
     ///

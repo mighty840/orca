@@ -168,6 +168,25 @@ impl Runtime for ContainerRuntime {
         Ok(ws)
     }
 
+    async fn last_exit(
+        &self,
+        handle: &WorkloadHandle,
+    ) -> Result<orca_core::runtime::ContainerExit> {
+        let info = self
+            .docker
+            .inspect_container(&handle.runtime_id, None::<InspectContainerOptions>)
+            .await
+            .map_err(|e| OrcaError::Runtime(format!("inspect failed: {e}")))?;
+        let state = info.state.as_ref();
+        Ok(orca_core::runtime::ContainerExit {
+            // A running container reports exit_code 0; only surface a non-zero
+            // (terminated/crashed) code.
+            exit_code: state.and_then(|s| s.exit_code).filter(|c| *c != 0),
+            restart_count: info.restart_count.unwrap_or(0).max(0) as u32,
+            oom_killed: state.and_then(|s| s.oom_killed).unwrap_or(false),
+        })
+    }
+
     async fn logs(&self, handle: &WorkloadHandle, opts: &LogOpts) -> Result<LogStream> {
         let log_opts = LogsOptions::<String> {
             follow: opts.follow,

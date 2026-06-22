@@ -61,6 +61,26 @@ pub(super) async fn handle_ws_heartbeat(
                     },
                 );
             }
+
+            // Track crash reasons so `orca status` can explain a degraded
+            // service. Record on a real crash (failed status or non-zero exit);
+            // clear once it reports running again (self-recovered).
+            if report.status == "running" {
+                state
+                    .last_failures
+                    .write()
+                    .await
+                    .remove(&report.service_name);
+            } else if report.status == "failed" || report.exit_code.is_some() {
+                state.last_failures.write().await.insert(
+                    report.service_name.clone(),
+                    crate::failures::from_crash(
+                        report.exit_code,
+                        report.restart_count,
+                        report.last_logs.as_deref(),
+                    ),
+                );
+            }
         }
     }
 }

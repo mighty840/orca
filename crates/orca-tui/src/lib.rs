@@ -370,6 +370,7 @@ mod tests {
             cpu_percent: None,
             node: None,
             memory_limit_bytes: None,
+            last_failure: None,
         }
     }
 

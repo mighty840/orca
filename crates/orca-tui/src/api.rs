@@ -5,9 +5,9 @@ use std::collections::HashMap;
 use serde::Deserialize;
 
 pub use orca_core::api_types::{
-    ClusterBackupsResponse, ClusterNetworksResponse, DockerNetwork, DomainRoute, LastBackupResult,
-    NetworkService, NodeBackupStatus, NodeNetworks, NodeRole, SecretRef, SecretUsage,
-    SecretsUsageResponse, TriggerBackupResponse, WebhookEntry, WebhookInvocation,
+    ClusterBackupsResponse, ClusterNetworksResponse, DockerNetwork, DomainRoute, FailureInfo,
+    LastBackupResult, NetworkService, NodeBackupStatus, NodeNetworks, NodeRole, SecretRef,
+    SecretUsage, SecretsUsageResponse, TriggerBackupResponse, WebhookEntry, WebhookInvocation,
     WebhookInvocationsResponse, WebhookListResponse,
 };
 pub use orca_core::types::{AlertConversation, AlertSender, AlertSeverity, AlertState};
@@ -53,6 +53,9 @@ pub struct ServiceStatus {
     /// Configured memory limit in bytes, used to scale the sparkline.
     #[serde(default)]
     pub memory_limit_bytes: Option<u64>,
+    /// Why the service is degraded/stopped, if known (deploy error or crash).
+    #[serde(default)]
+    pub last_failure: Option<FailureInfo>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
