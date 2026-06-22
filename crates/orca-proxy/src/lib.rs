@@ -317,10 +317,15 @@ pub(crate) async fn serve_loop_with_fallback(
             .redirect(reqwest::redirect::Policy::none())
             // Timeouts are mandatory: without them, a hung upstream (slow
             // backend, dead fallback, slowloris) parks the per-request task
-            // forever. We accept many in-flight tasks but every one must
-            // eventually complete so the proxy can recover without a restart.
+            // forever. But a *total* request timeout is wrong for a proxy that
+            // streams large bodies — a 300s cap killed Docker registry blob
+            // pushes/pulls partway through (a ~2GB upload over a typical link
+            // exceeds 300s and died mid-transfer). Use an inactivity
+            // (`read_timeout`) instead: it still recovers from a hung backend
+            // (no bytes → fires) but never caps a transfer that keeps making
+            // progress, so arbitrarily large blobs go through.
             .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(300))
+            .read_timeout(std::time::Duration::from_secs(120))
             .pool_idle_timeout(std::time::Duration::from_secs(90))
             .build()
             .expect("failed to build HTTP client"),

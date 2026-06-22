@@ -93,6 +93,16 @@ fn build_forward_request(
             // external domain, not the internal 127.0.0.1:port.
             continue;
         }
+        if name == "content-length" || name == "transfer-encoding" {
+            // Body framing is reqwest's job: it sets Content-Length from a
+            // buffered `Bytes` body, or chunked Transfer-Encoding for the
+            // streamed (`wrap_stream`) single-target path. Forwarding the
+            // client's framing headers double-sets Content-Length on the
+            // buffered path and, worse, pairs a stale Content-Length with a
+            // chunked body on the streaming path (a framing conflict that
+            // can truncate or stall large registry blob pushes).
+            continue;
+        }
         if name == "x-forwarded-for" {
             saw_xff = true;
         } else if name == "x-forwarded-proto" {
