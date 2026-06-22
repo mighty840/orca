@@ -102,41 +102,43 @@ pub(crate) async fn reconcile_service(
 
     // Check if placement targets a specific remote node
     if let Some(target_node_id) = find_target_node(state, config).await {
-        queue_remote_deploy(state, target_node_id, &spec).await?;
-        // Record the service + a placeholder instance on the master so
-        // `orca status` shows remote-scheduled workloads alongside local
-        // ones. Heartbeats from the target node will update the status
-        // field; until the first update arrives we optimistically mark
-        // the instance Running so the TUI doesn't paint it red during
-        // the first few seconds after a deploy.
-        let mut services = state.services.write().await;
-        let svc_state = services
-            .entry(config.name.clone())
-            .or_insert_with(|| ServiceState::from_config(config.clone()));
-        svc_state.config = config.clone();
-        let desired = match &config.replicas {
-            Replicas::Fixed(n) => *n,
-            Replicas::Auto => 1,
-        };
-        svc_state.desired_replicas = desired;
-        // If the instance list doesn't already have a placeholder for this
-        // remote node, add one. Placeholder handles have no runtime_id
-        // because the master doesn't own the container.
-        if svc_state.instances.is_empty() {
-            svc_state.instances.push(crate::state::InstanceState {
-                handle: orca_core::runtime::WorkloadHandle {
-                    runtime_id: format!("remote-{target_node_id}"),
-                    name: format!("orca-{}", config.name),
-                    metadata: Default::default(),
-                },
-                status: WorkloadStatus::Running,
-                host_port: None,
-                container_address: None,
-                health: orca_core::types::HealthState::NoCheck,
-                started_at: std::time::Instant::now(),
-                is_canary: false,
-            });
+        // Record the declared spec + a placeholder instance on the master
+        // BEFORE dispatching the deploy. `orca status` then shows the
+        // remote-scheduled workload (placeholder optimistically Running so the
+        // TUI doesn't paint it red), and — crucially — recording the config
+        // here rather than after `queue_remote_deploy` means a deploy whose
+        // ack/completion doesn't land cleanly (a flaky agent) can't leave
+        // `svc.config` stale. Previously the config update sat after the
+        // fallible `?`, so a missed ack made the declarative reconciler see a
+        // spec "mismatch" every cycle and redeploy the identical spec forever,
+        // churning the container (and breaking its logs/stats).
+        {
+            let mut services = state.services.write().await;
+            let svc_state = services
+                .entry(config.name.clone())
+                .or_insert_with(|| ServiceState::from_config(config.clone()));
+            svc_state.config = config.clone();
+            svc_state.desired_replicas = desired;
+            // If the instance list doesn't already have a placeholder for this
+            // remote node, add one. Placeholder handles have no runtime_id
+            // because the master doesn't own the container.
+            if svc_state.instances.is_empty() {
+                svc_state.instances.push(crate::state::InstanceState {
+                    handle: orca_core::runtime::WorkloadHandle {
+                        runtime_id: format!("remote-{target_node_id}"),
+                        name: format!("orca-{}", config.name),
+                        metadata: Default::default(),
+                    },
+                    status: WorkloadStatus::Running,
+                    host_port: None,
+                    container_address: None,
+                    health: orca_core::types::HealthState::NoCheck,
+                    started_at: std::time::Instant::now(),
+                    is_canary: false,
+                });
+            }
         }
+        queue_remote_deploy(state, target_node_id, &spec).await?;
         info!(
             "Queued deploy of {} to remote node {}",
             config.name, target_node_id

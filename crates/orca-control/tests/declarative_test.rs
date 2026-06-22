@@ -52,6 +52,140 @@ fn write_service(dir: &std::path::Path, project: &str, body: &str) {
     std::fs::write(sub.join("service.toml"), body).unwrap();
 }
 
+/// Reproduces the rc.4 churn: an erp-frontend-shaped service (mounts, cmd,
+/// aliases, network, env, domain) must be left ALONE on the second reconcile
+/// pass — i.e. its container is not replaced. We detect a needless redeploy by
+/// the instance's runtime_id changing between passes.
+#[tokio::test]
+async fn erp_like_service_is_idempotent_across_reconciles() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_service(
+        tmp.path(),
+        "erp",
+        r#"
+        [[service]]
+        name = "erp-frontend"
+        image = "ghcr.io/x/erpnext:v15"
+        port = 8080
+        domain = "erp.example.com"
+        network = "erp-net"
+        aliases = ["erp-frontend"]
+        cmd = ["nginx-entrypoint.sh"]
+        mounts = ["erp-data:/home/frappe/sites/erp.example.com"]
+        replicas = 1
+        [service.env]
+        BACKEND = "erp-backend:8000"
+        SOCKETIO = "erp-websocket:9000"
+        "#,
+    );
+
+    let state = state();
+    let dir = tmp.path().to_str().unwrap();
+
+    apply_config_dir(&state, dir).await;
+    let first_id = {
+        let services = state.services.read().await;
+        let svc = services.get("erp-frontend").expect("deployed");
+        assert_eq!(svc.instances.len(), 1);
+        svc.instances[0].handle.runtime_id.clone()
+    };
+
+    // Second pass with the IDENTICAL config must not redeploy → same container.
+    apply_config_dir(&state, dir).await;
+    {
+        let services = state.services.read().await;
+        let svc = services.get("erp-frontend").unwrap();
+        assert_eq!(svc.instances.len(), 1, "must not duplicate");
+        assert_eq!(
+            svc.instances[0].handle.runtime_id, first_id,
+            "identical config must NOT replace the container (churn bug)"
+        );
+    }
+}
+
+/// Regression for the rc.4 remote container-churn: a placement-pinned service
+/// whose agent never acks the deploy must STILL have its declared config
+/// recorded, so the next reconcile pass sees no spec change and does NOT
+/// re-dispatch the deploy. Before the fix, `svc.config` was set only after a
+/// successful `queue_remote_deploy`, so a missed ack left the service
+/// unrecorded and every cycle re-deployed it — churning the container.
+#[tokio::test]
+async fn remote_deploy_without_ack_is_not_redeployed_every_cycle() {
+    use orca_control::state::RegisteredNode;
+    use orca_core::ws_types::MasterMessage;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tempfile::tempdir().unwrap();
+    write_service(
+        tmp.path(),
+        "remote",
+        r#"
+        [[service]]
+        name = "remote-web"
+        image = "nginx:latest"
+        port = 8080
+        replicas = 1
+        [service.placement]
+        node = "node-7"
+        "#,
+    );
+
+    // Fast ack timeout so the no-ack deploy errors quickly; real store for the
+    // stopped-set the reconciler reads.
+    let mut cfg = ClusterConfig::default();
+    cfg.deploy.ack_timeout_secs = 1;
+    let store = ClusterStore::open(&db.path().join("c.db")).unwrap();
+    let state = Arc::new(
+        AppState::new(
+            cfg,
+            Arc::new(MockRuntime::with_host_port(9000)),
+            None,
+            Arc::new(RwLock::new(HashMap::new())),
+            Arc::new(RwLock::new(Vec::new())),
+        )
+        .with_store(Arc::new(store)),
+    );
+
+    // Node "node-7" + an agent that is connected but never acks (rx held open).
+    state.registered_nodes.write().await.insert(
+        7,
+        RegisteredNode {
+            node_id: 7,
+            address: "node-7:6881".into(),
+            labels: HashMap::new(),
+            last_heartbeat: chrono::Utc::now(),
+            drain: false,
+            cpu_percent: 0.0,
+            memory_bytes: 0,
+            memory_total: 0,
+            disk_used: 0,
+            disk_total: 0,
+            net_rx: 0,
+            net_tx: 0,
+        },
+    );
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<MasterMessage>(16);
+    state.ws_agents.write().await.insert(7, tx);
+
+    let dir = tmp.path().to_str().unwrap();
+    // Two reconcile passes — the agent never acks, so each deploy attempt errors,
+    // but the config recorded on the first pass must stop the second from
+    // re-dispatching.
+    apply_config_dir(&state, dir).await;
+    apply_config_dir(&state, dir).await;
+
+    let mut deploys = 0;
+    while let Ok(msg) = rx.try_recv() {
+        if matches!(msg, MasterMessage::Deploy { .. }) {
+            deploys += 1;
+        }
+    }
+    assert_eq!(
+        deploys, 1,
+        "an unchanged remote spec must be dispatched once, not re-deployed every reconcile cycle"
+    );
+}
+
 #[tokio::test]
 async fn applies_new_services_from_dir_and_is_idempotent() {
     let tmp = tempfile::tempdir().unwrap();
