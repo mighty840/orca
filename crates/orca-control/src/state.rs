@@ -66,6 +66,11 @@ pub struct AppState {
     pub network_listeners: RwLock<
         HashMap<String, tokio::sync::mpsc::Sender<orca_core::ws_types::NetworkStatusReportData>>,
     >,
+    /// Adoption-scan listeners: request_id → report sender. Same fan-out
+    /// pattern as `network_listeners`, used by the periodic adoption
+    /// reconciler to collect each agent's `orca.managed` container list (#95).
+    pub adoption_listeners:
+        RwLock<HashMap<String, tokio::sync::mpsc::Sender<orca_core::ws_types::AdoptionReportData>>>,
     /// Last completed `BackupResult` per agent node, recorded as the result
     /// arrives over WS. Surfaced alongside the snapshot listing so the
     /// dashboard can show a node's last-failure message without having to
@@ -253,6 +258,7 @@ impl AppState {
             log_listeners: RwLock::new(HashMap::new()),
             backup_listeners: RwLock::new(HashMap::new()),
             network_listeners: RwLock::new(HashMap::new()),
+            adoption_listeners: RwLock::new(HashMap::new()),
             last_backup_results: RwLock::new(HashMap::new()),
             master_last_backup_result: RwLock::new(None),
             webhook_invocations: RwLock::new(HashMap::new()),

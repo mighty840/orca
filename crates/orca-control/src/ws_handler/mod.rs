@@ -304,6 +304,11 @@ async fn handle_agent_message(
                 let _ = tx.send(data).await;
             }
         }
+        AgentMessage::AdoptionReport { request_id, data } => {
+            if let Some(tx) = state.adoption_listeners.read().await.get(&request_id) {
+                let _ = tx.send(data).await;
+            }
+        }
         AgentMessage::ExecOutput { session_id, data } => {
             use base64::Engine as _;
             let bytes = match base64::engine::general_purpose::STANDARD.decode(&data) {
