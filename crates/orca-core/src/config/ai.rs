@@ -31,6 +31,13 @@ pub struct AiAlertConfig {
     /// How often to analyze cluster health (seconds, default: 60).
     #[serde(default = "default_analysis_interval")]
     pub analysis_interval_secs: u64,
+    /// Grace window (seconds) a service must stay down before a "service down"
+    /// alert fires (default: 120). A deploy/rollout briefly drops replicas to 0;
+    /// without this grace every webhook deploy would open + auto-remediate an
+    /// alert, spamming the configured channels. Raise it for services whose
+    /// image pulls/health checks routinely take longer than the default.
+    #[serde(default = "default_alert_grace")]
+    pub alert_grace_secs: u64,
     /// Channels to deliver conversation updates.
     pub channels: Option<AlertDeliveryChannels>,
 }
@@ -41,6 +48,10 @@ fn default_true() -> bool {
 
 fn default_analysis_interval() -> u64 {
     60
+}
+
+fn default_alert_grace() -> u64 {
+    120
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

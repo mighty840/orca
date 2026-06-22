@@ -74,6 +74,11 @@ Configure AI-powered alert analysis:
 [ai.alerts]
 enabled = true
 analysis_interval_secs = 60
+# A "service down" alert only fires once a service has been at 0 running
+# replicas for this many seconds. Deploys/rollouts briefly drop to 0 replicas
+# while the new container pulls and starts; the grace window keeps a normal
+# rollout from opening (and then auto-remediating) an alert on every deploy.
+alert_grace_secs = 120
 
 [ai.alerts.channels]
 slack = "https://hooks.slack.com/services/..."
@@ -81,6 +86,8 @@ webhook = "https://my-pagerduty-webhook/..."
 ```
 
 When an alert fires, the AI investigates the root cause, suggests fixes, and tracks resolution.
+
+`alert_grace_secs` (default 120) debounces transient outages: a service must stay down longer than the grace window before it pages, so a webhook deploy doesn't spam open/remediated notifications. Raise it for services whose image pulls or health checks routinely take longer than two minutes; a genuine sustained outage still opens exactly one alert.
 
 ## Auto-Remediation
 

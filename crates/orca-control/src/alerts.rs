@@ -68,11 +68,12 @@ pub fn spawn_alert_monitor(state: Arc<AppState>) -> Option<tokio::task::JoinHand
         return None;
     }
     let interval = alerts_cfg.analysis_interval_secs;
+    let grace = alerts_cfg.alert_grace_secs;
     let provider: Arc<dyn ContextProvider> =
         Arc::new(StateContextProvider::for_state(state.clone()));
-    info!("Spawning AI alert monitor (interval: {interval}s)");
+    info!("Spawning AI alert monitor (interval: {interval}s, down-grace: {grace}s)");
     Some(tokio::spawn(async move {
-        let monitor = AiMonitor::new(engine, interval);
+        let monitor = AiMonitor::new(engine, interval, grace);
         monitor.run(provider).await;
     }))
 }
