@@ -16,7 +16,7 @@ pub use ai::{
 pub use cluster::NetworkConfig;
 pub use cluster::{
     AlertChannelConfig, ApiToken, CleanupConfig, ClusterConfig, ClusterMeta, DeployConfig,
-    FallbackConfig, NodeConfig, NodeGpuConfig, ObservabilityConfig, Role,
+    FallbackConfig, NodeConfig, NodeGpuConfig, ObservabilityConfig, ReconcileConfig, Role,
 };
 pub use service::{BuildConfig, ProbeConfig, ServiceConfig, ServicesConfig};
 

@@ -36,6 +36,16 @@ log_level = "info"
 # adopt_orphans = true          # periodically adopt orca.managed containers missing from the registry
 # adopt_interval_secs = 30      # how often to scan agents for orphans
 
+# -- Declarative reconciliation (K8s-style) --
+# Point the master at a directory of <project>/service.toml files (or a single
+# services.toml) and it will continuously apply new/changed services — no manual
+# `orca deploy` needed. Unchanged services are left alone; removed ones are not
+# auto-pruned. Unset config_dir to disable.
+
+# [reconcile]
+# config_dir = "services"   # dir of <project>/service.toml files, or a services.toml
+# interval_secs = 30        # how often to re-apply the directory
+
 # -- AI Operations Assistant --
 # Enables: `orca ask`, conversational alerts, smart import analysis, log summarization.
 # Works with any OpenAI-compatible API (LiteLLM, Ollama, vLLM, OpenAI, etc.)
