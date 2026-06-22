@@ -73,6 +73,12 @@ pub enum Command {
         service: Vec<String>,
     },
 
+    /// Start (resume) one or more paused services
+    Start {
+        /// Service name(s)
+        service: Vec<String>,
+    },
+
     /// Force redeploy one or more services (pull image + recreate)
     Redeploy {
         /// Service name(s)

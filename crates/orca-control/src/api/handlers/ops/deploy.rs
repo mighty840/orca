@@ -77,6 +77,18 @@ pub(crate) async fn stop_service(
     )
 }
 
+/// Resume a paused service (`orca start`): clears the stopped mark and deploys
+/// it back to its configured replica count.
+pub(crate) async fn start_service(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+) -> impl IntoResponse {
+    ok_or_500(
+        reconciler::start(&state, &name).await,
+        &format!("start {name}"),
+    )
+}
+
 /// Stop all services in a project.
 pub(crate) async fn stop_project(
     State(state): State<Arc<AppState>>,

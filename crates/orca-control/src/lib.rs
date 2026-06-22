@@ -106,10 +106,24 @@ pub async fn run_server_with_acme(
 
     // Restore persisted services, re-attaching to existing containers
     if let Some(store) = &state.store {
+        let stopped = store.get_stopped().unwrap_or_default();
         match store.get_all_services() {
             Ok(services) if !services.is_empty() => {
                 info!("Restoring {} persisted services", services.len());
                 for config in services.values() {
+                    // Paused services come back registered-but-not-started, so
+                    // the watchdog/reconciler never auto-start them.
+                    if stopped.contains(&config.name) {
+                        let mut svcs = state.services.write().await;
+                        let svc = svcs
+                            .entry(config.name.clone())
+                            .or_insert_with(|| state::ServiceState::from_config(config.clone()));
+                        svc.config = config.clone();
+                        svc.stopped = true;
+                        svc.desired_replicas = 0;
+                        info!(service = %config.name, "Restored as stopped (paused)");
+                        continue;
+                    }
                     if let Err(e) = restore_or_reconcile(&state, config).await {
                         tracing::warn!(service = %config.name, "Failed to restore: {e}");
                     }

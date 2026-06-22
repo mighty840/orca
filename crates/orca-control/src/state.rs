@@ -212,6 +212,10 @@ pub struct ServiceState {
     pub desired_replicas: u32,
     /// Running instances.
     pub instances: Vec<InstanceState>,
+    /// Operator-paused: defined but intentionally not running (`orca stop`).
+    /// Persisted in the store's stopped-set so it survives restarts and is
+    /// never auto-started by the watchdog or the declarative reconciler.
+    pub stopped: bool,
 }
 
 /// State of a single workload instance (one replica).
@@ -330,6 +334,7 @@ impl ServiceState {
             config,
             desired_replicas,
             instances: Vec::new(),
+            stopped: false,
         }
     }
 

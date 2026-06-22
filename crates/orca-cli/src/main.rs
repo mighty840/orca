@@ -113,6 +113,11 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
+        Command::Start { service } => {
+            for s in service {
+                handlers::ops::handle_start(&s, cli.api.clone()).await?;
+            }
+        }
         Command::Redeploy { service } => {
             for s in service {
                 handlers::ops::handle_redeploy(s, cli.api.clone()).await?;

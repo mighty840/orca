@@ -15,19 +15,80 @@ use super::GRACEFUL_TIMEOUT;
 /// Connection drain period: wait for in-flight requests after route update.
 const DRAIN_PERIOD: Duration = Duration::from_secs(5);
 
-/// Stop a service: scale to 0 and remove from state.
+/// Stop a service: pause it. Stops + removes its containers but keeps the
+/// service *defined* as a persisted `stopped` state — it stays in `orca status`
+/// (paused), survives a master restart without being auto-started, and is not
+/// purged. Use [`start`] to resume it, or remove it from `service.toml` to have
+/// the reconciler prune it. (Removal is intentionally NOT what stop does.)
 pub async fn stop(state: &AppState, service_name: &str) -> anyhow::Result<()> {
-    scale(state, service_name, 0).await?;
-    let mut services = state.services.write().await;
-    services.remove(service_name);
-    let mut routes = state.route_table.write().await;
-    routes.retain(|_, targets| {
-        targets.retain(|t| t.service_name != service_name);
-        !targets.is_empty()
-    });
-    let mut triggers = state.wasm_triggers.write().await;
-    triggers.retain(|t| t.service_name != service_name);
-    info!("Stopped service: {service_name}");
+    // Snapshot the configured replica count before scaling to 0 so resuming
+    // restores it (scale() rewrites the in-memory config's replicas).
+    let original_replicas = {
+        let services = state.services.read().await;
+        services
+            .get(service_name)
+            .map(|s| s.config.replicas.clone())
+    };
+
+    scale(state, service_name, 0).await?; // stop + remove the containers
+
+    {
+        let mut services = state.services.write().await;
+        if let Some(svc) = services.get_mut(service_name) {
+            svc.stopped = true;
+            svc.desired_replicas = 0;
+            if let Some(r) = original_replicas {
+                svc.config.replicas = r; // keep the real count for start
+            }
+        }
+    }
+
+    // Persist the pause mark so a restart restores the service as stopped
+    // (not running) and the watchdog/reconciler never auto-start it. The store
+    // already holds the original config (scale() doesn't persist), so the
+    // configured replica count is preserved across restart.
+    if let Some(store) = &state.store
+        && let Err(e) = store.mark_stopped(service_name)
+    {
+        tracing::warn!("failed to persist stopped mark for {service_name}: {e}");
+    }
+
+    // Drop routes + triggers — a paused service receives no traffic.
+    {
+        let mut routes = state.route_table.write().await;
+        routes.retain(|_, targets| {
+            targets.retain(|t| t.service_name != service_name);
+            !targets.is_empty()
+        });
+    }
+    {
+        let mut triggers = state.wasm_triggers.write().await;
+        triggers.retain(|t| t.service_name != service_name);
+    }
+    info!("Paused service: {service_name}");
+    Ok(())
+}
+
+/// Resume a paused service: clear the stopped mark and deploy it back to its
+/// configured replica count.
+pub async fn start(state: &AppState, service_name: &str) -> anyhow::Result<()> {
+    // Prefer the persisted (original) config — on a fresh boot the in-memory
+    // config is restored from the store with the real replica count.
+    let config = {
+        let mut services = state.services.write().await;
+        let svc = services
+            .get_mut(service_name)
+            .ok_or_else(|| anyhow::anyhow!("service '{service_name}' not found"))?;
+        svc.stopped = false;
+        svc.config.clone()
+    };
+    if let Some(store) = &state.store
+        && let Err(e) = store.unmark_stopped(service_name)
+    {
+        tracing::warn!("failed to clear stopped mark for {service_name}: {e}");
+    }
+    reconcile_service(state, &config).await?;
+    info!("Started service: {service_name}");
     Ok(())
 }
 

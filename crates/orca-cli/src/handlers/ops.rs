@@ -50,13 +50,21 @@ pub async fn handle_stop(service: Option<String>, api: String) -> anyhow::Result
     match service {
         Some(name) => {
             client.stop(&name).await?;
-            println!("Stopped service: {name}");
+            println!("Paused service: {name} (still defined; `orca start {name}` to resume)");
         }
         None => {
             client.stop_all().await?;
-            println!("Stopped all services.");
+            println!("Paused all services.");
         }
     }
+    Ok(())
+}
+
+/// Resume a paused service to its configured replica count.
+pub async fn handle_start(service: &str, api: String) -> anyhow::Result<()> {
+    let client = OrcaClient::new(api);
+    client.start(service).await?;
+    println!("Started service: {service}");
     Ok(())
 }
 
