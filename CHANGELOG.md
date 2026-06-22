@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Service lifecycle: `stop` now pauses (it doesn't delete), and the reconciler prunes services removed from `service.toml`.** `orca stop <svc>` stops the containers but keeps the service *defined* as a persisted **`paused`** state (a stopped-set in the store) — it stays in `orca status` as `paused`, survives a master restart without being auto-started, and the watchdog never restarts it. `orca start <svc>` resumes it to its configured replica count. Removing a service is now done by deleting it from `service.toml`: the declarative reconciler ([`[reconcile].config_dir`]) prunes (stops + purges) services no longer declared — guarded so an empty/garbled config never mass-deletes, and paused services are never pruned. This fixes services resurrecting after a master restart (`stop` previously dropped a service from memory but left it in the store, so restore recreated it) and lets you retire a service cleanly by removing it from config. `orca status` distinguishes `paused` (intentional, startable) from `stopped`/`degraded` (failed).
 
+### Fixed
+
+- **Webhook deploys no longer spam "critical issue opened" + "remediated" alert emails.** The AI monitor opened a `Critical` "service down" alert the instant it observed `0` running replicas — but a webhook deploy/rollout briefly drops a service to 0 replicas while the new container pulls and starts. The next monitor cycle opened an alert (one email), the container came up, and the following cycle auto-remediated it (a second email) — every single deploy. The monitor now applies a **grace window** (Prometheus `for:` semantics): a "service down" alert only opens once the outage has persisted past `[ai.alerts].alert_grace_secs` (default **120s**), measured per service and reset when it recovers. A normal rollout settles well inside the grace window so it never pages, while a genuine sustained outage still opens exactly one alert. Raise `alert_grace_secs` for services whose image pulls/health checks routinely exceed the default.
+
 ## [0.2.11-rc.2] - 2026-06-22
 
 ### Fixed
