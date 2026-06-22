@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11-rc.3] - 2026-06-22
+
 ### Added
 
 - **Service lifecycle: `stop` now pauses (it doesn't delete), and the reconciler prunes services removed from `service.toml`.** `orca stop <svc>` stops the containers but keeps the service *defined* as a persisted **`paused`** state (a stopped-set in the store) — it stays in `orca status` as `paused`, survives a master restart without being auto-started, and the watchdog never restarts it. `orca start <svc>` resumes it to its configured replica count. Removing a service is now done by deleting it from `service.toml`: the declarative reconciler ([`[reconcile].config_dir`]) prunes (stops + purges) services no longer declared — guarded so an empty/garbled config never mass-deletes, and paused services are never pruned. This fixes services resurrecting after a master restart (`stop` previously dropped a service from memory but left it in the store, so restore recreated it) and lets you retire a service cleanly by removing it from config. `orca status` distinguishes `paused` (intentional, startable) from `stopped`/`degraded` (failed).
