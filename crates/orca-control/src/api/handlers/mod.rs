@@ -32,6 +32,23 @@ pub(crate) async fn deploy(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DeployRequest>,
 ) -> impl IntoResponse {
+    // Validate every config up front so an invalid one (e.g. both `domain`
+    // and `domains` set) fails clearly instead of half-deploying.
+    let validation_errors: Vec<String> = req
+        .services
+        .iter()
+        .filter_map(|s| s.validate().err())
+        .collect();
+    if !validation_errors.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(DeployResponse {
+                deployed: Vec::new(),
+                errors: validation_errors,
+            }),
+        );
+    }
+
     let (deployed, errors) = reconciler::reconcile(&state, &req.services).await;
 
     // Persist deployed services to store
@@ -104,7 +121,8 @@ pub(crate) async fn status(
                 desired_replicas: svc.desired_replicas,
                 running_replicas: running,
                 status: overall_status.to_string(),
-                domain: svc.config.domain.clone(),
+                domain: svc.config.primary_domain(),
+                domains: svc.config.all_domains(),
                 project: svc.config.project.clone(),
                 memory_usage: cached.map(|s| s.memory_usage.clone()),
                 cpu_percent: cached.map(|s| s.cpu_percent),

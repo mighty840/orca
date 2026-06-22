@@ -47,8 +47,13 @@ pub struct ServiceStatus {
     pub running_replicas: u32,
     /// Overall status string (e.g., "running", "degraded", "stopped").
     pub status: String,
-    /// Domain for external access, if configured.
+    /// Primary domain for external access, if configured (first of `domains`).
+    /// Kept for back-compat with single-domain consumers.
     pub domain: Option<String>,
+    /// All domains the service is served on (apex + www, dual-TLD, etc.).
+    /// Empty when the service has no domain.
+    #[serde(default)]
+    pub domains: Vec<String>,
     /// Project name (from service directory).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
@@ -312,6 +317,7 @@ mod tests {
                 replicas: crate::types::Replicas::Fixed(2),
                 port: Some(80),
                 domain: Some("example.com".into()),
+                domains: vec![],
                 health: Some("/healthz".into()),
                 readiness: None,
                 liveness: None,

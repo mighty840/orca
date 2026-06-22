@@ -73,8 +73,9 @@ pub(super) async fn reconcile_services(
                         error: None,
                     })
                     .await;
-                // Notify domain discovery
-                if let Some(domain) = &spec.domain
+                // Notify domain discovery for every domain (each → same backend).
+                let domains = spec.all_domains();
+                if !domains.is_empty()
                     && let Ok(Some(port)) = runtime
                         .resolve_host_port(
                             &orca_core::runtime::WorkloadHandle {
@@ -86,9 +87,9 @@ pub(super) async fn reconcile_services(
                         )
                         .await
                 {
-                    let _ = domain_tx
-                        .send((spec.name.clone(), domain.clone(), port))
-                        .await;
+                    for domain in domains {
+                        let _ = domain_tx.send((spec.name.clone(), domain, port)).await;
+                    }
                 }
             }
             Err(e) => {

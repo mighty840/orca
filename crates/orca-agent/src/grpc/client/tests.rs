@@ -35,6 +35,7 @@ fn make_test_spec(name: &str) -> WorkloadSpec {
         port: None,
         host_port: None,
         domain: None,
+        domains: vec![],
         routes: Vec::new(),
         health: None,
         readiness: None,

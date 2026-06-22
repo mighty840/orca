@@ -40,6 +40,8 @@ pub struct ServiceStatus {
     pub status: String,
     pub domain: Option<String>,
     #[serde(default)]
+    pub domains: Vec<String>,
+    #[serde(default)]
     pub project: Option<String>,
     #[serde(default)]
     pub memory_usage: Option<String>,

@@ -119,7 +119,11 @@ fn draw_sparklines(f: &mut Frame, area: Rect, state: &AppState, service: &str) {
 
 fn draw_info(f: &mut Frame, area: Rect, svc: &crate::api::ServiceStatus) {
     let s_color = status_color(&svc.status);
-    let domain = svc.domain.as_deref().unwrap_or("-");
+    let domain = if svc.domains.is_empty() {
+        svc.domain.clone().unwrap_or_else(|| "-".to_string())
+    } else {
+        svc.domains.join(", ")
+    };
     let project = svc.project.as_deref().unwrap_or("-");
     let memory = svc.memory_usage.as_deref().unwrap_or("-");
     let cpu = svc

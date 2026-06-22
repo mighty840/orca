@@ -318,24 +318,27 @@ pub(crate) async fn reconcile_service(
         RuntimeKind::Wasm => update_wasm_triggers(state, config).await,
     }
 
-    // TLS cert provisioning for domains
-    if let Some(domain) = &config.domain
-        && let Some(resolver) = &state.cert_resolver
-        && !resolver.has_cert(domain)
-    {
-        if let (Some(cert_path), Some(key_path)) = (&config.tls_cert, &config.tls_key) {
-            // BYO cert: load from file
-            match load_byo_cert(cert_path, key_path) {
-                Ok(key) => {
-                    resolver.add_cert(domain, std::sync::Arc::new(key));
-                    tracing::info!(domain, "BYO TLS certificate loaded");
-                }
-                Err(e) => tracing::error!(domain, "Failed to load BYO cert: {e}"),
+    // TLS cert provisioning — one cert per domain (apex + www, dual-TLD, etc.).
+    // BYO cert/key, when provided, applies to every listed domain.
+    if let Some(resolver) = &state.cert_resolver {
+        for domain in config.all_domains() {
+            if resolver.has_cert(&domain) {
+                continue;
             }
-        } else if let Some(acme) = &state.acme_manager {
-            // ACME auto-provisioning
-            if let Err(e) = acme.ensure_cert_for_resolver(domain, resolver).await {
-                tracing::error!(domain, "Hot cert provisioning failed: {e}");
+            if let (Some(cert_path), Some(key_path)) = (&config.tls_cert, &config.tls_key) {
+                // BYO cert: load from file
+                match load_byo_cert(cert_path, key_path) {
+                    Ok(key) => {
+                        resolver.add_cert(&domain, std::sync::Arc::new(key));
+                        tracing::info!(domain, "BYO TLS certificate loaded");
+                    }
+                    Err(e) => tracing::error!(domain, "Failed to load BYO cert: {e}"),
+                }
+            } else if let Some(acme) = &state.acme_manager {
+                // ACME auto-provisioning
+                if let Err(e) = acme.ensure_cert_for_resolver(&domain, resolver).await {
+                    tracing::error!(domain, "Hot cert provisioning failed: {e}");
+                }
             }
         }
     }

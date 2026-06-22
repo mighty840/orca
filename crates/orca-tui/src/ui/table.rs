@@ -79,7 +79,17 @@ pub fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
                     let sel = actual == selected_pos;
                     let icon = status_icon(&svc.status);
                     let s_color = status_color(&svc.status);
-                    let domain = svc.domain.as_deref().unwrap_or("-");
+                    // Show the primary domain, with a "(+N)" hint when the
+                    // service is served on multiple hostnames (apex+www, etc.).
+                    let domain = if svc.domains.len() > 1 {
+                        format!("{} (+{})", svc.domains[0], svc.domains.len() - 1)
+                    } else {
+                        svc.domains
+                            .first()
+                            .or(svc.domain.as_ref())
+                            .cloned()
+                            .unwrap_or_else(|| "-".to_string())
+                    };
                     let project = svc.project.as_deref().unwrap_or("-");
                     let node = svc.node.as_deref().unwrap_or("master");
                     let style = if sel {

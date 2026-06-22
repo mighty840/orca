@@ -211,10 +211,23 @@ async fn handle_agent_message(
                 "Node {node_id} discovered domain {domain} for {service_name} (port {host_port})"
             );
             // Update the service's domain tracking on the master so the
-            // TUI and status API reflect the domain correctly.
+            // TUI and status API reflect the domain(s) correctly. Fold the
+            // newly-discovered domain into the existing set, normalizing to
+            // the single `domain` field for one and `domains` for many (the
+            // two are mutually exclusive — see ServiceConfig::validate).
             let mut services = state.services.write().await;
             if let Some(svc) = services.get_mut(&service_name) {
-                svc.config.domain = Some(domain);
+                let mut all = svc.config.all_domains();
+                if !all.contains(&domain) {
+                    all.push(domain);
+                    if all.len() == 1 {
+                        svc.config.domain = all.pop();
+                        svc.config.domains = Vec::new();
+                    } else {
+                        svc.config.domain = None;
+                        svc.config.domains = all;
+                    }
+                }
             }
         }
         AgentMessage::DeployReceived { service_name } => {

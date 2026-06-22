@@ -99,6 +99,7 @@ mod tests {
             replicas: Replicas::Fixed(1),
             port: Some(8080),
             domain: None,
+            domains: vec![],
             health: None,
             readiness: None,
             liveness: None,

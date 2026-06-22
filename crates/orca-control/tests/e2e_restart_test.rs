@@ -20,6 +20,7 @@ fn nginx_config() -> orca_core::config::ServiceConfig {
         replicas: orca_core::types::Replicas::Fixed(1),
         port: Some(80),
         domain: None,
+        domains: vec![],
         health: None,
         readiness: None,
         liveness: None,

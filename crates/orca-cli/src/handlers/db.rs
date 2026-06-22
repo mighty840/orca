@@ -74,6 +74,7 @@ async fn handle_create(
         port: Some(port),
         host_port: None,
         domain: None,
+        domains: vec![],
         routes: vec![],
         health,
         readiness: None,

@@ -45,6 +45,7 @@ fn canary_config(name: &str, image: &str) -> ServiceConfig {
         replicas: Replicas::Fixed(1),
         port: Some(8080),
         domain: Some("test.example.com".to_string()),
+        domains: vec![],
         health: None,
         readiness: None,
         liveness: None,

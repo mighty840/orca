@@ -33,9 +33,10 @@ use orca_proxy::RouteTarget;
 /// Filters for healthy/no-check instances only. Called during deploy and
 /// periodically by the watchdog to clean up stale routes.
 pub async fn update_container_routes(state: &AppState, config: &ServiceConfig) {
-    let Some(domain) = &config.domain else {
+    let domains = config.all_domains();
+    if domains.is_empty() {
         return;
-    };
+    }
 
     let services = state.services.read().await;
     let Some(svc) = services.get(&config.name) else {
@@ -88,11 +89,14 @@ pub async fn update_container_routes(state: &AppState, config: &ServiceConfig) {
 
     drop(services);
 
+    // Each domain routes to the same set of targets (same container(s)).
     let mut route_table = state.route_table.write().await;
-    if targets.is_empty() {
-        route_table.remove(domain);
-    } else {
-        route_table.insert(domain.clone(), targets);
+    for domain in &domains {
+        if targets.is_empty() {
+            route_table.remove(domain);
+        } else {
+            route_table.insert(domain.clone(), targets.clone());
+        }
     }
 }
 
@@ -163,7 +167,8 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
         replicas: config.replicas.clone(),
         port: config.port,
         host_port: config.host_port,
-        domain: config.domain.clone(),
+        domain: config.primary_domain(),
+        domains: config.all_domains(),
         routes: config.routes.clone(),
         health: config.health.clone(),
         readiness: config.readiness.clone(),

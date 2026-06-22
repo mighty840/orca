@@ -186,7 +186,8 @@ pub(crate) fn config_from_managed(node_id: u64, c: &ManagedContainer) -> Service
         replicas: Replicas::Fixed(1),
         port: c.port,
         host_port: None,
-        domain: c.domain.clone(),
+        domain: None,
+        domains: c.domains.clone(),
         routes: c.routes.clone(),
         health: None,
         readiness: None,
@@ -245,7 +246,7 @@ mod tests {
             status: "running".into(),
             container_id: "abc123".into(),
             port: Some(8080),
-            domain: Some("svc.example.com".into()),
+            domains: vec!["svc.example.com".into()],
             network: Some("app".into()),
             routes: vec![],
             strip_prefix: None,
@@ -258,7 +259,7 @@ mod tests {
         assert_eq!(cfg.name, "web");
         assert_eq!(cfg.image.as_deref(), Some("nginx:latest"));
         assert_eq!(cfg.port, Some(8080));
-        assert_eq!(cfg.domain.as_deref(), Some("svc.example.com"));
+        assert_eq!(cfg.all_domains(), vec!["svc.example.com".to_string()]);
         assert_eq!(cfg.network.as_deref(), Some("app"));
         assert_eq!(
             cfg.placement.and_then(|p| p.node).as_deref(),

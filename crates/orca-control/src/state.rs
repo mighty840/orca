@@ -355,6 +355,7 @@ mod tests {
             replicas,
             port: Some(8080),
             domain: None,
+            domains: vec![],
             health: None,
             readiness: None,
             liveness: None,

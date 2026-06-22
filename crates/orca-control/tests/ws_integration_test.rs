@@ -188,6 +188,7 @@ async fn ws_master_pushes_deploy_via_channel() {
         port: Some(80),
         host_port: None,
         domain: Some("test.example.com".into()),
+        domains: vec![],
         routes: vec![],
         health: None,
         readiness: None,
@@ -296,6 +297,7 @@ async fn ws_domain_discovered_updates_service_config() {
             port: Some(8000),
             host_port: None,
             domain: None, // no domain yet
+            domains: vec![],
             routes: vec![],
             health: None,
             readiness: None,
