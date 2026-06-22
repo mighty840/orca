@@ -138,6 +138,50 @@ async fn proxy_streams_large_request_body_byte_for_byte() {
 }
 
 #[tokio::test]
+async fn proxy_streams_large_upload_arriving_over_time() {
+    // Regression for the >2GB registry-upload bug: the proxy used a *total*
+    // request timeout (300s) which capped uploads by wall-clock — a large blob
+    // over a typical link exceeds it and died mid-transfer. The fix uses an
+    // inactivity timeout instead. This models a registry blob push that streams
+    // in over real time and asserts it completes byte-count-clean. It also
+    // guards the no-buffer streaming path and would catch a reintroduced tight
+    // total-timeout (the upload deliberately spans hundreds of ms).
+    const CHUNK: usize = 1024 * 1024; // 1 MiB
+    const CHUNKS: usize = 64; // 64 MiB total, streamed
+    let backend = spawn_echo_backend().await;
+    let port = spawn_proxy(backend).await;
+
+    // Trickle 1 MiB frames with periodic gaps so the request body arrives over
+    // wall-clock time rather than all at once — an active-but-slow transfer.
+    let stream = futures_util::stream::unfold(0usize, |i| async move {
+        if i >= CHUNKS {
+            return None;
+        }
+        if i > 0 && i % 8 == 0 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let frame = vec![(i % 251) as u8; CHUNK];
+        Some((Ok::<Vec<u8>, std::io::Error>(frame), i + 1))
+    });
+
+    let resp = client()
+        .post(format!("http://127.0.0.1:{port}/v2/blobs/uploads/"))
+        .header("Host", "registry.example.com")
+        .body(reqwest::Body::wrap_stream(stream))
+        .send()
+        .await
+        .expect("streamed large upload must succeed");
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let echoed = resp.bytes().await.expect("response body reads cleanly");
+    assert_eq!(
+        echoed.len(),
+        CHUNK * CHUNKS,
+        "every streamed byte must round-trip through the proxy"
+    );
+}
+
+#[tokio::test]
 async fn proxy_streams_empty_request_body() {
     // A bodyless GET on a single-target route must still forward cleanly
     // through the streaming path (empty stream, not a hang).
