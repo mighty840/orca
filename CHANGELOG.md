@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11-rc.1] - 2026-06-22
+
 ### Added
 
 - **Declarative reconciliation: the master can continuously apply a directory of service configs (K8s-style), no manual `orca deploy`.** Set `[reconcile].config_dir` (a directory of `<project>/service.toml` files, or a single `services.toml`) and a background loop on the master loads it every `interval_secs` (default 30) and applies any service that is **new or whose spec changed** — so bringing up a new service is just dropping its `service.toml` in the dir. Unchanged services are deliberately skipped (no steady-state churn / remote re-deploys); invalid configs are skipped with the reason recorded for `orca status`; applied services are persisted so they survive a master restart. Healing of degraded-but-unchanged services remains the watchdog's job, and removed services are not auto-pruned. Disabled unless `config_dir` is set.
