@@ -31,6 +31,43 @@ use orca_proxy::run_proxy_with_fallback;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 
+/// Spawn a backend that reports, in response headers, the body-framing it
+/// *received* — `transfer-encoding` and `content-length`. Lets a test assert
+/// how the proxy framed the forwarded request.
+async fn spawn_framing_backend() -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        loop {
+            let (stream, _) = listener.accept().await.unwrap();
+            let io = TokioIo::new(stream);
+            tokio::spawn(async move {
+                let svc = service_fn(|req: Request<Incoming>| async move {
+                    let te = req
+                        .headers()
+                        .get("transfer-encoding")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("none")
+                        .to_string();
+                    let cl = req
+                        .headers()
+                        .get("content-length")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("none")
+                        .to_string();
+                    let _ = req.into_body().collect().await;
+                    let mut resp = Response::new(Full::new(hyper::body::Bytes::new()));
+                    resp.headers_mut().insert("x-seen-te", te.parse().unwrap());
+                    resp.headers_mut().insert("x-seen-cl", cl.parse().unwrap());
+                    Ok::<_, hyper::Error>(resp)
+                });
+                let _ = http1::Builder::new().serve_connection(io, svc).await;
+            });
+        }
+    });
+    addr
+}
+
 /// Spawn a backend that echoes the received request body back verbatim.
 async fn spawn_echo_backend() -> SocketAddr {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -178,6 +215,49 @@ async fn proxy_streams_large_upload_arriving_over_time() {
         echoed.len(),
         CHUNK * CHUNKS,
         "every streamed byte must round-trip through the proxy"
+    );
+}
+
+#[tokio::test]
+async fn proxy_empty_body_post_forwards_content_length_not_chunked() {
+    // Regression (#102 follow-up): an empty-body POST (e.g. a session-refresh
+    // call: `Content-Length: 0`, no `Content-Type`) must NOT be re-framed as
+    // `Transfer-Encoding: chunked` by the streaming path. A chunked *empty*
+    // request makes strict backends (Fastify/Infisical) treat it as a body to
+    // parse and reject it with 415 → 500, which broke logins. It must arrive
+    // with `Content-Length: 0` and no chunked encoding.
+    let backend = spawn_framing_backend().await;
+    let port = spawn_proxy(backend).await;
+
+    let resp = client()
+        .post(format!("http://127.0.0.1:{port}/api/v1/auth/token"))
+        .header("Host", "registry.example.com")
+        .send() // no body → Content-Length: 0
+        .await
+        .expect("empty-body POST must succeed through the proxy");
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let seen_te = resp
+        .headers()
+        .get("x-seen-te")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let seen_cl = resp
+        .headers()
+        .get("x-seen-cl")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    // The regression was the proxy re-framing this as chunked. It must NOT be
+    // chunked; an empty body arrives as Content-Length: 0 or no framing at all
+    // (both mean "no body" — strict backends accept either, but reject chunked
+    // without a Content-Type).
+    assert_ne!(
+        seen_te, "chunked",
+        "empty-body POST must NOT be forwarded chunked (backend saw Transfer-Encoding: chunked)"
+    );
+    assert!(
+        seen_cl == "0" || seen_cl == "none",
+        "empty-body POST should have no positive Content-Length (saw cl={seen_cl}, te={seen_te})"
     );
 }
 

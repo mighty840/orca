@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11-rc.2] - 2026-06-22
+
+### Fixed
+
+- **Empty-body POST requests through the proxy were broken (rc.1 regression), breaking app logins.** The rc.1 large-upload fix streams single-target request bodies via `reqwest::Body::wrap_stream` (always `Transfer-Encoding: chunked`) and stripped the client's `Content-Length`. An *empty-body* POST (e.g. a session-refresh call — `Content-Length: 0`, no `Content-Type`) was therefore forwarded as a **chunked** request; strict backends (Fastify/Infisical) treat chunked as "has a body", find no `Content-Type`, and reject it with `415 Unsupported Media Type` → 500. Every empty-body POST through a single-target route failed — observed as Infisical login looping to "Access Restricted" (its `POST /api/v1/auth/token` refresh 500ing). Fixed: only stream (chunked) when the body is actually non-empty; an empty body is forwarded with no chunked framing, so the backend sees an empty request as before. Large-body streaming is unchanged. (regression from the v0.2.11-rc.1 proxy upload fix)
+
 ## [0.2.11-rc.1] - 2026-06-22
 
 ### Added

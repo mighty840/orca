@@ -263,9 +263,20 @@ pub(crate) async fn forward_streaming(
     );
     debug!("Proxying (stream) {host}{path_and_query} -> {uri}");
 
-    // Wrap the incoming hyper body as a byte stream for reqwest — data frames
-    // flow through without ever materializing the full body in memory.
-    let forward_req = forward_req.body(reqwest::Body::wrap_stream(BodyDataStream::new(body)));
+    // Attach the body. An *empty* body (e.g. `Content-Length: 0` — a session-
+    // refresh POST, a bodyless POST) must be forwarded as a zero-length body so
+    // reqwest emits `Content-Length: 0`, NOT `Transfer-Encoding: chunked`:
+    // `wrap_stream` produces an unknown-length (chunked) body, and a chunked
+    // *empty* request makes strict backends (Fastify/Infisical) treat it as a
+    // body to parse and reject it with `415 Unsupported Media Type` when there's
+    // no `Content-Type` — which broke every empty-body POST through the proxy.
+    // Only non-empty bodies are streamed (the large-blob case #102 targets).
+    use hyper::body::Body as _;
+    let forward_req = if body.size_hint().exact() == Some(0) {
+        forward_req.body(reqwest::Body::from(Vec::<u8>::new()))
+    } else {
+        forward_req.body(reqwest::Body::wrap_stream(BodyDataStream::new(body)))
+    };
 
     match forward_req.send().await {
         Ok(resp) => build_response(resp),
