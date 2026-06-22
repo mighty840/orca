@@ -217,6 +217,17 @@ async fn handle_agent_message(
                 svc.config.domain = Some(domain);
             }
         }
+        AgentMessage::DeployReceived { service_name } => {
+            info!("Node {node_id}: agent acknowledged deploy of {service_name}, work started");
+            if let Some(tx) = state
+                .pending_deploy_acks
+                .write()
+                .await
+                .remove(&service_name)
+            {
+                let _ = tx.send(());
+            }
+        }
         AgentMessage::DeployResult {
             service_name,
             success,

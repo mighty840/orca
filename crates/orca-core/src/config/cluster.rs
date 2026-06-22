@@ -32,6 +32,46 @@ pub struct ClusterConfig {
     /// Fallback proxy for unmatched requests (e.g., point to coolify-proxy).
     #[serde(default)]
     pub fallback: Option<FallbackConfig>,
+    /// Remote-deploy timeouts (agent ACK over WebSocket).
+    #[serde(default)]
+    pub deploy: DeployConfig,
+}
+
+/// Remote-deploy timeout configuration. Controls how long the master waits
+/// for an agent to (1) acknowledge receipt of a deploy command and (2) report
+/// the deploy complete. The two phases are split so a slow first-time image
+/// pull (long, expected) is never conflated with an unreachable agent (short,
+/// a genuine failure) — see #88 / #94.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeployConfig {
+    /// Seconds to wait for the agent to acknowledge it received the deploy
+    /// command and started work. A miss means the agent is unreachable or the
+    /// WS session is dead — fail fast. Default 10s.
+    #[serde(default = "default_deploy_ack_timeout")]
+    pub ack_timeout_secs: u64,
+    /// Seconds to wait for the agent to report the deploy finished — i.e. image
+    /// pull, container create, and start all done. Must cover multi-GB first
+    /// pulls; the old hard-coded 30s ceiling made such services undeployable.
+    /// Default 600s.
+    #[serde(default = "default_deploy_completion_timeout")]
+    pub completion_timeout_secs: u64,
+}
+
+impl Default for DeployConfig {
+    fn default() -> Self {
+        Self {
+            ack_timeout_secs: default_deploy_ack_timeout(),
+            completion_timeout_secs: default_deploy_completion_timeout(),
+        }
+    }
+}
+
+fn default_deploy_ack_timeout() -> u64 {
+    10
+}
+
+fn default_deploy_completion_timeout() -> u64 {
+    600
 }
 
 /// Fallback proxy configuration. When orca's route table has no match,

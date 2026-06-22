@@ -88,6 +88,12 @@ pub struct AppState {
     /// Pending deploy result waiters: service_name → oneshot sender.
     /// Inserted by queue_remote_deploy, resolved by ws_handler on DeployResult.
     pub pending_deploys: RwLock<HashMap<String, tokio::sync::oneshot::Sender<Result<(), String>>>>,
+    /// Pending deploy *receipt* waiters: service_name → oneshot sender.
+    /// Inserted by queue_remote_deploy, resolved by ws_handler on
+    /// DeployReceived. Separate from `pending_deploys` so the master can apply
+    /// a short receipt-ack timeout (catch a dead agent fast) independently of
+    /// the long completion timeout (cover multi-GB image pulls). See #88/#94.
+    pub pending_deploy_acks: RwLock<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
     /// AI conversational-alert engine. `None` when `[ai]` is not configured.
     /// `AiMonitor::run` (spawned in `lib::run_server_with_acme`) feeds it
     /// `open_alert` calls; the HTTP `/api/v1/alerts/...` handlers mutate it
@@ -252,6 +258,7 @@ impl AppState {
             webhook_invocations: RwLock::new(HashMap::new()),
             exec_sessions: RwLock::new(HashMap::new()),
             pending_deploys: RwLock::new(HashMap::new()),
+            pending_deploy_acks: RwLock::new(HashMap::new()),
             alerts: None,
             instance_events: RwLock::new(HashMap::new()),
         }

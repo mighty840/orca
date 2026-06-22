@@ -5,6 +5,7 @@
 
 mod backup;
 mod backup_status;
+mod deploy;
 mod logs;
 pub mod network_status;
 mod reconcile;
@@ -26,6 +27,7 @@ use crate::grpc::AgentClient;
 
 use backup::run_agent_backup;
 use backup_status::send_backup_status;
+use deploy::deploy_and_report;
 use logs::stream_logs;
 use network_status::send_network_status;
 use reconcile::reconcile_services;
@@ -177,45 +179,25 @@ async fn handle_master_message(
     match msg {
         MasterMessage::Deploy { spec } => {
             info!("WS: deploying {}", spec.name);
-            let result = agent.deploy_spec(runtime.as_ref(), &spec).await;
-            let success = result.is_ok();
-            let error = result.err().map(|e| e.to_string());
-
-            // If the spec has a domain, notify for proxy route registration
-            if success
-                && let Some(domain) = &spec.domain
-                && let Ok(Some(port)) = runtime
-                    .resolve_host_port(
-                        &orca_core::runtime::WorkloadHandle {
-                            runtime_id: format!("orca-{}", spec.name),
-                            name: format!("orca-{}", spec.name),
-                            metadata: Default::default(),
-                        },
-                        spec.port.unwrap_or(80),
-                    )
-                    .await
-            {
-                let _ = domain_tx
-                    .send((spec.name.clone(), domain.clone(), port))
-                    .await;
-            }
-
-            if success {
-                info!("WS: deploy of {} succeeded", spec.name);
-            } else {
-                error!(
-                    "WS: deploy of {} failed: {}",
-                    spec.name,
-                    error.as_deref().unwrap_or("unknown")
-                );
-            }
+            // Acknowledge receipt immediately so the master can tell a slow
+            // image pull apart from an unreachable agent (#88/#94). Sent
+            // before the (potentially multi-minute) deploy work begins.
             let _ = out_tx
-                .send(AgentMessage::DeployResult {
+                .send(AgentMessage::DeployReceived {
                     service_name: spec.name.clone(),
-                    success,
-                    error,
                 })
                 .await;
+
+            // Spawn so a long pull doesn't head-of-line-block other
+            // master→agent commands (Stop, further Deploys), the same way
+            // Logs/Exec/Prune are handled.
+            let rt = runtime.clone();
+            let agent_c = agent.clone();
+            let domain_tx_c = domain_tx.clone();
+            let tx = out_tx.clone();
+            tokio::spawn(async move {
+                deploy_and_report(rt, agent_c, domain_tx_c, tx, spec).await;
+            });
         }
         MasterMessage::Stop { service_name } => {
             info!("WS: stopping {service_name}");
