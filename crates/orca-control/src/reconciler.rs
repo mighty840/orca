@@ -478,4 +478,4 @@ async fn clear_pending_deploy(state: &AppState, name: &str) {
     state.pending_deploy_acks.write().await.remove(name);
     state.pending_deploys.write().await.remove(name);
 }
-pub use crate::operations::{promote, redeploy, rollback, scale, stop, stop_all};
+pub use crate::operations::{promote, redeploy, rollback, scale, start, stop, stop_all};

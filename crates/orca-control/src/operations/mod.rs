@@ -12,7 +12,7 @@ use crate::reconciler::{get_runtime, reconcile_service};
 use crate::state::AppState;
 
 pub(crate) use lifecycle::{canary_deploy, rolling_update};
-pub use lifecycle::{promote, rollback, scale, stop, stop_all};
+pub use lifecycle::{promote, rollback, scale, start, stop, stop_all};
 
 /// Returned when a redeploy targets a remote node that is not currently connected.
 /// Callers can downcast to distinguish this from internal errors (e.g. map to 503).

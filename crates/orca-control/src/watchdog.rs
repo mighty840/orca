@@ -184,6 +184,12 @@ async fn check_and_prune(state: &AppState, service_name: &str, runtime_kind: Run
         return false;
     };
 
+    // Paused services (`orca stop`) are intentionally not running — never
+    // auto-restart them.
+    if svc.stopped {
+        return false;
+    }
+
     // Remote-placed services are reconciled by send_reconcile when the agent
     // connects. The watchdog must not trigger local reconcile for them —
     // instances.len() is 0 until the agent's first heartbeat, so without

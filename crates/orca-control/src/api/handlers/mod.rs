@@ -18,8 +18,8 @@ mod ops;
 pub(crate) mod secrets;
 
 pub(crate) use ops::{
-    cluster_backups, cluster_networks, logs, promote, redeploy, rollback, scale, stop_all,
-    stop_project, stop_service, trigger_cluster_backup,
+    cluster_backups, cluster_networks, logs, promote, redeploy, rollback, scale, start_service,
+    stop_all, stop_project, stop_service, trigger_cluster_backup,
 };
 
 /// Health check endpoint.
@@ -99,7 +99,11 @@ pub(crate) async fn status(
         })
         .map(|svc| {
             let running = svc.running_count();
-            let overall_status = if running == 0 && svc.desired_replicas > 0 {
+            let overall_status = if svc.stopped {
+                // Operator-paused (`orca stop`): defined + startable, distinct
+                // from a service that failed to come up.
+                "paused"
+            } else if running == 0 && svc.desired_replicas > 0 {
                 "stopped"
             } else if running < svc.desired_replicas {
                 "degraded"

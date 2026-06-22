@@ -12,7 +12,9 @@ use tracing::error;
 
 pub(crate) use backups::{cluster_backups, trigger_cluster_backup};
 pub(crate) use cluster::logs;
-pub(crate) use deploy::{promote, redeploy, rollback, scale, stop_all, stop_project, stop_service};
+pub(crate) use deploy::{
+    promote, redeploy, rollback, scale, start_service, stop_all, stop_project, stop_service,
+};
 pub(crate) use networks::cluster_networks;
 
 fn ok_or_500(result: anyhow::Result<()>, op: &str) -> axum::response::Response {

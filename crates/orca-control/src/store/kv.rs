@@ -14,6 +14,10 @@ use super::types::{Assignment, NodeEntry, RaftEntry, RaftSnapshot};
 pub(super) const NODES: TableDefinition<u64, &[u8]> = TableDefinition::new("nodes");
 pub(super) const SERVICES: TableDefinition<&str, &[u8]> = TableDefinition::new("services");
 pub(super) const ASSIGNMENTS: TableDefinition<&str, &[u8]> = TableDefinition::new("assignments");
+/// Operator-stopped (paused) services, keyed by name. Persisted separately
+/// from the service config so the declarative reconciler — which loads
+/// `service.toml` (no `stopped` field) — never un-stops a paused service.
+pub(super) const STOPPED: TableDefinition<&str, &[u8]> = TableDefinition::new("stopped");
 
 /// Persistent cluster state store.
 pub struct ClusterStore {
@@ -30,6 +34,7 @@ impl ClusterStore {
             let _ = tx.open_table(NODES)?;
             let _ = tx.open_table(SERVICES)?;
             let _ = tx.open_table(ASSIGNMENTS)?;
+            let _ = tx.open_table(STOPPED)?;
         }
         tx.commit()?;
         Ok(Self { db })
@@ -175,6 +180,41 @@ impl ClusterStore {
         }
         tx.commit()?;
         Ok(())
+    }
+
+    /// Mark a service as operator-stopped (paused). Survives restart; the
+    /// service stays known but is not started until explicitly resumed.
+    pub fn mark_stopped(&self, name: &str) -> anyhow::Result<()> {
+        let tx = self.db.begin_write()?;
+        {
+            let mut table = tx.open_table(STOPPED)?;
+            table.insert(name, [1u8].as_slice())?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Clear the stopped mark for a service (on `orca start`).
+    pub fn unmark_stopped(&self, name: &str) -> anyhow::Result<()> {
+        let tx = self.db.begin_write()?;
+        {
+            let mut table = tx.open_table(STOPPED)?;
+            table.remove(name)?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Names of all operator-stopped (paused) services.
+    pub fn get_stopped(&self) -> anyhow::Result<std::collections::HashSet<String>> {
+        let tx = self.db.begin_read()?;
+        let table = tx.open_table(STOPPED)?;
+        let mut out = std::collections::HashSet::new();
+        for entry in table.iter()? {
+            let (k, _) = entry?;
+            out.insert(k.value().to_string());
+        }
+        Ok(out)
     }
 
     /// Get all service configs.

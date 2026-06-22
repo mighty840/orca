@@ -101,6 +101,18 @@ impl OrcaClient {
         Ok(())
     }
 
+    /// Resume a paused service to its configured replica count.
+    pub async fn start(&self, service: &str) -> anyhow::Result<()> {
+        self.auth(
+            self.client
+                .post(self.url(&format!("/api/v1/services/{service}/start"))),
+        )
+        .send()
+        .await?
+        .error_for_status()?;
+        Ok(())
+    }
+
     pub async fn redeploy(&self, service: &str) -> anyhow::Result<()> {
         self.auth(
             self.client
