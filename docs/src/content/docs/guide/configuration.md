@@ -46,6 +46,34 @@ role = "admin"                        # admin | deployer | viewer
 
 Create tokens via CLI: `orca token create --name ci --role deployer`
 
+### Deploy & Reconciliation
+
+Optional `cluster.toml` blocks controlling how deploys are acknowledged, how
+orphaned containers are recovered, and (optionally) continuous declarative
+reconciliation. Defaults shown:
+
+```toml
+[deploy]
+ack_timeout_secs = 10          # agent must acknowledge a deploy within this, else "unreachable"
+completion_timeout_secs = 600  # time for the agent to pull the image + start (covers multi-GB pulls)
+adopt_orphans = true           # adopt orca.managed containers running on an agent but missing from the registry
+adopt_interval_secs = 30       # how often to scan agents for orphans
+
+# Declarative reconciliation (K8s-style) — opt-in. When set, the master
+# continuously applies a directory of service configs: drop in a service.toml
+# and it deploys, no manual `orca deploy`.
+[reconcile]
+config_dir = "services"        # dir of <project>/service.toml files (or a single services.toml)
+interval_secs = 30             # how often to re-apply
+```
+
+The `[deploy]` wait is two-phase — a short *receipt* ack distinguishes an
+unreachable agent from a slow image pull, and the long *completion* wait
+surfaces the agent's real pull error instead of a bare timeout. `[reconcile]`
+applies only new or changed services each pass; unchanged services are left
+untouched and removed ones are not auto-pruned. See
+[Self-healing](/reference/self-healing).
+
 ## service.toml
 
 Each project directory contains a `service.toml` with one or more `[[service]]` blocks:
@@ -90,6 +118,23 @@ repo = "git@github.com:org/repo.git"
 branch = "main"
 dockerfile = "Dockerfile"
 ```
+
+#### Multiple domains
+
+Serve one container on several hostnames — apex + www, regional aliases, or a
+dual-TLD migration — with `domains` instead of `domain`. Each entry gets its own
+TLS certificate and proxy route to the same backend, so you no longer duplicate
+the `[[service]]` block (which would spawn a redundant container):
+
+```toml
+[[service]]
+name = "marketing"
+image = "myorg/marketing:latest"
+port = 8080
+domains = ["example.com", "www.example.com", "example.org"]
+```
+
+`domain` and `domains` are mutually exclusive — setting both is rejected at deploy.
 
 ### Wasm Services
 
