@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Deploys of large images no longer fail with an opaque 30s timeout, and real pull errors now reach the operator.** The master previously waited a hard-coded 30s for a remote agent's deploy ACK — but that single ACK was only sent *after* the agent finished the image pull, awaited inline in the agent's receive loop. So any first-time pull of a multi-GB image (or any unpullable/missing image) blew the 30s budget: the operator saw `deploy timed out after 30 s` (with a misleading "Is `orca server` running?") while the agent's real result — success or the actual `image not found`/pull error — arrived for a request the master had already abandoned, leaving the container running-but-unregistered. The wait is now two-phase: a short **receipt ACK** (new `AgentMessage::DeployReceived`, sent immediately on receipt) confirms the agent is alive — a miss here fails fast with a distinct "agent may be unreachable" message — followed by a long **completion** wait that carries the agent's real terminal result. Both timeouts are configurable via a new `[deploy]` block (`ack_timeout_secs` default 10, `completion_timeout_secs` default 600). The agent now also runs the deploy on a spawned task instead of inline, so a long pull no longer head-of-line-blocks other master→agent commands (Stop, further Deploys). (#88, #94)
+
 ## [0.2.8] - 2026-05-14
 
 ### Fixed

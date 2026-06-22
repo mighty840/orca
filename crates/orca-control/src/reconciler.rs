@@ -368,8 +368,20 @@ async fn find_target_node(state: &AppState, config: &ServiceConfig) -> Option<u6
 
 /// Send a deploy command to a remote agent node and await the result.
 ///
-/// Returns an error if the agent is not connected via WebSocket, if the WS
-/// channel is closed, or if the agent reports a deploy failure within 30 s.
+/// The wait is split into two phases so a slow image pull is never reported as
+/// an unreachable agent (#88/#94):
+///
+/// 1. **Receipt ACK** (`deploy.ack_timeout_secs`, default 10s): the agent
+///    confirms it received the command and started work. A miss here means the
+///    WS session is dead / the agent is unreachable — fail fast with a clear
+///    message.
+/// 2. **Completion** (`deploy.completion_timeout_secs`, default 600s): the
+///    agent reports the deploy finished. Long enough to cover multi-GB
+///    first-time pulls. On a real failure the agent's pull error surfaces
+///    verbatim; on timeout the message says the pull may still be running.
+///
+/// Returns an error if the agent is not connected via WebSocket, the WS channel
+/// is closed, either phase times out, or the agent reports a deploy failure.
 async fn queue_remote_deploy(
     state: &AppState,
     node_id: u64,
@@ -383,7 +395,13 @@ async fn queue_remote_deploy(
             .clone()
     };
 
+    let (ack_tx, ack_rx) = tokio::sync::oneshot::channel::<()>();
     let (result_tx, result_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    state
+        .pending_deploy_acks
+        .write()
+        .await
+        .insert(spec.name.clone(), ack_tx);
     state
         .pending_deploys
         .write()
@@ -396,20 +414,56 @@ async fn queue_remote_deploy(
         })
         .await
     {
-        state.pending_deploys.write().await.remove(&spec.name);
+        clear_pending_deploy(state, &spec.name).await;
         return Err(anyhow::anyhow!("agent {node_id} channel closed: {e}"));
     }
 
     info!("Sent deploy via WS to node {node_id}: {}", spec.name);
 
-    match tokio::time::timeout(std::time::Duration::from_secs(30), result_rx).await {
+    let ack_timeout = Duration::from_secs(state.cluster_config.deploy.ack_timeout_secs);
+    let completion_timeout =
+        Duration::from_secs(state.cluster_config.deploy.completion_timeout_secs);
+
+    // Phase 1: receipt ACK — distinguishes a dead/unreachable agent from a
+    // slow pull. This is the failure mode that used to masquerade as the
+    // misleading "is `orca server` running?" timeout.
+    match tokio::time::timeout(ack_timeout, ack_rx).await {
+        Ok(Ok(())) => {}
+        Ok(Err(_)) => {
+            clear_pending_deploy(state, &spec.name).await;
+            anyhow::bail!("deploy receipt channel dropped for agent {node_id}");
+        }
+        Err(_) => {
+            clear_pending_deploy(state, &spec.name).await;
+            anyhow::bail!(
+                "agent {node_id} did not acknowledge deploy of {} within {}s — agent may be unreachable or the WS session is dead",
+                spec.name,
+                ack_timeout.as_secs()
+            );
+        }
+    }
+
+    // Phase 2: completion — long enough for multi-GB first-time pulls. The
+    // agent's real pull error surfaces here instead of a bare timeout.
+    match tokio::time::timeout(completion_timeout, result_rx).await {
         Ok(Ok(Ok(()))) => Ok(()),
         Ok(Ok(Err(msg))) => anyhow::bail!("deploy failed on agent {node_id}: {msg}"),
         Ok(Err(_)) => anyhow::bail!("deploy result channel dropped for agent {node_id}"),
         Err(_) => {
             state.pending_deploys.write().await.remove(&spec.name);
-            anyhow::bail!("deploy timed out after 30 s waiting for agent {node_id}")
+            anyhow::bail!(
+                "deploy of {} did not complete within {}s on agent {node_id} (image pull may still be running — raise deploy.completion_timeout_secs if the image is large)",
+                spec.name,
+                completion_timeout.as_secs()
+            )
         }
     }
+}
+
+/// Remove both pending-deploy waiter entries for a service. Used on send
+/// failure and on receipt-ACK timeout so neither map leaks an orphan entry.
+async fn clear_pending_deploy(state: &AppState, name: &str) {
+    state.pending_deploy_acks.write().await.remove(name);
+    state.pending_deploys.write().await.remove(name);
 }
 pub use crate::operations::{promote, redeploy, rollback, scale, stop, stop_all};

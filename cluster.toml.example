@@ -25,6 +25,15 @@ log_level = "info"
 # count = 2
 # model = "A100"
 
+# -- Remote deploy timeouts --
+# How long the master waits on a remote agent during `orca deploy`. The wait is
+# split so a slow first-time image pull isn't mistaken for an unreachable agent.
+# Raise completion_timeout_secs if you deploy very large (multi-GB) images.
+
+# [deploy]
+# ack_timeout_secs = 10         # agent must acknowledge receipt this fast (else: unreachable)
+# completion_timeout_secs = 600 # agent has this long to finish the pull + start the container
+
 # -- AI Operations Assistant --
 # Enables: `orca ask`, conversational alerts, smart import analysis, log summarization.
 # Works with any OpenAI-compatible API (LiteLLM, Ollama, vLLM, OpenAI, etc.)

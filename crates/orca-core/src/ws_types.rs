@@ -24,6 +24,11 @@ pub enum AgentMessage {
         domain: String,
         host_port: u16,
     },
+    /// Agent acknowledges receipt of a `Deploy` command and is starting work
+    /// (image pull + container create). Sent *before* the potentially
+    /// long-running deploy begins so the master can distinguish a slow pull
+    /// from an unreachable agent and apply separate ACK/completion timeouts.
+    DeployReceived { service_name: String },
     DeployResult {
         service_name: String,
         success: bool,
@@ -220,6 +225,17 @@ mod tests {
         assert!(json.contains("\"type\":\"domain_discovered\""));
         let parsed: AgentMessage = serde_json::from_str(&json).unwrap();
         assert!(matches!(parsed, AgentMessage::DomainDiscovered { .. }));
+    }
+
+    #[test]
+    fn agent_message_deploy_received_serde() {
+        let msg = AgentMessage::DeployReceived {
+            service_name: "web".into(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"type\":\"deploy_received\""));
+        let parsed: AgentMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(parsed, AgentMessage::DeployReceived { .. }));
     }
 
     #[test]

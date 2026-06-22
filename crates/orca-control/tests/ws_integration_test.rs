@@ -239,6 +239,47 @@ async fn ws_master_pushes_deploy_via_channel() {
 }
 
 #[tokio::test]
+async fn ws_deploy_received_resolves_ack_waiter() {
+    let state = test_state();
+
+    // Simulate queue_remote_deploy having registered a receipt waiter.
+    let (ack_tx, ack_rx) = tokio::sync::oneshot::channel::<()>();
+    state
+        .pending_deploy_acks
+        .write()
+        .await
+        .insert("svc".into(), ack_tx);
+
+    let addr = start_server(state.clone()).await;
+    let url = format!("ws://{addr}/api/v1/ws/agent?token=test-token-123&node_id=8");
+    let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let _ = ws.next().await; // consume Ack
+
+    let msg = AgentMessage::DeployReceived {
+        service_name: "svc".into(),
+    };
+    ws.send(tungstenite::Message::Text(
+        serde_json::to_string(&msg).unwrap().into(),
+    ))
+    .await
+    .unwrap();
+
+    // The waiter must fire (agent acknowledged receipt)...
+    tokio::time::timeout(Duration::from_secs(2), ack_rx)
+        .await
+        .expect("ack waiter should resolve after DeployReceived")
+        .expect("ack channel should not be dropped");
+
+    // ...and the handler must remove the entry so it doesn't leak.
+    assert!(
+        !state.pending_deploy_acks.read().await.contains_key("svc"),
+        "DeployReceived must consume the pending ack entry"
+    );
+
+    ws.close(None).await.ok();
+}
+
+#[tokio::test]
 async fn ws_domain_discovered_updates_service_config() {
     let state = test_state();
 
