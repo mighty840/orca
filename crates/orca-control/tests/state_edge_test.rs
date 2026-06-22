@@ -139,11 +139,18 @@ async fn test_deploy_then_immediately_stop() {
         resp.status()
     );
 
-    // Verify service is gone from state (no orphans).
+    // `stop` now *pauses* rather than deletes: the service stays defined (so it
+    // survives a restart and can be resumed with `orca start`) but is marked
+    // paused with no running instances — and crucially no orphaned containers.
     let services = state.services.read().await;
-    assert!(
-        !services.contains_key("fast-stop"),
-        "service should be removed after stop"
+    let svc = services
+        .get("fast-stop")
+        .expect("stopped service stays defined (paused), not deleted");
+    assert!(svc.stopped, "service should be marked paused after stop");
+    assert_eq!(
+        svc.running_count(),
+        0,
+        "paused service must have no running instances (no orphans)"
     );
 }
 
