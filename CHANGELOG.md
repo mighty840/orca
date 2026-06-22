@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11-rc.5] - 2026-06-22
+
+### Fixed
+
+- **Declarative reconciler no longer churns remote (placement-pinned) services whose deploy ACK doesn't land.** In the remote-deploy path, `svc.config` was recorded only *after* `queue_remote_deploy` succeeded — but that call waits for the agent's receipt/completion ACK and fails (the `?` returns early) if the ACK doesn't arrive cleanly, which happens with a laggy agent even though it actually created the container. With the config never recorded, the declarative reconciler saw the service as "new/changed" on every pass and re-dispatched the identical deploy ~every interval, recreating the container in a loop (and breaking its logs/CPU/RAM in `orca status`/TUI, since freshly-recreated containers report no stats). Fixed by recording the declared config + placeholder instance **before** dispatching the deploy, so a missed ACK can't leave it stale; genuine deploy failures still surface via `last_failure`, and agent-reconnect still triggers a real reconcile. Regression tests cover a non-acking remote agent (exactly one Deploy dispatched across two passes) and idempotency of a mounts/cmd/env-heavy service. (Surfaced after enabling `[reconcile]` in production.)
+
 ## [0.2.11-rc.4] - 2026-06-22
 
 ### Added
