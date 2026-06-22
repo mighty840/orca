@@ -59,6 +59,14 @@ pub enum AgentMessage {
         #[serde(flatten)]
         data: NetworkStatusReportData,
     },
+    /// Reply to `MasterMessage::AdoptionScanRequest`. Lists every
+    /// `orca.managed=true` container on the agent so the master can adopt
+    /// orphans missing from its registry (#95).
+    AdoptionReport {
+        request_id: String,
+        #[serde(flatten)]
+        data: AdoptionReportData,
+    },
     /// PTY output chunk from a container exec session (base64-encoded bytes).
     ExecOutput { session_id: String, data: String },
     /// Exec session has ended.
@@ -97,6 +105,12 @@ pub enum MasterMessage {
     /// with `AgentMessage::NetworkStatusReport`. Mirrors the backup-status
     /// fan-out pattern.
     NetworkStatusRequest {
+        request_id: String,
+    },
+    /// Ask an agent to enumerate all its `orca.managed=true` containers and
+    /// respond with `AgentMessage::AdoptionReport` so the master can adopt
+    /// orphans into its registry (#95). Mirrors the network-status fan-out.
+    AdoptionScanRequest {
         request_id: String,
     },
     Ack {
@@ -153,6 +167,46 @@ pub struct NetworkStatusReportData {
     pub node_id: u64,
     pub hostname: String,
     pub networks: Vec<crate::api_types::DockerNetwork>,
+}
+
+/// Payload of `AgentMessage::AdoptionReport`. Lists the agent's
+/// `orca.managed=true` containers so the master's adoption reconciler can
+/// register any it doesn't already know about (#95).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdoptionReportData {
+    pub node_id: u64,
+    pub hostname: String,
+    pub containers: Vec<ManagedContainer>,
+}
+
+/// A single `orca.managed=true` container as seen by the agent, with the
+/// metadata needed to reconstruct a `ServiceConfig` for adoption — derived
+/// from the `orca.*` labels plus the container's image and state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManagedContainer {
+    /// Value of the `orca.service` label (the service name).
+    pub service_name: String,
+    /// Container image (from the Docker container summary).
+    pub image: String,
+    /// Docker container state, e.g. "running", "exited".
+    pub status: String,
+    /// Docker container id.
+    pub container_id: String,
+    /// `orca.port` label — the in-container port the service listens on.
+    #[serde(default)]
+    pub port: Option<u16>,
+    /// `orca.domain` label — the public hostname, if any.
+    #[serde(default)]
+    pub domain: Option<String>,
+    /// `orca.network` label — the bridge network the container joined.
+    #[serde(default)]
+    pub network: Option<String>,
+    /// `orca.routes` label — path-prefix routes, if any.
+    #[serde(default)]
+    pub routes: Vec<String>,
+    /// `orca.strip_prefix` label.
+    #[serde(default)]
+    pub strip_prefix: Option<String>,
 }
 
 /// Status of a single workload, reported by agent.
@@ -236,6 +290,54 @@ mod tests {
         assert!(json.contains("\"type\":\"deploy_received\""));
         let parsed: AgentMessage = serde_json::from_str(&json).unwrap();
         assert!(matches!(parsed, AgentMessage::DeployReceived { .. }));
+    }
+
+    #[test]
+    fn adoption_report_roundtrip() {
+        let msg = AgentMessage::AdoptionReport {
+            request_id: "req-9".into(),
+            data: AdoptionReportData {
+                node_id: 5,
+                hostname: "agent-1".into(),
+                containers: vec![ManagedContainer {
+                    service_name: "web".into(),
+                    image: "nginx:latest".into(),
+                    status: "running".into(),
+                    container_id: "abc123".into(),
+                    port: Some(80),
+                    domain: Some("web.example.com".into()),
+                    network: Some("orca-app".into()),
+                    routes: vec!["/api".into()],
+                    strip_prefix: None,
+                }],
+            },
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"type\":\"adoption_report\""));
+        // Flattened payload: node_id appears at the top level alongside `type`.
+        assert!(json.contains("\"node_id\":5"));
+        let back: AgentMessage = serde_json::from_str(&json).unwrap();
+        match back {
+            AgentMessage::AdoptionReport { request_id, data } => {
+                assert_eq!(request_id, "req-9");
+                assert_eq!(data.node_id, 5);
+                assert_eq!(data.containers.len(), 1);
+                assert_eq!(data.containers[0].service_name, "web");
+                assert_eq!(data.containers[0].port, Some(80));
+            }
+            _ => panic!("unexpected variant"),
+        }
+    }
+
+    #[test]
+    fn adoption_scan_request_roundtrip() {
+        let msg = MasterMessage::AdoptionScanRequest {
+            request_id: "req-9".into(),
+        };
+        let json = serde_json::to_string(&msg).unwrap();
+        assert!(json.contains("\"type\":\"adoption_scan_request\""));
+        let back: MasterMessage = serde_json::from_str(&json).unwrap();
+        assert!(matches!(back, MasterMessage::AdoptionScanRequest { .. }));
     }
 
     #[test]

@@ -3,6 +3,7 @@
 //! Replaces the HTTP heartbeat polling with a persistent WS connection.
 //! Falls back to HTTP heartbeat if WS connection fails.
 
+mod adoption;
 mod backup;
 mod backup_status;
 mod deploy;
@@ -25,6 +26,7 @@ use crate::ws_exec::ExecSessions;
 
 use crate::grpc::AgentClient;
 
+use adoption::send_adoption_report;
 use backup::run_agent_backup;
 use backup_status::send_backup_status;
 use deploy::deploy_and_report;
@@ -236,6 +238,12 @@ async fn handle_master_message(
             let tx = out_tx.clone();
             tokio::spawn(async move {
                 send_network_status(request_id, node_id, tx).await;
+            });
+        }
+        MasterMessage::AdoptionScanRequest { request_id } => {
+            let tx = out_tx.clone();
+            tokio::spawn(async move {
+                send_adoption_report(request_id, node_id, tx).await;
             });
         }
         MasterMessage::Ack { node_id } => {

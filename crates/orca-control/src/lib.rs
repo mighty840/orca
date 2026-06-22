@@ -1,3 +1,4 @@
+pub mod adoption;
 pub mod alerts;
 pub mod api;
 pub mod auth;
@@ -125,6 +126,9 @@ pub async fn run_server_with_acme(
     watchdog::spawn_watchdog(state.clone());
     health::spawn_health_checker(state.clone());
     stats::spawn_stats_collector(state.clone());
+    if adoption::spawn_adoption_reconciler(state.clone()) {
+        info!("Orphan-adoption reconciler started");
+    }
 
     // Spawn scheduled backup task if configured (needs state for agent dispatch).
     if let Some(backup_cfg) = cluster_config.backup.clone()

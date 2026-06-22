@@ -55,6 +55,15 @@ pub struct DeployConfig {
     /// Default 600s.
     #[serde(default = "default_deploy_completion_timeout")]
     pub completion_timeout_secs: u64,
+    /// Whether the master periodically scans connected agents for
+    /// `orca.managed=true` containers missing from its registry and adopts
+    /// them (#95) — the self-healing complement to the ACK split. Default
+    /// true; set false to disable auto-adoption.
+    #[serde(default = "default_adopt_orphans")]
+    pub adopt_orphans: bool,
+    /// Interval in seconds between orphan-adoption scans. Default 30.
+    #[serde(default = "default_adopt_interval")]
+    pub adopt_interval_secs: u64,
 }
 
 impl Default for DeployConfig {
@@ -62,6 +71,8 @@ impl Default for DeployConfig {
         Self {
             ack_timeout_secs: default_deploy_ack_timeout(),
             completion_timeout_secs: default_deploy_completion_timeout(),
+            adopt_orphans: default_adopt_orphans(),
+            adopt_interval_secs: default_adopt_interval(),
         }
     }
 }
@@ -72,6 +83,14 @@ fn default_deploy_ack_timeout() -> u64 {
 
 fn default_deploy_completion_timeout() -> u64 {
     600
+}
+
+fn default_adopt_orphans() -> bool {
+    true
+}
+
+fn default_adopt_interval() -> u64 {
+    30
 }
 
 /// Fallback proxy configuration. When orca's route table has no match,

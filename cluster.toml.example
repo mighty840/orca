@@ -33,6 +33,8 @@ log_level = "info"
 # [deploy]
 # ack_timeout_secs = 10         # agent must acknowledge receipt this fast (else: unreachable)
 # completion_timeout_secs = 600 # agent has this long to finish the pull + start the container
+# adopt_orphans = true          # periodically adopt orca.managed containers missing from the registry
+# adopt_interval_secs = 30      # how often to scan agents for orphans
 
 # -- AI Operations Assistant --
 # Enables: `orca ask`, conversational alerts, smart import analysis, log summarization.
