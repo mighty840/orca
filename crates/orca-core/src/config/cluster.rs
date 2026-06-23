@@ -39,6 +39,77 @@ pub struct ClusterConfig {
     /// continuously applies declared services (K8s-style), no manual deploy.
     #[serde(default)]
     pub reconcile: Option<ReconcileConfig>,
+    /// Baseline security response headers the proxy injects. Add-if-absent, so
+    /// a backend's own headers always win. Unset = on with a safe default set
+    /// (HSTS on HTTPS + nosniff + Referrer-Policy); see [`SecurityHeadersConfig`].
+    #[serde(default)]
+    pub security_headers: Option<SecurityHeadersConfig>,
+}
+
+/// Security response headers the proxy adds to every response it returns —
+/// **add-if-absent**, so a backend that sets its own `Content-Security-Policy`,
+/// `X-Frame-Options`, `Strict-Transport-Security`, etc. is never overridden
+/// (pass-through-plus-defaults, as Traefik/Caddy do). HSTS is applied only to
+/// HTTPS responses. The defaults are deliberately non-breaking; `X-Frame-Options`
+/// and CSP are off by default (they break iframe-embedded apps and most apps
+/// respectively) and are opt-in here or per app.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityHeadersConfig {
+    /// Master switch. Default true.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// `Strict-Transport-Security` value (HTTPS responses only). Empty disables
+    /// HSTS. Default `max-age=31536000` (1y, no `includeSubDomains`/`preload`).
+    #[serde(default = "default_hsts")]
+    pub hsts: String,
+    /// `X-Content-Type-Options` value. Empty disables. Default `nosniff`.
+    #[serde(default = "default_nosniff")]
+    pub content_type_options: String,
+    /// `Referrer-Policy` value. Empty disables. Default
+    /// `strict-origin-when-cross-origin`.
+    #[serde(default = "default_referrer_policy")]
+    pub referrer_policy: String,
+    /// `X-Frame-Options` value. Empty (default) = off — leave it to apps, since
+    /// `SAMEORIGIN`/`DENY` break services meant to be embedded in an iframe.
+    #[serde(default)]
+    pub frame_options: String,
+    /// `Content-Security-Policy` value. Empty (default) = off — a blanket CSP
+    /// breaks most apps; set per app instead.
+    #[serde(default)]
+    pub csp: String,
+    /// Arbitrary extra response headers to add-if-absent (name → value).
+    #[serde(default)]
+    pub extra: std::collections::HashMap<String, String>,
+}
+
+impl Default for SecurityHeadersConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            hsts: default_hsts(),
+            content_type_options: default_nosniff(),
+            referrer_policy: default_referrer_policy(),
+            frame_options: String::new(),
+            csp: String::new(),
+            extra: std::collections::HashMap::new(),
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_hsts() -> String {
+    "max-age=31536000".to_string()
+}
+
+fn default_nosniff() -> String {
+    "nosniff".to_string()
+}
+
+fn default_referrer_policy() -> String {
+    "strict-origin-when-cross-origin".to_string()
 }
 
 /// Declarative-reconciliation configuration. When `config_dir` is set, the

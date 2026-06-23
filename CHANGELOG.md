@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.11-rc.5] - 2026-06-22
+## [0.2.11-rc.6] - 2026-06-23
+
+### Added
+
+- **Proxy injects baseline security response headers (on by default, apps override).** The proxy now adds a safe set of security headers to every response it serves — `Strict-Transport-Security` (HTTPS only), `X-Content-Type-Options: nosniff`, and `Referrer-Policy: strict-origin-when-cross-origin` — so every service gets them centrally instead of each app reimplementing them. It's **add-if-absent**: a backend that already sets a header keeps its own value, so apps override the defaults just by sending the header (pass-through-plus-defaults, like Traefik/Caddy). `X-Frame-Options` and `Content-Security-Policy` are **off by default** — `X-Frame-Options` breaks iframe-embedded apps (Jitsi/Element/Collabora) and a blanket CSP breaks most apps, so CSP is left to individual apps. Configurable via a new `[security_headers]` block in `cluster.toml` (`enabled`, `hsts`, `content_type_options`, `referrer_policy`, `frame_options`, `csp`, and an `extra` map for arbitrary add-if-absent headers); `enabled = false` turns it off. The agent's node-local proxy applies the default-on set too. Applies uniformly to forwarded responses, the HTTP→HTTPS redirect, and the branded fallback page.
 
 ### Fixed
 

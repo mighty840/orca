@@ -226,6 +226,11 @@ async fn spawn_local_proxy(
         .map(|r| r.domain)
         .collect();
 
+    // The agent's local proxy serves node-local domains directly, so it also
+    // injects the security-header policy. The agent has no cluster.toml, so it
+    // uses the default-on safe set (matches the master's defaults).
+    orca_proxy::init_security_headers(None);
+
     let acme_for_proxy = acme.clone();
     let routes_for_proxy = route_table.clone();
     let triggers_for_proxy = triggers.clone();
