@@ -65,6 +65,18 @@ adopt_interval_secs = 30       # how often to scan agents for orphans
 [reconcile]
 config_dir = "services"        # dir of <project>/service.toml files (or a single services.toml)
 interval_secs = 30             # how often to re-apply
+
+# Security response headers the proxy injects. On by default — omit this block
+# to get the safe set below. Headers are add-if-absent, so an app that sets its
+# own value always wins.
+[security_headers]
+enabled = true
+hsts = "max-age=31536000"                       # HTTPS only; "" to disable; add "; includeSubDomains; preload" if you want it
+content_type_options = "nosniff"
+referrer_policy = "strict-origin-when-cross-origin"
+frame_options = ""                              # off by default (SAMEORIGIN/DENY breaks iframe-embedded apps)
+csp = ""                                        # off by default — set Content-Security-Policy per app
+# extra = { "Permissions-Policy" = "geolocation=()" }   # arbitrary add-if-absent headers
 ```
 
 The `[deploy]` wait is two-phase — a short *receipt* ack distinguishes an
@@ -73,6 +85,16 @@ surfaces the agent's real pull error instead of a bare timeout. `[reconcile]`
 applies only new or changed services each pass; unchanged services are left
 untouched and removed ones are not auto-pruned. See
 [Self-healing](/reference/self-healing).
+
+`[security_headers]` makes the proxy add a baseline set of security headers
+(`Strict-Transport-Security` on HTTPS, `X-Content-Type-Options`,
+`Referrer-Policy`) to every response — once, centrally, instead of per app. It's
+**add-if-absent**: a backend that already sets a header keeps its own value
+(apps override the defaults just by sending the header). `X-Frame-Options` and
+`Content-Security-Policy` are off by default — `X-Frame-Options` breaks apps
+meant to be embedded in an iframe (Jitsi, Element, Collabora), and a blanket CSP
+breaks most apps, so set CSP per app. Set `enabled = false` to turn it off
+entirely. The agent's node-local proxy uses the default-on set.
 
 ## service.toml
 

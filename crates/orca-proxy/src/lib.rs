@@ -11,11 +11,15 @@ mod forward;
 mod handler;
 pub mod rate_limit;
 mod routing;
+mod security_headers;
 pub mod sni;
 pub mod tls;
 mod websocket;
 
-pub use orca_core::config::FallbackConfig;
+pub use orca_core::config::{FallbackConfig, SecurityHeadersConfig};
+/// Install the proxy's security-header policy (call once at startup). See
+/// [`security_headers`].
+pub use security_headers::init as init_security_headers;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -371,7 +375,7 @@ pub(crate) async fn serve_loop_with_fallback(
                     if let Some(resp) = handle_acme_challenge(&req, acme.as_deref()).await {
                         return Ok(resp);
                     }
-                    handle_request(
+                    let mut resp = handle_request(
                         req,
                         &routes,
                         &triggers,
@@ -383,7 +387,11 @@ pub(crate) async fn serve_loop_with_fallback(
                         peer,
                         fb.as_ref().as_ref(),
                     )
-                    .await
+                    .await?;
+                    // Inject baseline security headers (add-if-absent; HSTS only
+                    // over TLS). No-op unless a policy was installed at startup.
+                    security_headers::apply(&mut resp, is_tls);
+                    Ok::<_, hyper::Error>(resp)
                 }
             });
             if let Some(acceptor) = tls {

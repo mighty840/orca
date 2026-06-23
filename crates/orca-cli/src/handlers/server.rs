@@ -98,6 +98,11 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
         domains.len()
     );
 
+    // Install the proxy's security-header policy before serving (default-on
+    // safe set — HSTS on HTTPS, nosniff, Referrer-Policy; backend-set headers
+    // always win). Configurable via `[security_headers]` in cluster.toml.
+    orca_proxy::init_security_headers(cluster_config.security_headers.clone());
+
     // Start proxy and get ACME components for hot cert provisioning
     let proxy_routes = route_table.clone();
     let proxy_triggers = wasm_triggers.clone();
