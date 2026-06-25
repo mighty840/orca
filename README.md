@@ -73,12 +73,14 @@ orca deploy && orca status
 
 ## What's New in v0.2.11
 
-- **Reliable deploys of large images** -- the remote-deploy ack is split into a fast *receipt* ack and a long *completion* wait, so a multi-GB first-time pull no longer hits a bogus 30s timeout, and the agent's real `image not found` / pull error reaches the operator instead of a bare timeout (#88, #94).
-- **Self-healing orphan adoption** -- the master periodically scans agents for `orca.managed` containers missing from its registry and re-registers them, so a container left running by a mid-deploy restart shows up in `orca status` automatically instead of needing a manual `docker rm -f` (#95).
-- **Multiple domains per service** -- `domains = ["a.com", "b.com"]` serves one container on several hostnames, each with its own cert + route. No more duplicating the `[[service]]` block (which spawned a redundant container) for apex+www or dual-TLD migrations (#93).
+- **Declarative reconciliation (K8s-style)** -- point `[reconcile].config_dir` at a folder of `service.toml` files and the master continuously converges the cluster to it: new/changed services are applied and removed ones are pruned, so bringing up or retiring a service is just editing config -- no manual `orca deploy`.
+- **`stop` pauses, `orca start` resumes** -- `orca stop` keeps the service defined as a persisted `paused` state (it stays in `orca status`, survives a restart, isn't auto-restarted); `orca start` brings it back. Retiring a service is now just removing it from `service.toml`.
+- **Security headers at the proxy** -- a safe baseline (`HSTS`, `nosniff`, `Referrer-Policy`) is added to every response, on by default and *add-if-absent* so apps override just by sending their own. `X-Frame-Options`/CSP are off by default (configurable via `[security_headers]`).
+- **Branded fallback page** -- unrouted hosts get a self-contained, docs-themed page (404 unknown host / 503 no healthy backend) instead of a bare `no service for host` string.
+- **Multiple domains per service** -- `domains = ["a.com", "b.com"]` serves one container on several hostnames, each with its own cert + route -- no more duplicating the `[[service]]` block (#93).
 - **`orca status` explains failures, K8s-style** -- degraded/stopped services show *why*: classified deploy errors (`ImagePullError`, `DeployTimeout`, …) and runtime crashes (`CrashLoopBackOff`) with exit code, restart count, and a `docker logs` tail.
-- **Declarative reconciliation** -- point `[reconcile].config_dir` at a folder of `service.toml` files and the master continuously applies new/changed services, no manual `orca deploy`.
-- **Large uploads through the proxy** -- registry blob pushes >2 GB no longer die mid-transfer; the proxy uses an inactivity timeout instead of a total request deadline.
+- **Self-healing orphan adoption** -- the master re-registers `orca.managed` containers missing from its registry, so a container left by a mid-deploy restart shows up in `orca status` automatically (#95).
+- **Reliable large deploys & uploads through the proxy** -- multi-GB image pulls no longer hit a bogus 30s timeout (split receipt/completion ack, #88/#94), registry blob pushes >2 GB stream through (inactivity timeout), and empty-body POSTs / app logins behind the proxy work.
 
 See [CHANGELOG.md](CHANGELOG.md) for the full history.
 
