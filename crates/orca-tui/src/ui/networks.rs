@@ -5,10 +5,7 @@
 //!   3. Unreachable agents are listed with a placeholder so the operator
 //!      sees who didn't respond.
 //!
-//! The original issue (#17) calls for an ASCII routing graph rendered with
-//! ratatui's canvas widget. This view delivers the data acceptance criteria
-//! (per-node, per-bridge, services + aliases) as a tree-list; the graph
-//! rendering is a follow-up.
+//! Renders the cluster topology as ASCII art with hierarchical indentation.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
@@ -28,7 +25,7 @@ pub fn rendered_line_count(state: &AppState) -> usize {
     };
     let mut lines: Vec<Line> = Vec::new();
     for node in &resp.nodes {
-        render_node(node, &mut lines);
+        render_node_ascii(node, &mut lines);
         lines.push(Line::from(""));
     }
     lines.len()
@@ -52,7 +49,7 @@ pub fn draw_networks(f: &mut Frame, area: Rect, state: &AppState) {
 
     let mut lines: Vec<Line> = Vec::new();
     for node in &resp.nodes {
-        render_node(node, &mut lines);
+        render_node_ascii(node, &mut lines);
         lines.push(Line::from(""));
     }
 
@@ -84,7 +81,7 @@ pub fn draw_networks(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(Paragraph::new(view).block(block), area);
 }
 
-fn render_node(node: &NodeNetworks, out: &mut Vec<Line>) {
+fn render_node_ascii(node: &NodeNetworks, out: &mut Vec<Line>) {
     let role = match node.role {
         NodeRole::Master => "master",
         NodeRole::Agent => "agent",
@@ -108,40 +105,46 @@ fn render_node(node: &NodeNetworks, out: &mut Vec<Line>) {
         return;
     }
 
-    // Public edge section.
+    // Public edge section - render as ASCII art
     if !node.domains.is_empty() {
         out.push(section_line("Public edge"));
-        for d in &node.domains {
-            let mut spans = vec![
+        for (i, d) in node.domains.iter().enumerate() {
+            let is_last = i == node.domains.len() - 1;
+            let prefix = if is_last { "└─ " } else { "├─ " };
+
+            let spans = vec![
                 Span::raw("    "),
+                Span::styled(prefix.to_string(), Style::default().fg(Color::DarkGray)),
                 Span::styled(d.domain.clone(), Style::default().fg(Color::White)),
-                Span::styled(" → ", Style::default().fg(Color::DarkGray)),
-                Span::raw(d.service.clone()),
+                Span::styled("  [A: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    d.resolved_ip.as_ref().map_or("?".to_string(), Clone::clone),
+                    Style::default().fg(if d.resolved_ip.is_some() {
+                        Color::DarkGray
+                    } else {
+                        Color::Yellow
+                    }),
+                ),
+                Span::styled("]", Style::default().fg(Color::DarkGray)),
             ];
-            // Show the resolved A-record next to the domain. `?` when DNS
-            // didn't answer within the dashboard timeout — operators read
-            // that as "I should look at why this name doesn't resolve."
-            let (ip, ip_color) = match &d.resolved_ip {
-                Some(ip) => (ip.clone(), Color::DarkGray),
-                None => ("?".to_string(), Color::Yellow),
-            };
-            spans.push(Span::styled(
-                format!("  [A: {ip}]"),
-                Style::default().fg(ip_color),
-            ));
+
             out.push(Line::from(spans));
         }
     }
 
-    // Bridge networks.
+    // Bridge networks - render as ASCII art
     if node.networks.is_empty() {
         out.push(dim_line("    (no orca-* bridge networks on this node)"));
         return;
     }
     out.push(section_line("Docker networks"));
-    for net in &node.networks {
+    for (net_idx, net) in node.networks.iter().enumerate() {
+        let is_last_net = net_idx == node.networks.len() - 1;
+        let net_prefix = if is_last_net { "└─ " } else { "├─ " };
+
         let net_header = format!(
-            "    {} ({} service{})",
+            "    {}{} ({} service{})",
+            net_prefix,
             net.name,
             net.services.len(),
             plural(net.services.len())
@@ -152,11 +155,25 @@ fn render_node(node: &NodeNetworks, out: &mut Vec<Line>) {
                 .fg(Color::Magenta)
                 .add_modifier(Modifier::BOLD),
         )]));
+
         if net.services.is_empty() {
             out.push(dim_line("        (no containers attached)"));
             continue;
         }
-        for svc in &net.services {
+
+        // Render services with proper indentation
+        for (svc_idx, svc) in net.services.iter().enumerate() {
+            let is_last_svc = svc_idx == net.services.len() - 1;
+            let svc_prefix = if is_last_net {
+                if is_last_svc { "    " } else { "│   " }
+            } else {
+                if is_last_svc {
+                    "└── "
+                } else {
+                    "├── "
+                }
+            };
+
             let aliases = if svc.aliases.is_empty() {
                 "(no aliases)".to_string()
             } else {
@@ -167,19 +184,35 @@ fn render_node(node: &NodeNetworks, out: &mut Vec<Line>) {
             } else {
                 Color::Green
             };
-            out.push(Line::from(vec![
+
+            let mut line_parts = vec![
                 Span::raw("        "),
+                Span::styled(svc_prefix.to_string(), Style::default().fg(Color::DarkGray)),
                 Span::raw(svc.name.clone()),
-                Span::styled("  aliases: ", Style::default().fg(Color::DarkGray)),
-                Span::styled(aliases, Style::default().fg(alias_color)),
-            ]));
-            // Missing-alias warning row. Drawn red so it pops in the green
-            // sea of aliases — this is the row that means "something
-            // references me by a name that won't resolve."
+            ];
+
+            // Add aliases
+            if !svc.aliases.is_empty() {
+                line_parts.push(Span::styled(
+                    "  aliases: ",
+                    Style::default().fg(Color::DarkGray),
+                ));
+                line_parts.push(Span::styled(aliases, Style::default().fg(alias_color)));
+            }
+            out.push(Line::from(line_parts));
+
+            // Missing-alias warning row
             if !svc.missing_aliases.is_empty() {
                 let names = svc.missing_aliases.join(", ");
+                let warning_prefix = if is_last_svc {
+                    "        "
+                } else {
+                    "│       "
+                };
+
                 out.push(Line::from(vec![
-                    Span::raw("          "),
+                    Span::raw("        "),
+                    Span::styled(warning_prefix, Style::default().fg(Color::DarkGray)),
                     Span::styled(
                         "⚠ referenced as: ",
                         Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
