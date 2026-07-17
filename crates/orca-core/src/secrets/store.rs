@@ -233,9 +233,32 @@ impl SecretStore {
 
     /// Replace `${secrets.KEY}` patterns in env-var values with actual secret values.
     pub fn resolve_env(&self, env: &HashMap<String, String>) -> HashMap<String, String> {
+        self.resolve_env_scoped(env, None)
+    }
+
+    /// Like [`Self::resolve_env`], but with project-first resolution (#68):
+    /// for a service in project `p`, `${secrets.KEY}` resolves `p.KEY`
+    /// before falling back to the bare `KEY`. Explicit cross-project refs
+    /// (`${secrets.other.KEY}`) keep working — the prefixed form is looked
+    /// up as written after the project-qualified attempt misses.
+    pub fn resolve_env_scoped(
+        &self,
+        env: &HashMap<String, String>,
+        project: Option<&str>,
+    ) -> HashMap<String, String> {
         env.iter()
-            .map(|(k, v)| (k.clone(), self.resolve_value(v)))
+            .map(|(k, v)| (k.clone(), self.resolve_value(v, project)))
             .collect()
+    }
+
+    /// Look a reference key up project-first, then bare.
+    fn lookup_scoped(&self, key: &str, project: Option<&str>) -> Option<&String> {
+        if let Some(p) = project
+            && let Some(v) = self.secrets.get(&format!("{p}.{key}"))
+        {
+            return Some(v);
+        }
+        self.secrets.get(key)
     }
 
     /// Persist secrets to disk with restrictive permissions.
@@ -269,7 +292,7 @@ impl SecretStore {
     }
 
     /// Resolve `${secrets.KEY}` patterns in a single string value.
-    fn resolve_value(&self, value: &str) -> String {
+    fn resolve_value(&self, value: &str, project: Option<&str>) -> String {
         let mut result = value.to_string();
         let mut search_from = 0;
         while let Some(start) = result[search_from..].find("${secrets.") {
@@ -279,7 +302,7 @@ impl SecretStore {
                 break;
             };
             let key = result[after_prefix..after_prefix + end].to_string();
-            if let Some(secret_value) = self.secrets.get(&key) {
+            if let Some(secret_value) = self.lookup_scoped(&key, project) {
                 result = format!(
                     "{}{}{}",
                     &result[..abs_start],

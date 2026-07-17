@@ -4,6 +4,15 @@
 
 use crate::commands::SecretsAction;
 
+/// Build the stored key for an optionally project-scoped secret (#68):
+/// `<project>.<key>` when scoped, the bare key otherwise.
+fn scoped_key(key: &str, project: Option<&str>) -> String {
+    match project {
+        Some(p) => format!("{p}.{key}"),
+        None => key.to_string(),
+    }
+}
+
 fn open_secrets() -> orca_core::secrets::SecretStore {
     orca_core::secrets::open_configured().unwrap_or_else(|e| {
         tracing::error!("Failed to open secrets store: {e}");
@@ -21,14 +30,26 @@ pub fn handle_secrets(action: SecretsAction) {
         let _ = orca_core::config::ClusterConfig::load(cluster_toml);
     }
     match action {
-        SecretsAction::Set { key, value } => {
+        SecretsAction::Set {
+            key,
+            value,
+            project,
+        } => {
+            let key = scoped_key(&key, project.as_deref());
             let mut store = open_secrets();
             store.set(&key, &value).expect("failed to set secret");
             println!("Secret '{key}' set.");
         }
-        SecretsAction::Get { key } => {
+        SecretsAction::Get { key, project } => {
             let store = open_secrets();
-            match store.get(&key) {
+            // Project-first lookup mirrors deploy-time resolution: the
+            // scoped variant wins, the bare key is the fallback.
+            let scoped = project.as_deref().map(|p| format!("{p}.{key}"));
+            let hit = scoped
+                .as_deref()
+                .and_then(|k| store.get(k))
+                .or_else(|| store.get(&key));
+            match hit {
                 Some(value) => println!("{value}"),
                 None => {
                     eprintln!("Secret '{key}' not found.");
@@ -36,7 +57,8 @@ pub fn handle_secrets(action: SecretsAction) {
                 }
             }
         }
-        SecretsAction::Remove { key } => {
+        SecretsAction::Remove { key, project } => {
+            let key = scoped_key(&key, project.as_deref());
             let mut store = open_secrets();
             match store.remove(&key) {
                 Ok(true) => println!("Secret '{key}' removed."),
@@ -49,10 +71,33 @@ pub fn handle_secrets(action: SecretsAction) {
             let keys = store.list();
             if keys.is_empty() {
                 println!("No secrets configured.");
-            } else {
-                for key in keys {
+                return;
+            }
+            // Group by scope prefix: `<project>.<key>` under its project,
+            // everything else under (global). Purely cosmetic — the store
+            // is flat and dots in legacy global keys just group oddly.
+            let (mut global, mut scoped): (Vec<&String>, Vec<&String>) = (vec![], vec![]);
+            for k in &keys {
+                if k.contains('.') {
+                    scoped.push(k);
+                } else {
+                    global.push(k);
+                }
+            }
+            if !global.is_empty() {
+                println!("(global)");
+                for key in global {
                     println!("  {key}");
                 }
+            }
+            let mut last_scope = "";
+            for key in scoped {
+                let (scope, name) = key.split_once('.').expect("filtered on '.'");
+                if scope != last_scope {
+                    println!("{scope}:");
+                    last_scope = scope;
+                }
+                println!("  {name}");
             }
         }
         SecretsAction::Import { file } => {

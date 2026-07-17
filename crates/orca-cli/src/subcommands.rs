@@ -29,13 +29,22 @@ pub enum SecretsAction {
     Set {
         key: String,
         value: String,
+        /// Scope the secret to a project (stored as `<project>.<key>`, #68).
+        #[arg(short, long)]
+        project: Option<String>,
     },
     /// Print a secret value to stdout.
     Get {
         key: String,
+        /// Look the key up in a project scope first.
+        #[arg(short, long)]
+        project: Option<String>,
     },
     Remove {
         key: String,
+        /// Remove the project-scoped variant (`<project>.<key>`).
+        #[arg(short, long)]
+        project: Option<String>,
     },
     List,
     Import {

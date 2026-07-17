@@ -7,10 +7,15 @@ use tracing::info;
 use orca_core::config::ServiceConfig;
 use orca_core::types::{DeployKind, HealthState, WorkloadSpec, WorkloadStatus};
 
-/// Resolve `${secrets.KEY}` patterns in env vars using the local secrets store.
-fn resolve_secrets(env: &HashMap<String, String>) -> HashMap<String, String> {
+/// Resolve `${secrets.KEY}` patterns in env vars using the configured
+/// secrets store. Project-scoped keys (`<project>.KEY`, #68) win over
+/// bare global keys for services that belong to a project.
+fn resolve_secrets(
+    env: &HashMap<String, String>,
+    project: Option<&str>,
+) -> HashMap<String, String> {
     match orca_core::secrets::open_configured() {
-        Ok(store) => store.resolve_env(env),
+        Ok(store) => store.resolve_env_scoped(env, project),
         Err(_) => env.clone(),
     }
 }
@@ -173,7 +178,7 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
         health: config.health.clone(),
         readiness: config.readiness.clone(),
         liveness: config.liveness.clone(),
-        env: resolve_secrets(&config.env),
+        env: resolve_secrets(&config.env, config.project.as_deref()),
         resources: config.resources.clone(),
         volume: config.volume.clone(),
         deploy: config.deploy.clone(),

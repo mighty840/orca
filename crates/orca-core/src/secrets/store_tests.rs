@@ -143,3 +143,46 @@ fn test_xor_migration() {
     let store2 = SecretStore::open_with_key(&path, &key_path).unwrap();
     assert_eq!(store2.get("OLD_KEY"), Some("my-legacy-secret"));
 }
+
+/// Project-scoped resolution (#68): `<project>.KEY` wins over bare `KEY`
+/// for services in that project; everything else falls back to global.
+#[test]
+fn project_scoped_resolution_order() {
+    let (mut store, _dir) = temp_store();
+    store.set("db_url", "global-url").unwrap();
+    store.set("inka.db_url", "inka-url").unwrap();
+    store.set("only_global", "shared").unwrap();
+    store.set("kitchenasty.only_scoped", "ka-secret").unwrap();
+
+    let env = std::collections::HashMap::from([
+        ("URL".to_string(), "${secrets.db_url}".to_string()),
+        ("SHARED".to_string(), "${secrets.only_global}".to_string()),
+    ]);
+
+    // In project `inka`, the scoped variant wins; globals still resolve.
+    let inka = store.resolve_env_scoped(&env, Some("inka"));
+    assert_eq!(inka["URL"], "inka-url");
+    assert_eq!(inka["SHARED"], "shared");
+
+    // A project without a scoped variant falls back to the global key.
+    let other = store.resolve_env_scoped(&env, Some("kitchenasty"));
+    assert_eq!(other["URL"], "global-url");
+
+    // No project context (cluster.toml fields): bare keys only.
+    let none = store.resolve_env_scoped(&env, None);
+    assert_eq!(none["URL"], "global-url");
+
+    // Explicit cross-project refs keep working as written.
+    let cross = std::collections::HashMap::from([(
+        "X".to_string(),
+        "${secrets.kitchenasty.only_scoped}".to_string(),
+    )]);
+    let resolved = store.resolve_env_scoped(&cross, Some("inka"));
+    assert_eq!(resolved["X"], "ka-secret");
+
+    // A scoped-only key does NOT leak into the bare form.
+    let bare =
+        std::collections::HashMap::from([("X".to_string(), "${secrets.only_scoped}".to_string())]);
+    let unresolved = store.resolve_env_scoped(&bare, None);
+    assert_eq!(unresolved["X"], "${secrets.only_scoped}");
+}

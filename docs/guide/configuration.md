@@ -212,6 +212,21 @@ orca secrets migrate                  # move legacy local store → encrypted fi
 The CLI uses the encrypted backend when run from the directory containing
 cluster.toml (offline/recovery access included — no running master needed).
 
+### Project-scoped secrets
+
+Secrets can be scoped to a project with a `<project>.<key>` prefix. For a
+service in project `p`, `${secrets.KEY}` resolves `p.KEY` first and falls
+back to the bare global `KEY` — so a project can override a shared default
+without leaking its value to other projects. Explicit cross-project
+references (`${secrets.other.KEY}`) resolve as written.
+
+```bash
+orca secrets set --project inka db_password "s3cret"   # stored as inka.db_password
+orca secrets get --project inka db_password            # scoped first, global fallback
+orca secrets remove --project inka db_password
+orca secrets list                                      # grouped by scope
+```
+
 `${secrets.X}` is resolved both in `service.toml` (any string field, including
 `env` values) and in selected `cluster.toml` fields:
 
