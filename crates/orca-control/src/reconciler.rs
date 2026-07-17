@@ -101,7 +101,7 @@ pub(crate) async fn reconcile_service(
     }
 
     // Check if placement targets a specific remote node
-    if let Some(target_node_id) = find_target_node(state, config).await {
+    if let Some(target_node_id) = find_target_node(state, config).await? {
         // Record the declared spec + a placeholder instance on the master
         // BEFORE dispatching the deploy. `orca status` then shows the
         // remote-scheduled workload (placeholder optimistically Running so the
@@ -358,26 +358,39 @@ pub(crate) async fn reconcile_service(
 }
 
 /// Find a registered node matching the service's placement constraint.
-/// Returns `None` if no placement node is set or no matching node is found.
-async fn find_target_node(state: &AppState, config: &ServiceConfig) -> Option<u64> {
-    let placement = config.placement.as_ref()?;
-    let target = placement.node.as_ref()?;
+///
+/// Returns `Ok(None)` if no placement node is set or no node matches (the
+/// master itself is not in `registered_nodes`, so master-pinned services
+/// resolve to `None` and deploy locally). Errors when the pin matches more
+/// than one node (#124) — never schedule on an arbitrary winner.
+async fn find_target_node(state: &AppState, config: &ServiceConfig) -> anyhow::Result<Option<u64>> {
+    let Some(target) = config.placement.as_ref().and_then(|p| p.node.as_ref()) else {
+        return Ok(None);
+    };
     let nodes = state.registered_nodes.read().await;
-    for node in nodes.values() {
-        if node.drain {
-            continue;
-        }
-        if node.address.contains(target.as_str()) || target == &node.node_id.to_string() {
-            return Some(node.node_id);
-        }
-        // Check hostname label
-        if let Some(hostname) = node.labels.get("hostname")
-            && hostname == target
-        {
-            return Some(node.node_id);
+    match crate::placement::resolve_placement(&nodes, target) {
+        crate::placement::PlacementResolution::Node(id) => Ok(Some(id)),
+        crate::placement::PlacementResolution::NoMatch => Ok(None),
+        crate::placement::PlacementResolution::Ambiguous(ids) => {
+            let described: Vec<String> = ids
+                .iter()
+                .filter_map(|id| nodes.get(id))
+                .map(|n| format!("{} ({})", n.node_id, n.address))
+                .collect();
+            tracing::error!(
+                service = %config.name,
+                pin = %target,
+                nodes = ?described,
+                "placement pin matches multiple nodes — refusing to schedule (#124)"
+            );
+            anyhow::bail!(
+                "placement pin {target:?} for service {:?} matches multiple nodes: {} — \
+                 refusing to schedule; make the pin unique (node id, full address, or hostname)",
+                config.name,
+                described.join(", "),
+            )
         }
     }
-    None
 }
 
 /// Send a deploy command to a remote agent node and await the result.
