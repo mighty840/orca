@@ -13,6 +13,7 @@ use orca_core::types::{HealthState, Replicas, WorkloadStatus};
 use crate::stats::ContainerStats;
 use crate::webhook::WebhookStore;
 
+pub use crate::session::AgentSession;
 pub use orca_proxy::{RouteTarget, SharedWasmTriggers, WasmTrigger};
 
 /// Shared route table type, compatible with [`orca_proxy::run_proxy`].
@@ -51,8 +52,11 @@ pub struct AppState {
     pub container_stats: RwLock<HashMap<String, ContainerStats>>,
     /// Persistent cluster store (redb). None in tests without persistence.
     pub store: Option<Arc<crate::store::ClusterStore>>,
-    /// WebSocket senders for connected agent nodes, keyed by node_id.
-    pub ws_agents: RwLock<HashMap<u64, crate::ws_handler::AgentSender>>,
+    /// Control sessions for connected agent nodes, keyed by node_id (#131).
+    /// Presence in this map is the master's definition of "reachable" — a
+    /// session that stops producing traffic is torn down by the read-idle
+    /// deadline in `ws_handler`, so entries here are live by construction.
+    pub ws_agents: RwLock<HashMap<u64, AgentSession>>,
     /// Log stream listeners: request_id → (data, done) sender.
     pub log_listeners: RwLock<HashMap<String, tokio::sync::mpsc::Sender<(String, bool)>>>,
     /// Backup status listeners: request_id → report sender. Used by the

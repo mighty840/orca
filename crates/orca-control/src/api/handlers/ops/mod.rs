@@ -169,7 +169,11 @@ mod tests {
 
         // Register a fake WS sender for the agent.
         let (agent_tx, mut agent_rx) = tokio::sync::mpsc::channel::<MasterMessage>(4);
-        state.ws_agents.write().await.insert(node_id, agent_tx);
+        state
+            .ws_agents
+            .write()
+            .await
+            .insert(node_id, crate::state::AgentSession::new(agent_tx));
 
         // Spawn a task that simulates the agent responding with log chunks.
         let state_clone = state.clone();

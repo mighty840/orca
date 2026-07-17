@@ -427,8 +427,16 @@ async fn queue_remote_deploy(
         }
         Err(_) => {
             clear_pending_deploy(state, &spec.name).await;
+            // A missed receipt-ACK is proof the control session is dead
+            // (#131): the agent ACKs instantly when the channel works. Tear
+            // the session down so the node stops looking reachable and
+            // subsequent deploys fail fast with the real story — instead of
+            // every deploy re-timing-out against the same zombie tx for
+            // days. The agent's own idle deadline triggers its reconnect;
+            // a truly-gone node is stale-pruned 60s later.
+            crate::ws_handler::kill_agent_session(state, node_id, "deploy ACK timeout").await;
             anyhow::bail!(
-                "agent {node_id} did not acknowledge deploy of {} within {}s — agent may be unreachable or the WS session is dead",
+                "agent {node_id} did not acknowledge deploy of {} within {}s — control                  session closed; node is unreachable until it rejoins",
                 spec.name,
                 ack_timeout.as_secs()
             );

@@ -39,6 +39,26 @@ pub struct WsQuery {
 /// Per-node sender so the master can push messages to a connected agent.
 pub type AgentSender = mpsc::Sender<MasterMessage>;
 
+/// Tear down a node's control session immediately (#131): remove it from
+/// the session map (so the node stops looking reachable NOW), wake its
+/// read loop so the task exits, and drop the node's remote placeholders
+/// (so status stops reporting last-known state as current). Used when the
+/// session is proven dead — e.g. a deploy ACK timeout. The agent's own
+/// read-idle deadline triggers its reconnect; a truly-gone node is
+/// stale-pruned 60s later.
+pub(crate) async fn kill_agent_session(state: &AppState, node_id: u64, reason: &str) {
+    let session = state.ws_agents.write().await.remove(&node_id);
+    let Some(session) = session else { return };
+    warn!(
+        node_id,
+        session_id = session.session_id,
+        reason,
+        "killing agent control session"
+    );
+    session.shutdown.notify_waiters();
+    remove_remote_placeholders(state, node_id).await;
+}
+
 /// Handle the WebSocket upgrade request.
 ///
 /// Authenticates via the `token` query param, then upgrades to a
@@ -80,13 +100,26 @@ async fn handle_agent_ws(
     // Channel for master → agent messages (deploy commands, log requests, etc.)
     let (tx, mut rx) = mpsc::channel::<MasterMessage>(64);
 
-    // Register this agent's sender so other parts of the system can push messages.
+    // Register this session. A reconnect from the same node supersedes the
+    // old session (#131): wake its read loop so it tears down immediately —
+    // its generation-guarded cleanup can't touch our fresh entry.
+    let session = crate::state::AgentSession::new(tx.clone());
+    let session_id = session.session_id;
+    let shutdown = session.shutdown.clone();
     {
         let mut senders = state.ws_agents.write().await;
-        senders.insert(node_id, tx.clone());
+        if let Some(old) = senders.insert(node_id, session) {
+            info!(
+                node_id,
+                old_session = old.session_id,
+                new_session = session_id,
+                "agent reconnected — superseding previous control session"
+            );
+            old.shutdown.notify_waiters();
+        }
     }
 
-    info!("Agent {node_id} connected via WebSocket");
+    info!("Agent {node_id} connected via WebSocket (session {session_id})");
 
     // Register/update the node in registered_nodes so the reconciler's
     // find_target_node() can match placement constraints to this agent.
@@ -133,6 +166,9 @@ async fn handle_agent_ws(
     send_reconcile(&state, node_id, &tx).await;
 
     // Spawn task to forward master→agent messages from the channel to the WS.
+    // A send failure is proof the socket is dead — wake the read loop so the
+    // session tears down now instead of waiting out the idle deadline.
+    let send_shutdown = shutdown.clone();
     let send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             let json = match serde_json::to_string(&msg) {
@@ -143,7 +179,8 @@ async fn handle_agent_ws(
                 }
             };
             if ws_tx.send(Message::Text(json.into())).await.is_err() {
-                break; // connection closed
+                send_shutdown.notify_waiters();
+                break;
             }
         }
     });
@@ -161,28 +198,55 @@ async fn handle_agent_ws(
         }
     });
 
-    // Process incoming agent messages.
-    while let Some(Ok(msg)) = ws_rx.next().await {
-        match msg {
-            Message::Text(text) => {
-                if let Err(e) = handle_agent_message(&state, node_id, &text, &tx).await {
-                    warn!("Error handling agent message from {node_id}: {e}");
-                }
+    // Process incoming agent messages under a read-idle deadline (#131).
+    // Healthy agents heartbeat every 5s, so IDLE seconds of silence means
+    // the socket is half-open (peer gone without FIN/RST) — the exact
+    // failure that previously left a zombie session serving stale state
+    // for days. Session liveness IS deploy-channel liveness: no traffic,
+    // no session.
+    let idle = std::time::Duration::from_secs(state.cluster_config.deploy.ws_idle_timeout_secs);
+    loop {
+        tokio::select! {
+            _ = shutdown.notified() => {
+                info!(node_id, session_id, "control session shut down (superseded or killed)");
+                break;
             }
-            Message::Close(_) => break,
-            _ => {} // ignore binary, ping, pong (axum handles pong auto)
+            next = tokio::time::timeout(idle, ws_rx.next()) => match next {
+                Err(_) => {
+                    warn!(
+                        node_id, session_id, idle_secs = idle.as_secs(),
+                        "no traffic from agent within idle deadline — closing half-dead session"
+                    );
+                    break;
+                }
+                Ok(None) => break,
+                Ok(Some(Err(e))) => {
+                    warn!(node_id, session_id, "WebSocket read error: {e}");
+                    break;
+                }
+                Ok(Some(Ok(msg))) => match msg {
+                    Message::Text(text) => {
+                        if let Err(e) = handle_agent_message(&state, node_id, &text, &tx).await {
+                            warn!("Error handling agent message from {node_id}: {e}");
+                        }
+                    }
+                    Message::Close(_) => break,
+                    _ => {} // ignore binary, ping, pong (axum handles pong auto)
+                },
+            }
         }
     }
 
-    // Cleanup on disconnect
+    // Cleanup on disconnect — generation-guarded (#131): only the session
+    // that still owns the map entry may deregister the node and drop its
+    // placeholders. A superseded session exiting late must not tear down
+    // its replacement's state (the old last-writer-cleanup race).
     send_task.abort();
     ping_task.abort();
-    {
-        let mut senders = state.ws_agents.write().await;
-        senders.remove(&node_id);
+    if state.deregister_agent_session(node_id, session_id).await {
+        remove_remote_placeholders(&state, node_id).await;
     }
-    remove_remote_placeholders(&state, node_id).await;
-    info!("Agent {node_id} WebSocket disconnected");
+    info!("Agent {node_id} WebSocket disconnected (session {session_id})");
 }
 
 /// Process a single message from the agent.

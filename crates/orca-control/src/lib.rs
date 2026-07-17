@@ -21,6 +21,7 @@ pub mod raft;
 pub mod reconciler;
 pub mod routes;
 pub mod scheduler;
+pub mod session;
 pub mod state;
 pub mod stats;
 pub mod store;

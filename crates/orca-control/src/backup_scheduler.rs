@@ -258,8 +258,8 @@ mod tests {
         let (tx2, mut rx2) = tokio::sync::mpsc::channel::<MasterMessage>(4);
         {
             let mut agents = state.ws_agents.write().await;
-            agents.insert(1, tx1);
-            agents.insert(2, tx2);
+            agents.insert(1, crate::state::AgentSession::new(tx1));
+            agents.insert(2, crate::state::AgentSession::new(tx2));
         }
 
         let config = BackupConfig {

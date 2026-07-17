@@ -165,7 +165,11 @@ async fn remote_deploy_without_ack_is_not_redeployed_every_cycle() {
         },
     );
     let (tx, mut rx) = tokio::sync::mpsc::channel::<MasterMessage>(16);
-    state.ws_agents.write().await.insert(7, tx);
+    state
+        .ws_agents
+        .write()
+        .await
+        .insert(7, orca_control::state::AgentSession::new(tx));
 
     let dir = tmp.path().to_str().unwrap();
     // Two reconcile passes — the agent never acks, so each deploy attempt errors,

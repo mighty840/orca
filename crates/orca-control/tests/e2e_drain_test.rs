@@ -61,7 +61,11 @@ async fn e2e_drain_prevents_remote_dispatch() {
 
     // Wire up a WS sender for node 7 so placement can succeed, then drain it.
     let (tx, mut rx) = tokio::sync::mpsc::channel::<MasterMessage>(8);
-    state.ws_agents.write().await.insert(7, tx);
+    state
+        .ws_agents
+        .write()
+        .await
+        .insert(7, orca_control::state::AgentSession::new(tx));
     state
         .registered_nodes
         .write()
@@ -86,7 +90,11 @@ async fn e2e_undrained_node_receives_dispatch() {
     register_node(&state, 8).await;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<MasterMessage>(8);
-    state.ws_agents.write().await.insert(8, tx);
+    state
+        .ws_agents
+        .write()
+        .await
+        .insert(8, orca_control::state::AgentSession::new(tx));
 
     let services = services_json("e2e-active-svc", 8);
     orca_control::reconciler::reconcile(&state, &services).await;
@@ -105,7 +113,11 @@ async fn e2e_drain_then_undrain_allows_dispatch() {
     register_node(&state, 9).await;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<MasterMessage>(8);
-    state.ws_agents.write().await.insert(9, tx);
+    state
+        .ws_agents
+        .write()
+        .await
+        .insert(9, orca_control::state::AgentSession::new(tx));
 
     // Drain — deploy should be skipped.
     state
