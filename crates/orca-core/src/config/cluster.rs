@@ -29,6 +29,11 @@ pub struct ClusterConfig {
     /// Mesh networking configuration (NetBird).
     #[serde(default)]
     pub network: Option<NetworkConfig>,
+    /// Encrypted-secrets store (#109). When present, secrets come from a
+    /// SOPS/age-encrypted file committed to the config repo instead of the
+    /// machine-local AES store.
+    #[serde(default)]
+    pub secrets: Option<SecretsConfig>,
     /// Fallback proxy for unmatched requests (e.g., point to coolify-proxy).
     #[serde(default)]
     pub fallback: Option<FallbackConfig>,
@@ -194,6 +199,39 @@ pub struct FallbackConfig {
     pub http: Option<String>,
     /// HTTPS/TLS fallback target for SNI passthrough (e.g., "127.0.0.1:8443").
     pub tls: Option<String>,
+}
+
+/// SOPS/age-encrypted secrets store configuration (#109).
+///
+/// The master decrypts the file in-process at load with a local age
+/// identity and re-encrypts on every mutation. Standard `sops`/`age`
+/// tooling can always decrypt the file without orca — recovery is
+/// "have the repo + the key."
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecretsConfig {
+    /// SOPS-encrypted JSON secrets file. Relative paths resolve against
+    /// the directory containing cluster.toml, so the file lives in the
+    /// same git repo the declarative reconciler converges on.
+    pub encrypted_file: String,
+    /// age identity file (one `AGE-SECRET-KEY-…` per line) used for
+    /// in-process decryption. Optional when the `ROPS_AGE` /
+    /// `ROPS_AGE_KEY_FILE` environment variables are set instead.
+    #[serde(default)]
+    pub age_key_file: Option<String>,
+    /// age public keys (`age1…`) the file is encrypted to — the master's
+    /// key plus the operator's offline key. Required when orca creates
+    /// the file; an existing file's recipient set is reused as-is.
+    #[serde(default)]
+    pub age_recipients: Vec<String>,
+    /// Commit and push the encrypted file after each mutation so the
+    /// config repo stays the source of truth (best-effort: failures are
+    /// logged loudly, never lose the local write). Default: true.
+    #[serde(default = "default_secrets_git_autocommit")]
+    pub git_autocommit: bool,
+}
+
+fn default_secrets_git_autocommit() -> bool {
+    true
 }
 
 /// Mesh networking configuration.

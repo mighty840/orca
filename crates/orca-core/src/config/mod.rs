@@ -17,7 +17,7 @@ pub use cluster::NetworkConfig;
 pub use cluster::{
     AlertChannelConfig, ApiToken, CleanupConfig, ClusterConfig, ClusterMeta, DeployConfig,
     FallbackConfig, NodeConfig, NodeGpuConfig, ObservabilityConfig, ReconcileConfig, Role,
-    SecurityHeadersConfig,
+    SecretsConfig, SecurityHeadersConfig,
 };
 pub use service::{BuildConfig, ProbeConfig, ServiceConfig, ServicesConfig};
 
@@ -29,13 +29,20 @@ impl ClusterConfig {
             .map_err(|e| OrcaError::Config(format!("failed to read {}: {e}", path.display())))?;
         let mut config: Self = toml::from_str(&content)
             .map_err(|e| OrcaError::Config(format!("failed to parse {}: {e}", path.display())))?;
+        // Install the encrypted-secrets backend BEFORE resolving
+        // `${secrets.X}` fields below, so they resolve against the store
+        // `[secrets]` selects (#109).
+        if let Some(secrets_cfg) = &config.secrets {
+            let base_dir = path.parent().unwrap_or_else(|| std::path::Path::new("."));
+            crate::secrets::configure(secrets_cfg, base_dir);
+        }
         config.resolve_secrets();
         Ok(config)
     }
 
     /// Resolve `${secrets.X}` patterns in config fields that may contain secrets.
     fn resolve_secrets(&mut self) {
-        let store = match crate::secrets::SecretStore::open(crate::secrets::default_path()) {
+        let store = match crate::secrets::open_configured() {
             Ok(s) => s,
             Err(_) => return,
         };

@@ -9,7 +9,7 @@ use orca_core::types::{DeployKind, HealthState, WorkloadSpec, WorkloadStatus};
 
 /// Resolve `${secrets.KEY}` patterns in env vars using the local secrets store.
 fn resolve_secrets(env: &HashMap<String, String>) -> HashMap<String, String> {
-    match orca_core::secrets::SecretStore::open(orca_core::secrets::default_path()) {
+    match orca_core::secrets::open_configured() {
         Ok(store) => store.resolve_env(env),
         Err(_) => env.clone(),
     }

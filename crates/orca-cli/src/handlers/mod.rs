@@ -12,6 +12,7 @@ pub mod join;
 pub mod ops;
 mod port;
 pub mod reload;
+pub mod secrets;
 pub mod server;
 pub mod status;
 pub mod token;

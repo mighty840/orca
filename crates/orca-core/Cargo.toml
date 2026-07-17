@@ -21,6 +21,8 @@ tracing = { workspace = true }
 reqwest = { workspace = true }
 serde_yaml = "0.9"
 aes-gcm = "0.10"
+rops = { version = "0.1", default-features = false, features = ["aes-gcm", "age", "json", "sha2"] }
 
 [dev-dependencies]
+age = "0.11"
 tempfile = "3"

@@ -4,7 +4,6 @@ use std::collections::HashMap;
 
 use anyhow::{Result, bail};
 use orca_core::config::ServiceConfig;
-use orca_core::secrets::SecretStore;
 use orca_core::types::VolumeSpec;
 
 use crate::client::OrcaClient;
@@ -104,12 +103,10 @@ async fn handle_create(
         backup: None,
     };
 
-    // Store password as a secret
-    let secrets_path = dirs_next::data_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join("orca")
-        .join("secrets.json");
-    let mut store = SecretStore::open(&secrets_path)?;
+    // Store password as a secret. Uses the configured backend — this
+    // previously wrote to a divergent `data_dir()/orca/secrets.json` path
+    // that neither the server nor `orca secrets` ever read.
+    let mut store = orca_core::secrets::open_configured()?;
     let secret_key = format!("{name}_password");
     store.set(&secret_key, &password)?;
 
