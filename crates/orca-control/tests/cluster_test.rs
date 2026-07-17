@@ -121,11 +121,9 @@ async fn test_drained_node_skipped_by_scheduler() {
 
     let services: Vec<orca_core::config::ServiceConfig> =
         serde_json::from_value(deploy_body["services"].clone()).unwrap();
-    let (deployed, _errors) = orca_control::reconciler::reconcile(&state, &services).await;
+    let (deployed, errors) = orca_control::reconciler::reconcile(&state, &services).await;
 
-    // The service should be "deployed" (reconcile returns it) but
-    // since the target node is drained, nothing should be queued
-    // for remote dispatch.
+    // Nothing may be queued for the drained node.
     let pending = state.pending_commands.read().await;
     let cmds = pending.get(&10).cloned().unwrap_or_default();
     assert!(
@@ -133,11 +131,19 @@ async fn test_drained_node_skipped_by_scheduler() {
         "drained node should not receive deploy commands, got {cmds:?}"
     );
 
-    // The service name should still appear as deployed because
-    // reconcile_service falls through to local deploy when no
-    // remote target is found.
+    // A pin to a drained node refuses loudly (#124's refuse-don't-guess
+    // rule) — it must NOT fall through to a local deploy on the master,
+    // which is a mis-placement, not a fallback.
     assert!(
-        deployed.contains(&"drain-test-svc".to_string()),
-        "service should still be deployed locally"
+        !deployed.contains(&"drain-test-svc".to_string()),
+        "service pinned to a drained node must not deploy anywhere"
+    );
+    let err = errors
+        .iter()
+        .find(|e| e.contains("drain-test-svc"))
+        .expect("refusal must surface as a reconcile error");
+    assert!(
+        err.contains("drained"),
+        "error should tell the operator the node is drained, got: {err}"
     );
 }

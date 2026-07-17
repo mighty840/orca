@@ -359,10 +359,13 @@ pub(crate) async fn reconcile_service(
 
 /// Find a registered node matching the service's placement constraint.
 ///
-/// Returns `Ok(None)` if no placement node is set or no node matches (the
-/// master itself is not in `registered_nodes`, so master-pinned services
-/// resolve to `None` and deploy locally). Errors when the pin matches more
-/// than one node (#124) — never schedule on an arbitrary winner.
+/// Returns `Ok(None)` when no placement node is set, or when the pin
+/// explicitly names the master (`master`, `localhost`, `127.0.0.1`, or the
+/// master's hostname — the master is not in `registered_nodes`), in which
+/// case the caller deploys locally. Errors when the pin matches more than
+/// one node (#124) — never schedule on an arbitrary winner — or matches
+/// nothing at all: a pin for a vanished/mistyped node must fail the deploy,
+/// not silently land the service on the master.
 async fn find_target_node(state: &AppState, config: &ServiceConfig) -> anyhow::Result<Option<u64>> {
     let Some(target) = config.placement.as_ref().and_then(|p| p.node.as_ref()) else {
         return Ok(None);
@@ -370,7 +373,52 @@ async fn find_target_node(state: &AppState, config: &ServiceConfig) -> anyhow::R
     let nodes = state.registered_nodes.read().await;
     match crate::placement::resolve_placement(&nodes, target) {
         crate::placement::PlacementResolution::Node(id) => Ok(Some(id)),
-        crate::placement::PlacementResolution::NoMatch => Ok(None),
+        crate::placement::PlacementResolution::NoMatch => {
+            if crate::placement::pin_matches_master(target) {
+                return Ok(None);
+            }
+            let drained = crate::placement::drained_matches(&nodes, target);
+            if !drained.is_empty() {
+                tracing::error!(
+                    service = %config.name,
+                    pin = %target,
+                    drained_nodes = ?drained,
+                    "placement pin matches only drained node(s) — refusing to schedule"
+                );
+                anyhow::bail!(
+                    "placement pin {target:?} for service {:?} matches only drained node(s) \
+                     {drained:?} — refusing to deploy; undrain the node or repin the service",
+                    config.name,
+                )
+            }
+            let known: Vec<String> = nodes
+                .values()
+                .map(|n| {
+                    format!(
+                        "{} ({}{})",
+                        n.node_id,
+                        n.address,
+                        n.labels
+                            .get("hostname")
+                            .map(|h| format!(", hostname {h}"))
+                            .unwrap_or_default()
+                    )
+                })
+                .collect();
+            tracing::error!(
+                service = %config.name,
+                pin = %target,
+                known_nodes = ?known,
+                "placement pin matches no registered node and is not the master — refusing to schedule"
+            );
+            anyhow::bail!(
+                "placement pin {target:?} for service {:?} matches no registered node and is \
+                 not the master ({:?}) — refusing to deploy; registered nodes: [{}]",
+                config.name,
+                crate::placement::master_hostname(),
+                known.join(", "),
+            )
+        }
         crate::placement::PlacementResolution::Ambiguous(ids) => {
             let described: Vec<String> = ids
                 .iter()

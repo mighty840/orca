@@ -118,7 +118,7 @@ async fn collect_master(
     let domains = routes_by_node.get(&None).cloned().unwrap_or_default();
     NodeNetworks {
         node_id: None,
-        hostname: master_hostname(),
+        hostname: crate::placement::master_hostname(),
         role: NodeRole::Master,
         networks,
         domains,
@@ -369,13 +369,6 @@ fn service_name_from_container(container: &str) -> String {
 /// enumerator so master and agent always see the same shape.
 async fn enumerate_local_orca_networks() -> Vec<DockerNetwork> {
     orca_agent::ws_client::network_status::list_local_orca_networks().await
-}
-
-fn master_hostname() -> String {
-    std::fs::read_to_string("/etc/hostname")
-        .map(|s| s.trim().to_string())
-        .or_else(|_| std::env::var("HOSTNAME"))
-        .unwrap_or_else(|_| "master".to_string())
 }
 
 #[cfg(test)]

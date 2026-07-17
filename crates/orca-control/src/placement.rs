@@ -16,9 +16,11 @@ use crate::state::RegisteredNode;
 /// Outcome of resolving a placement pin against the registered nodes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PlacementResolution {
-    /// No registered node matches. Callers keep their existing behavior
-    /// (the master itself is not in `registered_nodes`, so master-pinned
-    /// services resolve here and deploy locally).
+    /// No registered node matches. The master itself is not in
+    /// `registered_nodes`, so callers must then check
+    /// [`pin_matches_master`]: deploy locally when the pin names the
+    /// master, refuse when it names nothing — a pin for a vanished node
+    /// must never silently land the service on the master.
     NoMatch,
     /// Exactly one node matches.
     Node(u64),
@@ -64,6 +66,35 @@ pub(crate) fn resolve_placement(
             PlacementResolution::Ambiguous(matches)
         }
     }
+}
+
+/// Node IDs of *drained* nodes the pin would otherwise match. Used only for
+/// diagnostics: "your pin is fine, the node is draining" is a different
+/// operator action than "your pin names nothing".
+pub(crate) fn drained_matches(nodes: &HashMap<u64, RegisteredNode>, pin: &str) -> Vec<u64> {
+    let mut ids: Vec<u64> = nodes
+        .values()
+        .filter(|n| n.drain && node_matches_pin(n, pin))
+        .map(|n| n.node_id)
+        .collect();
+    ids.sort_unstable();
+    ids
+}
+
+/// The master's own hostname — same convention the ops dashboards use to
+/// label the master node.
+pub(crate) fn master_hostname() -> String {
+    std::fs::read_to_string("/etc/hostname")
+        .map(|s| s.trim().to_string())
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "master".to_string())
+}
+
+/// Whether a placement pin explicitly names the master itself. Checked only
+/// after no registered agent matched: the master runs workloads locally, so
+/// these pins resolve to a local deploy instead of an error.
+pub(crate) fn pin_matches_master(pin: &str) -> bool {
+    pin == "master" || pin == "localhost" || pin == "127.0.0.1" || pin == master_hostname()
 }
 
 #[cfg(test)]
@@ -179,6 +210,18 @@ mod tests {
             resolve_placement(&nodes, "worker"),
             PlacementResolution::Ambiguous(vec![1, 2])
         );
+    }
+
+    /// Master pins resolve locally; anything else that matches no node is
+    /// the caller's cue to refuse, not to fall through to a master deploy.
+    #[test]
+    fn master_pins_are_recognized() {
+        assert!(pin_matches_master("master"));
+        assert!(pin_matches_master("localhost"));
+        assert!(pin_matches_master("127.0.0.1"));
+        assert!(pin_matches_master(&master_hostname()));
+        assert!(!pin_matches_master("ubuntu"));
+        assert!(!pin_matches_master("10.0.0.99"));
     }
 
     #[test]

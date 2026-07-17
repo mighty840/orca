@@ -44,7 +44,7 @@ async fn collect_master_status(state: &AppState) -> NodeBackupStatus {
     let last_result = state.master_last_backup_result.read().await.clone();
     NodeBackupStatus {
         node_id: None,
-        hostname: master_hostname(),
+        hostname: crate::placement::master_hostname(),
         role: NodeRole::Master,
         snapshots,
         last_result,
@@ -156,13 +156,6 @@ async fn collect_agent_statuses(state: &AppState) -> Vec<NodeBackupStatus> {
             }
         })
         .collect()
-}
-
-fn master_hostname() -> String {
-    std::fs::read_to_string("/etc/hostname")
-        .map(|s| s.trim().to_string())
-        .or_else(|_| std::env::var("HOSTNAME"))
-        .unwrap_or_else(|_| "master".to_string())
 }
 
 #[derive(Debug, Deserialize)]
