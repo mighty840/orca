@@ -15,6 +15,7 @@ pub mod health;
 pub(crate) mod instance;
 pub mod metrics;
 pub(crate) mod operations;
+pub(crate) mod placement;
 pub mod proto;
 pub mod raft;
 pub mod reconciler;

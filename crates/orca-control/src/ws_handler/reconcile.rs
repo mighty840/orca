@@ -54,14 +54,15 @@ pub(super) async fn send_reconcile(
     node_id: u64,
     tx: &mpsc::Sender<MasterMessage>,
 ) {
-    // Find the node's address/hostname for placement matching
-    let node_address = {
-        let nodes = state.registered_nodes.read().await;
-        nodes.get(&node_id).map(|n| n.address.clone())
-    };
-    let Some(node_addr) = node_address else {
+    // Snapshot the node registry once; placement pins are resolved with the
+    // same exact-match resolver the deploy path uses (#124), so what a node
+    // is told to run on reconcile always agrees with deploy targeting. A pin
+    // matching multiple nodes resolves Ambiguous — expected on no node —
+    // mirroring the deploy path's refusal to schedule.
+    let nodes = state.registered_nodes.read().await;
+    if !nodes.contains_key(&node_id) {
         return;
-    };
+    }
 
     // Collect all services whose placement targets this node
     let services = state.services.read().await;
@@ -73,17 +74,8 @@ pub(super) async fn send_reconcile(
                 .as_ref()
                 .and_then(|p| p.node.as_ref())
                 .is_some_and(|target| {
-                    node_addr.contains(target.as_str()) || target == &node_id.to_string() || {
-                        let nodes_guard =
-                            futures_util::FutureExt::now_or_never(state.registered_nodes.read());
-                        nodes_guard
-                            .and_then(|nodes| {
-                                nodes
-                                    .get(&node_id)
-                                    .and_then(|n| n.labels.get("hostname").map(|h| h == target))
-                            })
-                            .unwrap_or(false)
-                    }
+                    crate::placement::resolve_placement(&nodes, target)
+                        == crate::placement::PlacementResolution::Node(node_id)
                 })
         })
         .filter_map(|svc| {
@@ -92,6 +84,11 @@ pub(super) async fn send_reconcile(
                 .map(Box::new)
         })
         .collect();
+    // Release both read guards before the channel send below — holding a
+    // read across an await lets a queued writer (heartbeats write
+    // registered_nodes constantly) block every subsequent reader.
+    drop(services);
+    drop(nodes);
 
     if expected.is_empty() {
         return;

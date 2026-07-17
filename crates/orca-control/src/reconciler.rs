@@ -9,6 +9,7 @@ use orca_core::runtime::Runtime;
 use orca_core::types::{DeployKind, Replicas, RuntimeKind, WorkloadSpec, WorkloadStatus};
 
 use crate::instance::create_and_start_instance;
+use crate::placement::find_target_node;
 use crate::routes::{service_config_to_spec, update_container_routes, update_wasm_triggers};
 use crate::state::{AppState, ServiceState};
 
@@ -101,7 +102,7 @@ pub(crate) async fn reconcile_service(
     }
 
     // Check if placement targets a specific remote node
-    if let Some(target_node_id) = find_target_node(state, config).await {
+    if let Some(target_node_id) = find_target_node(state, config).await? {
         // Record the declared spec + a placeholder instance on the master
         // BEFORE dispatching the deploy. `orca status` then shows the
         // remote-scheduled workload (placeholder optimistically Running so the
@@ -355,29 +356,6 @@ pub(crate) async fn reconcile_service(
     }
 
     Ok(())
-}
-
-/// Find a registered node matching the service's placement constraint.
-/// Returns `None` if no placement node is set or no matching node is found.
-async fn find_target_node(state: &AppState, config: &ServiceConfig) -> Option<u64> {
-    let placement = config.placement.as_ref()?;
-    let target = placement.node.as_ref()?;
-    let nodes = state.registered_nodes.read().await;
-    for node in nodes.values() {
-        if node.drain {
-            continue;
-        }
-        if node.address.contains(target.as_str()) || target == &node.node_id.to_string() {
-            return Some(node.node_id);
-        }
-        // Check hostname label
-        if let Some(hostname) = node.labels.get("hostname")
-            && hostname == target
-        {
-            return Some(node.node_id);
-        }
-    }
-    None
 }
 
 /// Send a deploy command to a remote agent node and await the result.
