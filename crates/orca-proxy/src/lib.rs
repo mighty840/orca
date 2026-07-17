@@ -335,6 +335,14 @@ pub(crate) async fn serve_loop_with_fallback(
             .build()
             .expect("failed to build HTTP client"),
     );
+    // A TLS endpoint exists if this listener terminates TLS itself, or if
+    // an ACME manager is present — the plain-HTTP listener of the ACME
+    // dual-listener setup carries one for HTTP-01 challenges, which is
+    // exactly the "HTTPS runs alongside on 443" signal. With neither, the
+    // HTTP→HTTPS redirect has nowhere to send clients and must not fire
+    // (#123: ACME unconfigured meant every routed host redirected into a
+    // closed port).
+    let https_enabled = tls_acceptor.is_some() || acme_manager.is_some();
     let acme = acme_manager.map(Arc::new);
     let is_tls = tls_acceptor.is_some();
     let rate_limiter = RateLimiter::new();
@@ -383,6 +391,7 @@ pub(crate) async fn serve_loop_with_fallback(
                         &counter,
                         &client,
                         is_tls,
+                        https_enabled,
                         &rl,
                         peer,
                         fb.as_ref().as_ref(),
