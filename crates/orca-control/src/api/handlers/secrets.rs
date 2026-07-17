@@ -14,7 +14,7 @@ use axum::response::IntoResponse;
 use serde::Deserialize;
 
 use orca_core::api_types::{SecretRef, SecretUsage, SecretsUsageResponse};
-use orca_core::secrets::{SecretStore, default_path, extract_refs};
+use orca_core::secrets::extract_refs;
 
 use crate::state::AppState;
 
@@ -25,7 +25,7 @@ pub struct SetSecretRequest {
 
 /// `GET /api/v1/secrets` — return the list of secret keys (never values).
 pub async fn list_secrets() -> impl IntoResponse {
-    match SecretStore::open(default_path()) {
+    match orca_core::secrets::open_configured() {
         Ok(store) => {
             let keys: Vec<String> = store.list().into_iter().collect();
             (StatusCode::OK, Json(serde_json::json!({ "keys": keys }))).into_response()
@@ -43,7 +43,7 @@ pub async fn set_secret(
     Path(key): Path<String>,
     Json(body): Json<SetSecretRequest>,
 ) -> impl IntoResponse {
-    let mut store = match SecretStore::open(default_path()) {
+    let mut store = match orca_core::secrets::open_configured() {
         Ok(s) => s,
         Err(e) => {
             return (
@@ -73,7 +73,7 @@ pub async fn set_secret(
 /// key that isn't in the store — so the operator sees broken templates,
 /// not just stored keys.
 pub async fn secrets_usage(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let store = match SecretStore::open(default_path()) {
+    let store = match orca_core::secrets::open_configured() {
         Ok(s) => s,
         Err(e) => {
             return (
@@ -137,7 +137,7 @@ pub async fn secrets_usage(State(state): State<Arc<AppState>>) -> impl IntoRespo
 
 /// `DELETE /api/v1/secrets/{key}` — remove a secret.
 pub async fn remove_secret(Path(key): Path<String>) -> impl IntoResponse {
-    let mut store = match SecretStore::open(default_path()) {
+    let mut store = match orca_core::secrets::open_configured() {
         Ok(s) => s,
         Err(e) => {
             return (

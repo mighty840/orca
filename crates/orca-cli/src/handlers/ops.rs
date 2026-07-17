@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use crate::client::OrcaClient;
-use crate::commands::{AlertsAction, SecretsAction, WebhookAction};
+use crate::commands::{AlertsAction, WebhookAction};
 
 /// Find the orca project directory by walking up from `base` looking for
 /// `cluster.toml` or `services/`. Falls back to `~/.orca/`.
@@ -241,71 +241,6 @@ fn truncate(s: &str, max: usize) -> String {
         s.to_string()
     } else {
         format!("{}…", &s[..max.saturating_sub(1)])
-    }
-}
-
-fn open_secrets() -> orca_core::secrets::SecretStore {
-    orca_core::secrets::SecretStore::open(orca_core::secrets::default_path()).unwrap_or_else(|e| {
-        tracing::error!("Failed to open secrets store: {e}");
-        std::process::exit(1);
-    })
-}
-
-pub fn handle_secrets(action: SecretsAction) {
-    match action {
-        SecretsAction::Set { key, value } => {
-            let mut store = open_secrets();
-            store.set(&key, &value).expect("failed to set secret");
-            println!("Secret '{key}' set.");
-        }
-        SecretsAction::Get { key } => {
-            let store = open_secrets();
-            match store.get(&key) {
-                Some(value) => println!("{value}"),
-                None => {
-                    eprintln!("Secret '{key}' not found.");
-                    std::process::exit(1);
-                }
-            }
-        }
-        SecretsAction::Remove { key } => {
-            let mut store = open_secrets();
-            match store.remove(&key) {
-                Ok(true) => println!("Secret '{key}' removed."),
-                Ok(false) => println!("Secret '{key}' not found."),
-                Err(e) => tracing::error!("Failed to remove: {e}"),
-            }
-        }
-        SecretsAction::List => {
-            let store = open_secrets();
-            let keys = store.list();
-            if keys.is_empty() {
-                println!("No secrets configured.");
-            } else {
-                for key in keys {
-                    println!("  {key}");
-                }
-            }
-        }
-        SecretsAction::Import { file } => {
-            let mut store = open_secrets();
-            let content = std::fs::read_to_string(&file).unwrap_or_else(|e| {
-                tracing::error!("Failed to read '{file}': {e}");
-                std::process::exit(1);
-            });
-            let mut count = 0u32;
-            for line in content.lines() {
-                let line = line.trim();
-                if line.is_empty() || line.starts_with('#') {
-                    continue;
-                }
-                if let Some((key, value)) = line.split_once('=') {
-                    store.set(key.trim(), value.trim()).expect("failed to set");
-                    count += 1;
-                }
-            }
-            println!("Imported {count} secrets from {file}.");
-        }
     }
 }
 

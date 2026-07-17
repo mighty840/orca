@@ -168,3 +168,28 @@ scale_on_pressure = false
     assert_eq!(ai.alerts.as_ref().unwrap().analysis_interval_secs, 30);
     assert!(ai.auto_remediate.as_ref().unwrap().restart_crashed);
 }
+
+#[test]
+fn parse_secrets_config() {
+    let toml = r#"
+[cluster]
+name = "test"
+
+[secrets]
+encrypted_file = "secrets.enc.json"
+age_key_file = "/home/op/.config/orca/age.key"
+age_recipients = [
+    "age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+    "age1zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+]
+"#;
+    let config: ClusterConfig = toml::from_str(toml).unwrap();
+    let secrets = config.secrets.as_ref().unwrap();
+    assert_eq!(secrets.encrypted_file, "secrets.enc.json");
+    assert_eq!(secrets.age_recipients.len(), 2);
+    assert!(secrets.git_autocommit, "git_autocommit defaults to true");
+
+    // Section absent → no encrypted backend selected.
+    let bare: ClusterConfig = toml::from_str("[cluster]\nname = \"t\"\n").unwrap();
+    assert!(bare.secrets.is_none());
+}

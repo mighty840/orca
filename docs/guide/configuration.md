@@ -174,14 +174,43 @@ API_KEY = "${secrets.edge_key}"
 
 ## Secrets
 
-Secrets are encrypted and stored in the cluster state (redb). Reference them in
-config with `${secrets.KEY}`.
+Secrets are stored encrypted and referenced in config with `${secrets.KEY}`.
+Two backends exist:
+
+- **Default:** a machine-local AES-256-GCM store (`~/.orca/secrets.json`,
+  key at `~/.orca/master.key`). Simple, but tied to one machine.
+- **Recommended — `[secrets]` in cluster.toml:** an age/SOPS-encrypted file
+  committed to your config repo. Keys stay plaintext (readable `git diff`),
+  values are encrypted to your age recipients. The master decrypts
+  in-process; recovery never needs orca — `sops -d` / `age -d` with the key
+  is enough.
+
+```toml
+[secrets]
+encrypted_file = "secrets.enc.json"            # relative to cluster.toml
+age_key_file   = "/root/.config/orca/age.key"  # master's age identity (keep OUT of git)
+age_recipients = [                             # encrypt to master + operator
+  "age1masterkey…",
+  "age1operatorkey…",
+]
+# git_autocommit = true   # commit+push after each mutation (default)
+```
+
+Generate keys with `age-keygen`. Because the file is encrypted to *both*
+recipients, the operator can always decrypt locally, independent of the
+master. With `git_autocommit` (default), every `orca secrets set/remove`
+commits and pushes `secrets.enc.json` so the repo stays the source of truth;
+push failures are logged loudly but never lose the local write.
 
 ```bash
 orca secrets set DB_PASS "s3cret"
 orca secrets list
 orca secrets import -f .env           # Bulk import
+orca secrets migrate                  # move legacy local store → encrypted file
 ```
+
+The CLI uses the encrypted backend when run from the directory containing
+cluster.toml (offline/recovery access included — no running master needed).
 
 `${secrets.X}` is resolved both in `service.toml` (any string field, including
 `env` values) and in selected `cluster.toml` fields:
@@ -189,7 +218,7 @@ orca secrets import -f .env           # Bulk import
 | File | Resolved fields |
 |------|-----------------|
 | `service.toml` | All string fields, including `env`, `image`, `domain`, `aliases` |
-| `cluster.toml` | `ai.api_key`, `ai.endpoint`, `network.setup_key` |
+| `cluster.toml` | `ai.api_key`, `ai.endpoint`, SMTP password, `network.setup_key`, named token values, S3 backup credentials |
 
 This means cluster-level config can be safely committed to git -- credentials
 live in the encrypted secret store, not in the TOML.

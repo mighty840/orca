@@ -125,12 +125,44 @@ pub struct SecretStore {
     #[serde(skip)]
     master_key: Vec<u8>,
     secrets: HashMap<String, String>,
+    /// When set, this store reads/writes the SOPS/age-encrypted file
+    /// (#109) instead of the legacy AES file. The in-memory model and the
+    /// public API are identical either way.
+    #[serde(skip)]
+    sops: Option<super::sops_store::SopsBackend>,
 }
 
 impl SecretStore {
     /// Open an existing secrets file or create a new empty one.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         Self::open_with_key(path, &default_master_key_path())
+    }
+
+    /// Open the SOPS/age-encrypted backend (#109). Prefer
+    /// [`super::open_configured`], which picks the backend from cluster.toml.
+    pub(super) fn open_sops(backend: super::sops_store::SopsBackend) -> Result<Self> {
+        let secrets = backend.load()?;
+        Ok(SecretStore {
+            path: backend.path.clone(),
+            master_key: Vec::new(),
+            secrets,
+            sops: Some(backend),
+        })
+    }
+
+    /// Copy every secret from `other` into this store with a single save —
+    /// the migration path from the legacy AES store into the encrypted
+    /// file (one commit, not one per key).
+    pub fn import_from(&mut self, other: &SecretStore) -> Result<usize> {
+        let mut count = 0;
+        for key in other.list() {
+            if let Some(value) = other.get(&key) {
+                self.secrets.insert(key, value.to_string());
+                count += 1;
+            }
+        }
+        self.save()?;
+        Ok(count)
     }
 
     /// Open with a specific master key path (useful for testing).
@@ -165,6 +197,7 @@ impl SecretStore {
                 path,
                 master_key,
                 secrets: HashMap::new(),
+                sops: None,
             };
             store.save()?;
             Ok(store)
@@ -207,6 +240,9 @@ impl SecretStore {
 
     /// Persist secrets to disk with restrictive permissions.
     fn save(&self) -> Result<()> {
+        if let Some(backend) = &self.sops {
+            return backend.save(&self.secrets);
+        }
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent).context("failed to create secrets directory")?;
         }

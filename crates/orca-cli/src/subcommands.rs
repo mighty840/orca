@@ -42,6 +42,9 @@ pub enum SecretsAction {
         #[arg(short, long)]
         file: String,
     },
+    /// Move all secrets from the legacy machine-local store into the
+    /// [secrets] encrypted file (#109). Requires [secrets] in cluster.toml.
+    Migrate,
 }
 
 #[derive(Subcommand)]
