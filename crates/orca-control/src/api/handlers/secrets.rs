@@ -84,21 +84,33 @@ pub async fn secrets_usage(State(state): State<Arc<AppState>>) -> impl IntoRespo
         }
     };
     let stored_keys: Vec<String> = store.list();
+    let stored: std::collections::HashSet<&str> = stored_keys.iter().map(|s| s.as_str()).collect();
 
-    // Build key → unique (service, project) set. Using BTreeMap so the
-    // response order is stable for the dashboard.
-    let mut refs_by_key: BTreeMap<(Option<String>, String), Vec<SecretRef>> = BTreeMap::new();
+    // Join references to the STORED key they actually resolve to, mirroring
+    // deploy-time resolution (#68): an implicit `${secrets.X}` from a
+    // service in project `p` resolves to `p.X` when that scoped key exists,
+    // the bare `X` otherwise; an explicit `${secrets.s.X}` targets `s.X` as
+    // written. BTreeMap keeps the response order stable for the dashboard.
+    let mut refs_by_target: BTreeMap<String, Vec<SecretRef>> = BTreeMap::new();
     {
         let services = state.services.read().await;
         for svc in services.values() {
             let project = svc.config.project.clone();
-            let mut seen_for_service: std::collections::HashSet<(Option<String>, String)> =
+            let mut seen_for_service: std::collections::HashSet<String> =
                 std::collections::HashSet::new();
             for value in svc.config.env.values() {
                 for r in extract_refs(value) {
-                    let map_key = (r.scope.clone(), r.key.clone());
-                    if seen_for_service.insert(map_key.clone()) {
-                        refs_by_key.entry(map_key).or_default().push(SecretRef {
+                    let target = match &r.scope {
+                        Some(s) => format!("{s}.{}", r.key),
+                        None => match &project {
+                            Some(p) if stored.contains(format!("{p}.{}", r.key).as_str()) => {
+                                format!("{p}.{}", r.key)
+                            }
+                            _ => r.key.clone(),
+                        },
+                    };
+                    if seen_for_service.insert(target.clone()) {
+                        refs_by_target.entry(target).or_default().push(SecretRef {
                             service_name: svc.config.name.clone(),
                             project: project.clone(),
                         });
@@ -109,24 +121,25 @@ pub async fn secrets_usage(State(state): State<Arc<AppState>>) -> impl IntoRespo
     }
 
     // Emit stored keys first (preserving alphabetical order from the store),
-    // then any referenced-but-unstored keys as "broken" entries.
+    // then any referenced-but-unstored keys as "broken" entries. `key` is
+    // always the FULL stored key (delete/set target); `scope` is the
+    // grouping hint — the prefix for project-scoped keys.
     let mut out: Vec<SecretUsage> = stored_keys
         .iter()
         .map(|k| {
-            let map_key = (None, k.clone());
-            let refs = refs_by_key.remove(&map_key).unwrap_or_default();
+            let refs = refs_by_target.remove(k).unwrap_or_default();
             SecretUsage {
                 key: k.clone(),
-                scope: None,
+                scope: k.split_once('.').map(|(s, _)| s.to_string()),
                 refs,
                 in_store: true,
             }
         })
         .collect();
-    for ((scope, key), refs) in refs_by_key {
+    for (target, refs) in refs_by_target {
         out.push(SecretUsage {
-            key,
-            scope,
+            scope: target.split_once('.').map(|(s, _)| s.to_string()),
+            key: target,
             refs,
             in_store: false,
         });

@@ -116,6 +116,14 @@ pub struct AppState {
     /// so use `ui::secrets::selectable_indices` when navigating to skip
     /// non-selectable header rows.
     pub selected_secret: usize,
+    /// Pending y/N confirmation for deleting a secret (#69). Holds the full
+    /// stored key. Rendered in the footer; consumed by the next keypress
+    /// (`y` confirms, anything else cancels).
+    pub pending_secret_delete: Option<String>,
+    /// Scope filter for the secrets view (#69): `None` shows every group,
+    /// `Some(label)` shows only that group (`global`, a project name, or
+    /// `broken refs`). Cycled with `p`.
+    pub secrets_scope_filter: Option<String>,
     /// Cached cluster-backups response; refreshed when entering the view or
     /// on explicit `r` keypress. `None` means we haven't fetched yet this
     /// session — the view shows a "loading" placeholder.
@@ -231,6 +239,8 @@ impl AppState {
             cluster_version: None,
             cluster_commit: None,
             selected_secret: 0,
+            pending_secret_delete: None,
+            secrets_scope_filter: None,
             backups: None,
             selected_backup_node: 0,
             selected_backup_snapshot: 0,

@@ -50,6 +50,14 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
         ("2 / n", "Nodes view (CPU/Mem/Disk/Net sparklines)"),
         ("3", "Secrets view (grouped by inferred scope + ref counts)"),
         (
+            "a / e / x (secrets)",
+            "Add (:set prefill), edit selected key, delete with y/N confirm",
+        ),
+        (
+            "p (secrets)",
+            "Cycle scope filter: all -> global -> per-project -> broken refs",
+        ),
+        (
             "↵ on a secret row",
             "Drill into the list of services referencing that key",
         ),

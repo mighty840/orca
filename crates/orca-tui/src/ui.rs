@@ -276,6 +276,16 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
 
     // Separator + key hints
     spans.push(Span::styled(" | ", dim));
+    // A pending delete confirmation replaces the key hints — the next
+    // keypress answers it, so nothing else is actionable right now.
+    if let Some(key) = &state.pending_secret_delete {
+        spans.push(Span::styled(
+            format!("Delete secret '{key}'? y:confirm  any other key:cancel"),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ));
+        f.render_widget(Paragraph::new(Line::from(spans)), area);
+        return;
+    }
     let keys = match &state.view {
         // Services: 1 services, 2 nodes, 3 secrets. `c` collapses the
         // project of the currently selected row (was SPC, but space
@@ -285,7 +295,9 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
         View::Logs { .. } => "Esc:back w:wrap PgUp/PgDn:scroll ?:help",
         View::Detail { .. } => "Esc:back s:scale x:stop l:logs ?:help",
         View::Help => "Esc:back",
-        View::Secrets => "Esc:back j/k:select ↵:refs r:refresh :set/:rm ?:help",
+        View::Secrets => {
+            "Esc:back j/k:select ↵:refs a:add e:edit x:delete p:scope r:refresh ?:help"
+        }
         View::SecretRefs { .. } => "Esc:back r:refresh ?:help",
         View::Networks => "Esc:back r:refresh ?:help",
         View::Backups => "Esc:back j/k:select ↵:snapshots r:refresh b:trigger ?:help",
