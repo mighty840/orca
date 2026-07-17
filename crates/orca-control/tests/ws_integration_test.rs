@@ -386,3 +386,82 @@ async fn ws_cleanup_on_disconnect() {
         );
     }
 }
+
+/// #131 regression: a session that stops producing traffic (half-open
+/// socket — peer gone without FIN/RST) must be torn down by the master's
+/// read-idle deadline, removing the node from `ws_agents` without any
+/// close frame or error ever arriving.
+#[tokio::test]
+async fn half_dead_session_is_closed_by_idle_deadline() {
+    let container_runtime = Arc::new(orca_core::testing::MockRuntime::new());
+    let mut cluster_config = ClusterConfig::default();
+    cluster_config.api_tokens = vec!["test-token-123".to_string()];
+    cluster_config.deploy.ws_idle_timeout_secs = 1; // fast test
+    let state = Arc::new(orca_control::state::AppState::new(
+        cluster_config,
+        container_runtime,
+        None,
+        Arc::new(RwLock::new(HashMap::new())),
+        Arc::new(RwLock::new(Vec::new())),
+    ));
+    let addr = start_server(state.clone()).await;
+
+    let url = format!("ws://{addr}/api/v1/ws/agent?token=test-token-123&node_id=77");
+    let (mut ws, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    // Drain the Ack so the connection is fully established.
+    let _ = tokio::time::timeout(Duration::from_secs(2), ws.next()).await;
+    assert!(
+        state.ws_agents.read().await.contains_key(&77),
+        "session must be registered after connect"
+    );
+
+    // Go silent — no heartbeats, no close frame. The socket stays open,
+    // exactly like a half-dead connection. The idle deadline must fire.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if !state.ws_agents.read().await.contains_key(&77) {
+            break; // torn down — pass
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "half-dead session was not torn down within 5s (idle deadline 1s)"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// #131 regression: a reconnect from the same node supersedes the old
+/// session, and the old session's (later) cleanup must NOT remove the new
+/// session's registration — the old last-writer-cleanup race.
+#[tokio::test]
+async fn reconnect_supersedes_without_clobbering_new_session() {
+    let state = test_state();
+    let addr = start_server(state.clone()).await;
+    let url = format!("ws://{addr}/api/v1/ws/agent?token=test-token-123&node_id=88");
+
+    // First connection.
+    let (mut ws1, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(2), ws1.next()).await;
+    let first_id = state.ws_agents.read().await.get(&88).unwrap().session_id;
+
+    // Second connection from the same node — supersedes the first.
+    let (mut ws2, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+    let _ = tokio::time::timeout(Duration::from_secs(2), ws2.next()).await;
+    let second_id = state.ws_agents.read().await.get(&88).unwrap().session_id;
+    assert_ne!(first_id, second_id, "reconnect must install a new session");
+
+    // Close the FIRST (superseded) socket and give its cleanup time to run.
+    ws1.close(None).await.ok();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    // The new session must still be registered — the old session's exit
+    // must not have deregistered node 88.
+    let current = state.ws_agents.read().await.get(&88).map(|s| s.session_id);
+    assert_eq!(
+        current,
+        Some(second_id),
+        "old session's cleanup clobbered the new session"
+    );
+
+    ws2.close(None).await.ok();
+}

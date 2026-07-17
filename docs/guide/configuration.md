@@ -58,6 +58,7 @@ ack_timeout_secs = 10          # agent must acknowledge a deploy within this, el
 completion_timeout_secs = 600  # time for the agent to pull the image + start (covers multi-GB pulls)
 adopt_orphans = true           # adopt orca.managed containers running on an agent but missing from the registry
 adopt_interval_secs = 30       # how often to scan agents for orphans
+ws_idle_timeout_secs = 30      # silence window before an agent control session is declared dead (#131)
 
 # Declarative reconciliation (K8s-style) — opt-in. When set, the master
 # continuously applies a directory of service configs: drop in a service.toml

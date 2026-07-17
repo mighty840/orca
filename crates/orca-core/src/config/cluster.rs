@@ -162,6 +162,12 @@ pub struct DeployConfig {
     /// Interval in seconds between orphan-adoption scans. Default 30.
     #[serde(default = "default_adopt_interval")]
     pub adopt_interval_secs: u64,
+    /// Read-idle deadline on each agent control session (#131). Healthy
+    /// agents heartbeat every 5s; this many seconds of silence closes the
+    /// session as half-dead, marking the node unreachable until it
+    /// rejoins. Default 30.
+    #[serde(default = "default_ws_idle_timeout")]
+    pub ws_idle_timeout_secs: u64,
 }
 
 impl Default for DeployConfig {
@@ -171,6 +177,7 @@ impl Default for DeployConfig {
             completion_timeout_secs: default_deploy_completion_timeout(),
             adopt_orphans: default_adopt_orphans(),
             adopt_interval_secs: default_adopt_interval(),
+            ws_idle_timeout_secs: default_ws_idle_timeout(),
         }
     }
 }
@@ -185,6 +192,10 @@ fn default_deploy_completion_timeout() -> u64 {
 
 fn default_adopt_orphans() -> bool {
     true
+}
+
+fn default_ws_idle_timeout() -> u64 {
+    30
 }
 
 fn default_adopt_interval() -> u64 {

@@ -104,7 +104,11 @@ async fn ack_timeout_reports_unreachable_distinctly() {
     // Register a WS sender whose receiver we hold open, so the Deploy send
     // succeeds but nothing ever replies with DeployReceived.
     let (tx, _rx) = tokio::sync::mpsc::channel::<MasterMessage>(8);
-    state.ws_agents.write().await.insert(1, tx);
+    state
+        .ws_agents
+        .write()
+        .await
+        .insert(1, orca_control::state::AgentSession::new(tx));
 
     let cfg = config_placed_on("svc", "1");
     let (deployed, errors) = orca_control::reconciler::reconcile(&state, &[cfg]).await;
@@ -124,6 +128,23 @@ async fn ack_timeout_reports_unreachable_distinctly() {
     // Both waiter maps must be cleaned up so they don't leak.
     assert!(state.pending_deploy_acks.read().await.is_empty());
     assert!(state.pending_deploys.read().await.is_empty());
+
+    // #131: a missed ACK is proof the control session is dead — it must be
+    // torn down so the node stops looking reachable and the next deploy
+    // fails fast with the real story instead of re-timing-out forever.
+    assert!(
+        state.ws_agents.read().await.is_empty(),
+        "dead control session must be killed after ACK timeout"
+    );
+    // And the node's remote placeholders must be gone, so status stops
+    // reporting last-known state as current.
+    let services = state.services.read().await;
+    if let Some(svc) = services.get("svc") {
+        assert!(
+            svc.instances.is_empty(),
+            "remote placeholders must be removed with the dead session"
+        );
+    }
 }
 
 /// Once the agent acknowledges receipt, a real deploy failure (e.g. image not
@@ -134,7 +155,11 @@ async fn real_agent_error_propagates_after_ack() {
     register_node(&state, 1).await;
 
     let (tx, mut rx) = tokio::sync::mpsc::channel::<MasterMessage>(8);
-    state.ws_agents.write().await.insert(1, tx);
+    state
+        .ws_agents
+        .write()
+        .await
+        .insert(1, orca_control::state::AgentSession::new(tx));
 
     let cfg = config_placed_on("svc", "1");
     let state_c = state.clone();

@@ -1,7 +1,13 @@
 //! WebSocket client for agent→master streaming communication.
 //!
-//! Replaces the HTTP heartbeat polling with a persistent WS connection.
-//! Falls back to HTTP heartbeat if WS connection fails.
+//! The persistent WS connection is the agent's ONLY control/heartbeat
+//! channel (there is no HTTP fallback). The session read loop runs under a
+//! read-idle deadline (#131): the master sends `StatusPing` every 30s, so
+//! prolonged silence means the socket is half-open — the loop tears the
+//! session down and the outer reconnect loop re-establishes it with
+//! backoff. Without this, a half-open socket blocked the read forever
+//! while heartbeats buffered into a dead kernel send buffer, and the
+//! agent believed it was connected for days.
 
 mod adoption;
 mod backup;
@@ -129,7 +135,22 @@ async fn handle_ws_session(
     });
 
     // Process incoming master messages, passing out_tx for async responses.
-    while let Some(msg_result) = ws_rx.next().await {
+    // Read-idle deadline (#131): the master StatusPings every 30s; three
+    // missed intervals means the connection is half-dead — break so the
+    // reconnect loop replaces it. Detection window: ≤90s, no human needed.
+    const READ_IDLE: std::time::Duration = std::time::Duration::from_secs(90);
+    loop {
+        let msg_result = match tokio::time::timeout(READ_IDLE, ws_rx.next()).await {
+            Err(_) => {
+                warn!(
+                    "no traffic from master within {}s — closing half-dead session for reconnect",
+                    READ_IDLE.as_secs()
+                );
+                break;
+            }
+            Ok(None) => break,
+            Ok(Some(r)) => r,
+        };
         let msg = match msg_result {
             Ok(m) => m,
             Err(e) => {
