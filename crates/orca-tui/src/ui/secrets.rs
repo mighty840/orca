@@ -31,7 +31,7 @@ pub fn draw_secrets(f: &mut Frame, area: Rect, state: &AppState) {
         return;
     }
 
-    let rows_data = flatten(&state.secrets_usage);
+    let rows_data = flatten(&state.secrets_usage, state.secrets_scope_filter.as_deref());
     let total_keys = rows_data
         .iter()
         .filter(|r| matches!(r, FlatRow::Key { .. }))
@@ -59,14 +59,19 @@ pub fn draw_secrets(f: &mut Frame, area: Rect, state: &AppState) {
 
     let widths = [Constraint::Min(40), Constraint::Length(14)];
 
+    let filter_tag = state
+        .secrets_scope_filter
+        .as_deref()
+        .map(|fltr| format!(" ⛉ {fltr}"))
+        .unwrap_or_default();
     let title = if rows_data.len() > visible_rows {
         format!(
-            " Secrets ({total_keys}) [{}/{}] ",
+            " Secrets ({total_keys}){filter_tag} [{}/{}] ",
             (scroll + 1).min(rows_data.len()),
             rows_data.len()
         )
     } else {
-        format!(" Secrets ({total_keys}) ")
+        format!(" Secrets ({total_keys}){filter_tag} ")
     };
 
     let block = Block::default()
@@ -102,14 +107,31 @@ pub enum FlatRow<'a> {
     Key { usage: &'a SecretUsage },
 }
 
-pub fn flatten(usage: &[SecretUsage]) -> Vec<FlatRow<'_>> {
+/// Group labels present in the usage list, in display order — the cycle
+/// ring for the `p` scope filter.
+pub fn group_labels(usage: &[SecretUsage]) -> Vec<String> {
+    let mut labels: Vec<String> = usage
+        .iter()
+        .map(infer_group)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    labels.sort_by_key(|s| (sort_rank(s), s.clone()));
+    labels
+}
+
+pub fn flatten<'a>(usage: &'a [SecretUsage], filter: Option<&str>) -> Vec<FlatRow<'a>> {
     use std::collections::BTreeMap;
 
     // Bucket each usage into a group. The infer_group rule lives in one place
     // so the test suite can pin the contract.
     let mut groups: BTreeMap<String, Vec<&SecretUsage>> = BTreeMap::new();
     for u in usage {
-        groups.entry(infer_group(u)).or_default().push(u);
+        let group = infer_group(u);
+        if filter.is_some_and(|f| f != group) {
+            continue;
+        }
+        groups.entry(group).or_default().push(u);
     }
 
     let mut out: Vec<FlatRow<'_>> = Vec::new();
@@ -198,8 +220,13 @@ fn render_row<'a>(r: &FlatRow<'a>, selected: bool) -> Row<'a> {
             } else {
                 Style::default()
             };
+            let display = usage
+                .scope
+                .as_deref()
+                .and_then(|s| usage.key.strip_prefix(s).and_then(|k| k.strip_prefix('.')))
+                .unwrap_or(&usage.key);
             Row::new(vec![
-                Span::raw(format!("    {}", usage.key)),
+                Span::raw(format!("    {display}")),
                 Span::styled(count_text, Style::default().fg(count_color)),
             ])
             .style(row_style)
@@ -219,7 +246,7 @@ fn group_color(name: &str) -> Color {
 /// Used by the event-loop drill-down handler so it can stay decoupled from
 /// the rendering structure.
 pub fn selected_key(state: &AppState) -> Option<&SecretUsage> {
-    let rows = flatten(&state.secrets_usage);
+    let rows = flatten(&state.secrets_usage, state.secrets_scope_filter.as_deref());
     match rows.get(state.selected_secret) {
         Some(FlatRow::Key { usage }) => Some(usage),
         _ => None,
@@ -297,7 +324,7 @@ mod tests {
             usage("B", true, &[]),
             usage("C", false, &[("svc", None)]),
         ];
-        let rows = flatten(&usages);
+        let rows = flatten(&usages, None);
         // Sequence: global header, B, alpha header, A, broken refs header, C
         match &rows[0] {
             FlatRow::Group { label, .. } => assert_eq!(label, "global"),
@@ -321,11 +348,55 @@ mod tests {
             usage("A", true, &[("svc", Some("alpha"))]),
             usage("B", true, &[]),
         ];
-        let rows = flatten(&usages);
+        let rows = flatten(&usages, None);
         let sel = selectable_indices(&rows);
         for i in &sel {
             assert!(matches!(rows[*i], FlatRow::Key { .. }));
         }
         assert_eq!(sel.len(), 2);
+    }
+    /// A stored `<project>.KEY` (scope populated by the usage endpoint since
+    /// #68) groups under its project regardless of who references it.
+    #[test]
+    fn stored_scoped_key_groups_under_its_scope() {
+        let mut u = usage("inka.db_password", true, &[("web", Some("other"))]);
+        u.scope = Some("inka".into());
+        assert_eq!(infer_group(&u), "inka");
+    }
+
+    /// The scope filter hides every other group — rows and headers.
+    #[test]
+    fn flatten_filter_shows_only_matching_group() {
+        let usages = vec![
+            usage("A", true, &[("svc", Some("alpha"))]),
+            usage("B", true, &[]),
+            usage("C", false, &[("svc", None)]),
+        ];
+        let rows = flatten(&usages, Some("alpha"));
+        assert_eq!(rows.len(), 2, "one header + one key row");
+        match &rows[0] {
+            FlatRow::Group { label, .. } => assert_eq!(label, "alpha"),
+            _ => panic!("expected group header"),
+        }
+        match &rows[1] {
+            FlatRow::Key { usage } => assert_eq!(usage.key, "A"),
+            _ => panic!("expected key row"),
+        }
+        // A filter matching nothing yields an empty list, not a panic.
+        assert!(flatten(&usages, Some("nope")).is_empty());
+    }
+
+    /// Cycle ring for the `p` filter: display order, every group once.
+    #[test]
+    fn group_labels_follow_display_order() {
+        let usages = vec![
+            usage("A", true, &[("svc", Some("alpha"))]),
+            usage("B", true, &[]),
+            usage("C", false, &[("svc", None)]),
+        ];
+        assert_eq!(
+            group_labels(&usages),
+            vec!["global", "alpha", "broken refs"]
+        );
     }
 }

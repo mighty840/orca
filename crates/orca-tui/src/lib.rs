@@ -4,9 +4,11 @@ mod chat_input;
 mod commands;
 
 pub(crate) use chat_dispatch::{drain_chat_result, send_chat_message};
+mod input_keys;
 mod keys;
 mod metrics;
 mod persist;
+mod secrets_actions;
 pub mod state;
 pub mod ui;
 mod webhook_actions;

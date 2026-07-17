@@ -5,52 +5,7 @@ use crossterm::event::KeyCode;
 use crate::api::ApiClient;
 use crate::state::{AppState, InputMode, View};
 
-pub fn handle_filter_key(state: &mut AppState, code: KeyCode) {
-    match code {
-        KeyCode::Esc => {
-            state.filter.clear();
-            state.input_mode = InputMode::Normal;
-            state.selected_service = 0;
-        }
-        KeyCode::Enter => {
-            state.input_mode = InputMode::Normal;
-        }
-        KeyCode::Backspace => {
-            state.filter.pop();
-            state.selected_service = 0;
-        }
-        KeyCode::Char(c) => {
-            state.filter.push(c);
-            state.selected_service = 0;
-        }
-        _ => {}
-    }
-}
-
-pub async fn handle_command_key(state: &mut AppState, client: &ApiClient, code: KeyCode) {
-    match code {
-        KeyCode::Esc => {
-            state.command_input.clear();
-            state.input_mode = InputMode::Normal;
-        }
-        KeyCode::Enter => {
-            let cmd = state.command_input.trim().to_string();
-            state.command_input.clear();
-            state.input_mode = InputMode::Normal;
-            crate::commands::execute_command(state, client, &cmd).await;
-        }
-        KeyCode::Backspace => {
-            state.command_input.pop();
-            if state.command_input.is_empty() {
-                state.input_mode = InputMode::Normal;
-            }
-        }
-        KeyCode::Char(c) => {
-            state.command_input.push(c);
-        }
-        _ => {}
-    }
-}
+pub use crate::input_keys::{handle_command_key, handle_filter_key};
 
 pub async fn handle_normal_key(
     state: &mut AppState,
@@ -60,6 +15,17 @@ pub async fn handle_normal_key(
 ) {
     if matches!(state.view, View::Chat) {
         crate::chat_input::handle_chat_key(state, client, code).await;
+        return;
+    }
+    // Pending delete confirmation (#69): the next keypress resolves it —
+    // `y` deletes, anything else cancels. Intercepted before normal
+    // dispatch so no other binding can fire mid-confirmation.
+    if let Some(key) = state.pending_secret_delete.take() {
+        if matches!(code, KeyCode::Char('y') | KeyCode::Char('Y')) {
+            crate::secrets_actions::delete_secret(client, state, &key).await;
+        } else {
+            state.flash("Delete cancelled".into());
+        }
         return;
     }
     match code {
@@ -78,7 +44,7 @@ pub async fn handle_normal_key(
 
         // Navigation
         KeyCode::Char('j') | KeyCode::Down => match state.view {
-            View::Secrets => secret_nav_next(state),
+            View::Secrets => crate::secrets_actions::secret_nav_next(state),
             View::Backups => {
                 let len = state.backups.as_ref().map(|b| b.nodes.len()).unwrap_or(0);
                 if len > 0 && state.selected_backup_node + 1 < len {
@@ -108,7 +74,7 @@ pub async fn handle_normal_key(
             _ => state.next_service(),
         },
         KeyCode::Char('k') | KeyCode::Up => match state.view {
-            View::Secrets => secret_nav_prev(state),
+            View::Secrets => crate::secrets_actions::secret_nav_prev(state),
             View::Backups => {
                 if state.selected_backup_node > 0 {
                     state.selected_backup_node -= 1;
@@ -136,7 +102,7 @@ pub async fn handle_normal_key(
             _ => state.prev_service(),
         },
         KeyCode::Char('g') => match state.view {
-            View::Secrets => secret_nav_first(state),
+            View::Secrets => crate::secrets_actions::secret_nav_first(state),
             View::Backups => state.selected_backup_node = 0,
             View::BackupSnapshots { .. } => state.selected_backup_snapshot = 0,
             View::Webhooks => state.selected_webhook = 0,
@@ -146,7 +112,7 @@ pub async fn handle_normal_key(
             _ => state.selected_service = 0,
         },
         KeyCode::Char('G') => match state.view {
-            View::Secrets => secret_nav_last(state),
+            View::Secrets => crate::secrets_actions::secret_nav_last(state),
             View::Backups => {
                 let len = state.backups.as_ref().map(|b| b.nodes.len()).unwrap_or(0);
                 if len > 0 {
@@ -242,7 +208,7 @@ pub async fn handle_normal_key(
         KeyCode::Char('2') | KeyCode::Char('n') => {}
         KeyCode::Char('3') if !matches!(state.view, View::Secrets) => {
             super::refresh_secrets_usage(client, state).await;
-            secret_nav_first(state);
+            crate::secrets_actions::secret_nav_first(state);
             state.push_view(View::Secrets);
         }
         KeyCode::Char('3') => {}
@@ -302,6 +268,13 @@ pub async fn handle_normal_key(
             state.input_mode = InputMode::Command;
             state.command_input = "webhook-add ".into();
         }
+        // `a` adds a secret: opens the command bar pre-filled with `:set`.
+        // Project-scoped keys use the `<project>.KEY` prefix form (#68).
+        KeyCode::Char('a') if matches!(state.view, View::Secrets) => {
+            state.input_mode = InputMode::Command;
+            state.command_input = "set ".into();
+            state.flash("Enter KEY <value> — or <project>.KEY <value> to scope".into());
+        }
         // `e` edits — opens command mode pre-filled with the current row's
         // identity so the user only types the changed field(s).
         KeyCode::Char('e') if matches!(state.view, View::Webhooks) => {
@@ -309,6 +282,16 @@ pub async fn handle_normal_key(
                 state.input_mode = InputMode::Command;
                 state.command_input =
                     format!("webhook-edit {} {} {} ", w.repo, w.branch, w.service_name);
+            }
+        }
+        // `e` edits the selected secret: `:set` pre-filled with the full
+        // stored key. Values are never readable back, so the flow always
+        // takes a fresh value (same as `:set` today).
+        KeyCode::Char('e') if matches!(state.view, View::Secrets) => {
+            if let Some(u) = crate::ui::secrets::selected_key(state) {
+                let key = u.key.clone();
+                state.input_mode = InputMode::Command;
+                state.command_input = format!("set {key} ");
             }
         }
         // `b` triggers a manual backup on the selected node when in the
@@ -325,8 +308,25 @@ pub async fn handle_normal_key(
         KeyCode::Char('x') if matches!(state.view, View::Webhooks) => {
             super::delete_selected_webhook(client, state).await;
         }
+        // `x` on a secret arms a y/N confirmation instead of deleting
+        // immediately — a mistyped delete here loses a credential, unlike
+        // stopping a service which is reversible.
+        KeyCode::Char('x') if matches!(state.view, View::Secrets) => {
+            if let Some(u) = crate::ui::secrets::selected_key(state) {
+                if u.in_store {
+                    state.pending_secret_delete = Some(u.key.clone());
+                } else {
+                    state.flash("Not in store (broken ref) — nothing to delete".into());
+                }
+            }
+        }
         KeyCode::Char('x') => super::handle_stop(client, state).await,
         KeyCode::Char('s') => handle_scale_prompt(state),
+        // `p` in the secrets view cycles the scope filter (#69); everywhere
+        // else it keeps its services-project-filter meaning.
+        KeyCode::Char('p') if matches!(state.view, View::Secrets) => {
+            crate::secrets_actions::cycle_scope_filter(state);
+        }
         KeyCode::Char('p') => handle_project_filter(state),
         KeyCode::Char('w') => {
             if matches!(state.view, View::Logs { .. } | View::Detail { .. }) {
@@ -367,40 +367,6 @@ fn handle_esc(state: &mut AppState) {
         state.flash("Project filter cleared".into());
     } else {
         state.pop_view();
-    }
-}
-
-/// Navigation helpers for the secrets organizer. The view is a flat list of
-/// group-headers interleaved with key rows, but selection should only land on
-/// key rows. Going through `selectable_indices` keeps the contract in one
-/// place (see `ui::secrets::flatten`).
-fn secret_nav_first(state: &mut AppState) {
-    let rows = crate::ui::secrets::flatten(&state.secrets_usage);
-    if let Some(&i) = crate::ui::secrets::selectable_indices(&rows).first() {
-        state.selected_secret = i;
-    }
-}
-
-fn secret_nav_last(state: &mut AppState) {
-    let rows = crate::ui::secrets::flatten(&state.secrets_usage);
-    if let Some(&i) = crate::ui::secrets::selectable_indices(&rows).last() {
-        state.selected_secret = i;
-    }
-}
-
-fn secret_nav_next(state: &mut AppState) {
-    let rows = crate::ui::secrets::flatten(&state.secrets_usage);
-    let sel = crate::ui::secrets::selectable_indices(&rows);
-    if let Some(next) = sel.iter().find(|&&i| i > state.selected_secret) {
-        state.selected_secret = *next;
-    }
-}
-
-fn secret_nav_prev(state: &mut AppState) {
-    let rows = crate::ui::secrets::flatten(&state.secrets_usage);
-    let sel = crate::ui::secrets::selectable_indices(&rows);
-    if let Some(prev) = sel.iter().rev().find(|&&i| i < state.selected_secret) {
-        state.selected_secret = *prev;
     }
 }
 

@@ -193,7 +193,10 @@ async fn cmd_secret_rm(state: &mut AppState, client: &ApiClient, parts: &[&str])
             crate::refresh_secrets_usage(client, state).await;
             // After the row drops out, clamp selection back into the
             // selectable range (skip past group headers).
-            let rows = crate::ui::secrets::flatten(&state.secrets_usage);
+            let rows = crate::ui::secrets::flatten(
+                &state.secrets_usage,
+                state.secrets_scope_filter.as_deref(),
+            );
             let sel = crate::ui::secrets::selectable_indices(&rows);
             if !sel.contains(&state.selected_secret) {
                 state.selected_secret = sel.last().copied().unwrap_or(0);
