@@ -55,6 +55,7 @@ pub async fn register_node(
         node_id: req.node_id,
         address: req.address.clone(),
         labels: req.labels,
+        peer_ip: None,
         last_heartbeat: chrono::Utc::now(),
         drain: false,
         cpu_percent: 0.0,

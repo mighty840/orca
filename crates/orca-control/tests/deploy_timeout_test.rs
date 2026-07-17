@@ -75,6 +75,7 @@ async fn register_node(state: &AppState, node_id: u64) {
     state.registered_nodes.write().await.insert(
         node_id,
         RegisteredNode {
+            peer_ip: None,
             node_id,
             address: format!("node-{node_id}:6881"),
             labels: HashMap::new(),

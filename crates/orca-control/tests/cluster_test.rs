@@ -29,6 +29,7 @@ fn test_app() -> (axum::Router, Arc<AppState>) {
 
 async fn register_node(state: &AppState, node_id: u64) {
     let node = RegisteredNode {
+        peer_ip: None,
         node_id,
         address: format!("10.0.0.{node_id}:6880"),
         labels: HashMap::new(),
@@ -145,5 +146,67 @@ async fn test_drained_node_skipped_by_scheduler() {
     assert!(
         err.contains("drained"),
         "error should tell the operator the node is drained, got: {err}"
+    );
+}
+
+/// #134: the master self-registers in `registered_nodes` with its real
+/// identity and `role=master`. A pin resolving to that entry must deploy
+/// LOCALLY — never dispatch over a WS session the master doesn't have.
+#[tokio::test]
+async fn master_pin_resolving_to_self_entry_deploys_locally() {
+    let (_app, state) = test_app();
+
+    // Simulate register_master_node: role=master + hostname identity.
+    {
+        let mut labels = std::collections::HashMap::new();
+        labels.insert("role".to_string(), "master".to_string());
+        labels.insert("hostname".to_string(), "breakpilot-infra-vm1".to_string());
+        state.registered_nodes.write().await.insert(
+            99,
+            RegisteredNode {
+                peer_ip: None,
+                node_id: 99,
+                address: "breakpilot-infra-vm1:6880".to_string(),
+                labels,
+                last_heartbeat: chrono::Utc::now(),
+                drain: false,
+                cpu_percent: 0.0,
+                memory_bytes: 0,
+                memory_total: 0,
+                disk_used: 0,
+                disk_total: 0,
+                net_rx: 0,
+                net_tx: 0,
+            },
+        );
+    }
+
+    let services: Vec<orca_core::config::ServiceConfig> =
+        serde_json::from_value(serde_json::json!(
+            [{
+                "name": "master-pinned-svc",
+                "image": "nginx:latest",
+                "replicas": 1,
+                "port": 80,
+                "placement": { "node": "breakpilot-infra-vm1" }
+            }]
+        ))
+        .unwrap();
+    let (deployed, errors) = orca_control::reconciler::reconcile(&state, &services).await;
+
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    assert!(
+        deployed.contains(&"master-pinned-svc".to_string()),
+        "master-pinned service must deploy locally"
+    );
+    // Nothing may be queued for WS dispatch to the self-entry.
+    assert!(
+        state
+            .pending_commands
+            .read()
+            .await
+            .get(&99)
+            .is_none_or(|c| c.is_empty()),
+        "no remote dispatch to the master's own node entry"
     );
 }

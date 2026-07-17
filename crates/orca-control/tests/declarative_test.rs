@@ -150,6 +150,7 @@ async fn remote_deploy_without_ack_is_not_redeployed_every_cycle() {
     state.registered_nodes.write().await.insert(
         7,
         RegisteredNode {
+            peer_ip: None,
             node_id: 7,
             address: "node-7:6881".into(),
             labels: HashMap::new(),
