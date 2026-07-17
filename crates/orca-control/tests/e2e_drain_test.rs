@@ -27,6 +27,7 @@ fn mock_state() -> Arc<AppState> {
 
 async fn register_node(state: &AppState, node_id: u64) {
     let node = RegisteredNode {
+        peer_ip: None,
         node_id,
         address: format!("10.0.0.{node_id}:6880"),
         labels: HashMap::new(),

@@ -46,6 +46,11 @@ fn node_matches_pin(node: &RegisteredNode, pin: &str) -> bool {
     {
         return true;
     }
+    // The session's peer IP as observed by the master (#135) — lets IP
+    // pins work even when the agent self-reports a hostname address.
+    if node.peer_ip.as_deref() == Some(pin) {
+        return true;
+    }
     node.labels.get("hostname").is_some_and(|h| h == pin)
 }
 
@@ -117,7 +122,15 @@ pub(crate) async fn find_target_node(
     };
     let nodes = state.registered_nodes.read().await;
     match resolve_placement(&nodes, target) {
-        PlacementResolution::Node(id) => Ok(Some(id)),
+        PlacementResolution::Node(id) => {
+            // The master self-registers with its real identity (#134); a pin
+            // resolving to the `role=master` entry means "deploy locally" —
+            // never a WS dispatch to a session the master doesn't have.
+            let is_master = nodes
+                .get(&id)
+                .is_some_and(|n| n.labels.get("role").is_some_and(|r| r == "master"));
+            if is_master { Ok(None) } else { Ok(Some(id)) }
+        }
         PlacementResolution::NoMatch => {
             if pin_matches_master(target) {
                 return Ok(None);
@@ -199,6 +212,7 @@ mod tests {
             node_id: id,
             address: address.to_string(),
             labels,
+            peer_ip: None,
             last_heartbeat: chrono::Utc::now(),
             drain: false,
             cpu_percent: 0.0,
@@ -262,6 +276,24 @@ mod tests {
         assert_eq!(
             resolve_placement(&nodes, "217.154.26.121:9443"),
             PlacementResolution::Node(1)
+        );
+    }
+
+    /// #135: agents self-report hostname addresses, but the master knows
+    /// the session's real peer IP — IP pins must match against it. This is
+    /// the prod case that refused deploys on v0.2.12-rc.1.
+    #[test]
+    fn ip_pin_matches_session_peer_ip() {
+        let mut n = node(1, "ubuntu:6881", Some("ubuntu"));
+        n.peer_ip = Some("217.154.26.121".to_string());
+        let nodes = registry(vec![n, node(2, "ubuntu-16gb-fsn1-1:6881", None)]);
+        assert_eq!(
+            resolve_placement(&nodes, "217.154.26.121"),
+            PlacementResolution::Node(1)
+        );
+        assert_eq!(
+            resolve_placement(&nodes, "10.9.9.9"),
+            PlacementResolution::NoMatch
         );
     }
 

@@ -179,8 +179,15 @@ pub use orca_core::api_types::LastBackupResult;
 pub struct RegisteredNode {
     /// Node ID.
     pub node_id: u64,
-    /// Node address (ip:port).
+    /// Node address (ip:port or hostname:port — self-reported by the agent).
     pub address: String,
+    /// The control session's peer IP as seen by the master (#135). The
+    /// ground-truth counterpart to the self-reported `address`; placement
+    /// pins match against it, so IP pins work regardless of what the agent
+    /// reports. `None` for the master's own entry and pre-upgrade persisted
+    /// nodes.
+    #[serde(default)]
+    pub peer_ip: Option<String>,
     /// Node labels.
     pub labels: HashMap<String, String>,
     /// Last heartbeat time.

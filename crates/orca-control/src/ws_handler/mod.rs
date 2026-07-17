@@ -11,7 +11,7 @@ mod reconcile;
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
-use axum::extract::{Query, State, WebSocketUpgrade};
+use axum::extract::{ConnectInfo, Query, State, WebSocketUpgrade};
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
@@ -66,6 +66,7 @@ pub(crate) async fn kill_agent_session(state: &AppState, node_id: u64, reason: &
 pub async fn ws_agent_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
+    ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
     Query(query): Query<WsQuery>,
 ) -> impl IntoResponse {
     // Authenticate: check token against cluster tokens
@@ -84,7 +85,7 @@ pub async fn ws_agent_handler(
     let address = query.address;
     info!("WebSocket upgrade accepted for node {node_id}");
 
-    ws.on_upgrade(move |socket| handle_agent_ws(socket, state, node_id, address))
+    ws.on_upgrade(move |socket| handle_agent_ws(socket, state, node_id, address, peer.ip()))
         .into_response()
 }
 
@@ -94,6 +95,7 @@ async fn handle_agent_ws(
     state: Arc<AppState>,
     node_id: u64,
     agent_address: Option<String>,
+    peer_ip: std::net::IpAddr,
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
@@ -132,6 +134,7 @@ async fn handle_agent_ws(
                 node_id,
                 address: addr.clone(),
                 labels: std::collections::HashMap::new(),
+                peer_ip: None,
                 last_heartbeat: chrono::Utc::now(),
                 drain: false,
                 cpu_percent: 0.0,
@@ -144,7 +147,11 @@ async fn handle_agent_ws(
             });
         node.last_heartbeat = chrono::Utc::now();
         node.address = addr;
-        info!("Node {node_id} registered at {}", node.address);
+        node.peer_ip = Some(peer_ip.to_string());
+        info!(
+            "Node {node_id} registered at {} (peer {peer_ip})",
+            node.address
+        );
     }
 
     // Send initial Ack
