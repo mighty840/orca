@@ -85,6 +85,7 @@ pub(crate) async fn handle_request(
     counter: &Arc<AtomicUsize>,
     client: &Arc<reqwest::Client>,
     is_tls: bool,
+    https_enabled: bool,
     rate_limiter: &RateLimiter,
     peer: SocketAddr,
     fallback: Option<&FallbackConfig>,
@@ -154,10 +155,12 @@ pub(crate) async fn handle_request(
         ));
     };
 
-    // HTTP -> HTTPS redirect: if not TLS and host has routes, redirect.
-    // Take the read in a tight scope so the lock releases before further
-    // awaits — see comment below.
-    if !is_tls {
+    // HTTP -> HTTPS redirect: if not TLS and host has routes, redirect —
+    // but only when a TLS endpoint actually exists (#123: with ACME
+    // unconfigured there is no HTTPS listener, so redirecting sends
+    // clients into a wall). Take the read in a tight scope so the lock
+    // releases before further awaits — see comment below.
+    if !is_tls && https_enabled {
         let known = {
             let routes = route_table.read().await;
             routes.contains_key(&host)
