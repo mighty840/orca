@@ -95,12 +95,21 @@ pub async fn update_container_routes(state: &AppState, config: &ServiceConfig) {
     drop(services);
 
     // Each domain routes to the same set of targets (same container(s)).
+    //
+    // Merge, don't replace: several services can share one domain with
+    // disjoint `routes` patterns (e.g. storefront on /* and admin on
+    // /admin/* of the same host). A plain insert() would make the last
+    // service to register wipe its siblings' targets — observed as
+    // whole-path-trees 404ing after every deploy/health transition. Only
+    // this service's own stale targets are dropped before extending; the
+    // removal paths (remove/pause) already use the same retain semantics.
     let mut route_table = state.route_table.write().await;
     for domain in &domains {
-        if targets.is_empty() {
+        let entry = route_table.entry(domain.clone()).or_default();
+        entry.retain(|t| t.service_name != config.name);
+        entry.extend(targets.iter().cloned());
+        if entry.is_empty() {
             route_table.remove(domain);
-        } else {
-            route_table.insert(domain.clone(), targets.clone());
         }
     }
 }
