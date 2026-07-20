@@ -158,3 +158,19 @@ fn generate_password(len: usize) -> String {
         .map(|_| CHARSET[rand::random::<u32>() as usize % CHARSET.len()] as char)
         .collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::generate_password;
+
+    #[test]
+    fn password_length_and_charset() {
+        let p = generate_password(24);
+        assert_eq!(p.len(), 24);
+        assert!(p.chars().all(|c| c.is_ascii_alphanumeric()));
+        assert!(
+            p.chars().collect::<std::collections::HashSet<_>>().len() > 4,
+            "CSPRNG output must not be near-constant"
+        );
+    }
+}

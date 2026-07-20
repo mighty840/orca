@@ -106,3 +106,11 @@ fn config_to_spec_passes_env_through() {
     // Without a secrets.json in cwd, patterns pass through unchanged
     assert_eq!(spec.env["SECRET"], "${secrets.FOO}");
 }
+
+#[test]
+fn restart_policy_propagates_to_spec() {
+    let mut c = minimal_config(Some("nginx".into()), None);
+    c.restart_policy = Some("on-failure:5".into());
+    let spec = service_config_to_spec(&c).unwrap();
+    assert_eq!(spec.restart_policy.as_deref(), Some("on-failure:5"));
+}
