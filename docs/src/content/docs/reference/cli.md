@@ -20,10 +20,12 @@ orca join 10.0.0.1       # Join by leader address
 ```
 
 ### `orca nodes`
-List cluster nodes with status and resource usage.
+List cluster nodes with status and resource usage. `--gpus` shows each
+node's declared GPU inventory (from `[[node.gpus]]` in `cluster.toml`).
 
 ```bash
 orca nodes
+orca nodes --gpus     # GPU inventory per node (alias: `orca gpus`)
 ```
 
 ### `orca tui`
@@ -65,10 +67,13 @@ Stream logs from a service.
 ```bash
 orca logs api
 orca logs api --tail 100
+orca logs api --follow            # stream new lines live (Ctrl-C to stop)
 orca logs api --summarize         # AI-summarized digest with likely causes
 ```
 
-`--summarize` requires an `[ai]` section in `cluster.toml`. See the
+`--follow` streams live for master-local services and polls for new lines
+for agent-pinned services. `--summarize` requires an `[ai]` section in
+`cluster.toml`. See the
 [AI Ops guide](/guide/ai-ops) for setup.
 
 ### `orca scale`
@@ -191,6 +196,8 @@ Manage git push deploy webhooks.
 ```bash
 orca webhooks                                                # List
 orca webhooks add --repo myorg/app --service app --branch main
+orca webhooks remove app                                     # Remove by service name
+orca webhooks remove 'myorg-*' navidrome                     # Multiple + glob (*, ?)
 
 # Provide a shared secret so the webhook handler can verify the signature:
 orca webhooks add --repo myorg/app --service app --branch main \
@@ -212,9 +219,26 @@ Flags:
 | `--secret <value>` | HMAC shared secret for signature verification |
 | `--infra` | Treat as an orca-infra webhook: `git pull` + redeploy the cluster on push |
 
+`orca webhooks remove <name>...` accepts multiple service names and glob
+patterns (`*`, `?`). Removal keys on the service name, so a name removes
+every webhook registered for that service.
+
 ### `orca completions`
-Print a shell completion script for the chosen shell. Pipe it to a file or
-source it directly.
+
+**Dynamic completion (recommended)** — completes live values (service names,
+secret keys, webhook and alert ids), not just subcommands and flags. Add one
+line to your shell rc:
+
+```bash
+# bash
+source <(COMPLETE=bash orca)
+# zsh
+source <(COMPLETE=zsh orca)
+# fish
+COMPLETE=fish orca | source
+```
+
+**Static script** — subcommands and flags only, for offline install:
 
 ```bash
 orca completions bash       > /etc/bash_completion.d/orca

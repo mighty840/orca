@@ -125,11 +125,9 @@ A few things to note:
 - `initial_delay_secs = 120` gives Keycloak ~90s of uninterrupted boot time before the first probe fires.
 
 ::: danger Pitfall: always run orca from the same working directory
-
 orca looks for `services/` **relative to the current working directory**. If you run `orca server -d` from `~`, it will look for `~/services/` and find nothing. Worse, if you run `orca deploy keycloak` from `~` while the server is running in `~/orca`, the deploy command will fail to find the toml.
 
 **Rule:** use `orca install-service` — it sets `WorkingDirectory=~/orca` in the systemd unit automatically. If running manually, always `cd ~/orca` first.
-
 :::
 
 ## 2. cluster.toml
@@ -170,7 +168,6 @@ secret_key = "${secrets.HETZNER_S3_SECRET_KEY}"
 ```
 
 ::: warning Pitfall: cluster.toml is only read on startup
-
 Changes to `cluster.toml` — including backup schedules, ACME email, and proxy ports — are loaded exactly once, when the orca server boots. Editing the file does nothing until you restart:
 
 ```bash
@@ -179,7 +176,6 @@ cd ~/orca && orca server -d
 ```
 
 Don't forget to `cd ~/orca` before restarting — otherwise orca will come back up pointing at the wrong (empty) services directory.
-
 :::
 
 ## 3. Secrets management
@@ -217,11 +213,9 @@ orca secrets rm KEY
 After rotating a secret, redeploy the consuming service: `orca deploy keycloak`.
 
 ::: danger Pitfall: secrets.json is written relative to cwd
-
 `orca secrets set` writes the encrypted `secrets.json` to the **current working directory**, not to a fixed location under `~/.orca/`. This is a known wart and is being fixed in an upcoming release.
 
 Until then: **always run `orca secrets set` from `~/orca`**. Otherwise, you'll end up with a `secrets.json` in `~` that the server (running from `~/orca`) never reads, and you'll spend an hour wondering why your env vars are blank.
-
 :::
 
 ## 4. CI/CD with webhooks
@@ -314,15 +308,15 @@ From then on, every push to `main` will:
 3. Orca verifies the HMAC, force-pulls `:latest`, and restarts the service
 
 ::: tip :latest vs :sha pull behavior
-
 Orca force-pulls `:latest` tags on every reconcile (this landed in main today). For `:<sha>` or any other immutable tag, orca skips the pull if the image already exists locally. This means Pattern 1 ("just bump latest") works as expected, and Pattern 2 ("bump the sha in toml") is efficient — no pointless re-pulls.
-
 :::
 
 ::: tip Webhooks are persisted
-
 As of v0.2.2, registered webhooks are saved to `~/.orca/webhooks.json` and survive restarts. You no longer need to re-register them after a reboot or `orca shutdown`.
+:::
 
+::: tip Manage webhooks from the TUI
+`orca tui` → press `5` (or `:webhooks`) for a dashboard of every registered webhook with last-trigger metadata (status, commit, age). Press `Enter` on a row to see the last 10 invocations; `a` to add, `e` to edit, `x` to delete. The invocation history is an in-memory ring on the master — it resets on `orca shutdown`.
 :::
 
 ### Infra webhook: GitOps auto-deploy
@@ -361,10 +355,8 @@ Now the workflow is:
 - **`orca redeploy <service>`** -- force-pulls the container image and restarts the service, even if the spec hasn't changed. Use this when you've pushed a new `:latest` image and want to pick it up immediately.
 
 ::: tip When to use which
-
 Use `orca deploy` for config changes (env vars, ports, domains, mounts).
 Use `orca redeploy` for image-only updates where the tag hasn't changed (e.g., `:latest`).
-
 :::
 
 ## 5. Private Docker registry pulls
@@ -382,7 +374,6 @@ From then on, any `service.toml` that references `registry.example.com/foo:tag` 
 If your private registry is itself a service managed by orca (and routed through orca's proxy on :443), then pulling **any** image from that registry requires the orca proxy to be up, which requires the registry image to already be cached locally.
 
 ::: danger Pitfall: pre-pull the registry image
-
 Before your very first `orca server -d` on a fresh host, manually pull the registry image:
 
 ```bash
@@ -392,12 +383,15 @@ docker pull registry:2   # or whatever image your registry service uses
 Otherwise you get a classic bootstrap deadlock: orca can't start the registry because it can't pull the registry image, because the proxy that routes to the registry isn't up yet.
 
 On subsequent boots this isn't a problem — the image is cached — but it bites you hard on first-time setup and on any host migration.
-
 :::
 
 ## 6. Backups
 
 Orca has a built-in backup scheduler configured via `cluster.toml`. It snapshots volumes and, optionally, runs per-service `pre_hook` commands (e.g. `pg_dump`) before snapshotting.
+
+::: tip Backup dashboard in the TUI
+`orca tui` → press `4` (or `:backups`) for a per-node table of backup status: hostname, role (master / agent), last-run age, snapshot count, total size, and the last result message. Press `b` on a row to trigger an immediate backup on that node (master row runs `orca backup all` as a subprocess; agent rows dispatch over WS). `Enter` drills into a per-snapshot listing with file inventory. The view shows local-disk snapshots only — S3 listing is tracked separately (#41).
+:::
 
 ### cluster.toml backup config
 
@@ -489,9 +483,7 @@ Two non-obvious things:
 2. **`path = "/realms/master"`** — the obvious choice is `/health/ready`, but Keycloak exposes that on the **management port 9000**, not the main HTTP port 8080 that orca probes. `/realms/master` is a cheap GET on port 8080 that returns 200 once the server is fully up.
 
 ::: danger Pitfall: no initial_delay_secs = crash loop on slow starters
-
 Any service that takes more than a few seconds to accept connections — Keycloak, Gitea on first migration, anything JVM-based — needs `initial_delay_secs`. Otherwise orca's first probe fails, the `failure_threshold` ticks down quickly, and the container is killed before it ever finishes booting. You'll waste an hour thinking the image is broken.
-
 :::
 
 ## 8. Reverse proxy and TLS
@@ -534,9 +526,7 @@ Some upstreams are picky about headers and cookies. If you're debugging weird lo
 - **Upstream redirects are NOT auto-followed.** Orca's HTTP client is configured with `redirect::Policy::none()`. If the proxy follows a 302 from Keycloak, the client browser never sees the redirect, the auth handshake breaks, and you get infinite login loops.
 
 ::: tip Debugging login loops
-
 If a service that works direct-to-container stops working through the proxy, 95% of the time it's one of the above three issues. Orca has all three handled in current main — if you're running older builds, upgrade first before going deep on a debugging session.
-
 :::
 
 ## 9. Migrating from another orchestrator
