@@ -199,6 +199,11 @@ impl ServiceConfig {
                 self.name
             ));
         }
+        // #89 (network == name): NOT a hard error — prod runs five such
+        // services healthily (incl. one agent-pinned), so the collision
+        // alone doesn't break registration; the reported failure needs an
+        // unidentified co-factor. `load_dir` logs a warning as a debugging
+        // breadcrumb instead.
         Ok(())
     }
 
@@ -366,6 +371,18 @@ mod tests {
         assert!(c.validate().is_ok());
         c.domain = None;
         c.domains = vec!["b.com".into()];
+        assert!(c.validate().is_ok());
+    }
+
+    /// #89: `network == name` silently broke registration; validate must
+    /// refuse it loudly.
+    #[test]
+    fn validate_allows_network_equal_to_name() {
+        // #89: the collision is legal (prod runs several such services,
+        // including agent-pinned ones) — the breadcrumb is a load-time
+        // warning, never a rejection.
+        let mut c = base_config();
+        c.network = Some(c.name.clone());
         assert!(c.validate().is_ok());
     }
 

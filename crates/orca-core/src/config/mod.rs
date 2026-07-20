@@ -139,6 +139,17 @@ impl ServicesConfig {
                     if svc.network.is_none() {
                         svc.network = Some(project_name.clone());
                     }
+                    // Debugging breadcrumb for the #89 family: the collision
+                    // is legal (prod runs several) but was present in the one
+                    // observed silent-registration failure — leave a trace
+                    // for the next investigation.
+                    if svc.network.as_deref() == Some(svc.name.as_str()) {
+                        tracing::warn!(
+                            service = %svc.name,
+                            "`network` equals the service name — legal, but implicated in \
+                             unresolved silent-registration reports (#89)"
+                        );
+                    }
                 }
 
                 all_services.extend(config.service);
