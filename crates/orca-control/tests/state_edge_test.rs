@@ -37,7 +37,14 @@ async fn test_concurrent_deploys_same_service() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let app = router(state.clone());
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let client = reqwest::Client::new();
@@ -84,7 +91,14 @@ async fn test_stop_nonexistent_service() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let app = router(state.clone());
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let client = reqwest::Client::new();
@@ -109,7 +123,14 @@ async fn test_deploy_then_immediately_stop() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let app = router(state.clone());
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let client = reqwest::Client::new();
@@ -161,7 +182,14 @@ async fn test_redeploy_with_fewer_replicas() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let app = router(state.clone());
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let client = reqwest::Client::new();

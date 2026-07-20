@@ -35,7 +35,14 @@ pub async fn start_server_with_watchdog() -> (u16, Arc<AppState>) {
 
     // Spawn API
     let app = orca_control::api::router(state.clone());
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
 
     // Spawn watchdog and health checker
     orca_control::watchdog::spawn_watchdog(state.clone());
