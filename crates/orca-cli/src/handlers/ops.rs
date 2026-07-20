@@ -301,42 +301,59 @@ pub async fn handle_webhooks(action: WebhookAction, api: String) -> anyhow::Resu
     Ok(())
 }
 
-pub async fn handle_nodes(_gpus: bool, api: String) -> anyhow::Result<()> {
-    let client = reqwest::Client::new();
-    match client
-        .get(format!("{}/api/v1/cluster/info", api.trim_end_matches('/')))
-        .send()
-        .await
-    {
-        Ok(resp) => {
-            let json: serde_json::Value = resp.json().await?;
-            println!("Cluster: {}", json["cluster_name"]);
-            let nodes = json["nodes"].as_array();
-            if let Some(nodes) = nodes {
-                if nodes.is_empty() {
-                    println!("No nodes registered.");
-                } else {
-                    let header = format!("{:<20} {:<25} {:<10}", "NODE ID", "ADDRESS", "STATUS");
-                    println!("{header}");
-                    for n in nodes {
-                        println!(
-                            "{:<20} {:<25} {:<10}",
-                            n["node_id"], n["address"], n["last_heartbeat"]
-                        );
-                    }
-                }
-            }
+pub async fn handle_nodes(gpus: bool, api: String) -> anyhow::Result<()> {
+    // Authenticated + status-checked (was a raw client with no token, which
+    // 401'd against a token-protected master and then failed to decode the
+    // plain-text body as JSON — "expected value at line 1 column 1").
+    let client = OrcaClient::new(api);
+    let json = client.cluster_info().await?;
+    println!("Cluster: {}", json["cluster_name"].as_str().unwrap_or("?"));
+
+    let empty = Vec::new();
+    let nodes = json["nodes"].as_array().unwrap_or(&empty);
+    if nodes.is_empty() {
+        println!("No nodes registered.");
+        return Ok(());
+    }
+
+    let s = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
+    if gpus {
+        println!("{:<22} {:<24} GPUs", "NODE", "ADDRESS");
+        let mut any = false;
+        for n in nodes {
+            let list = n["gpus"].as_array().cloned().unwrap_or_default();
+            let desc = if list.is_empty() {
+                "-".to_string()
+            } else {
+                any = true;
+                list.iter()
+                    .map(|g| {
+                        let model = g["model"].as_str().unwrap_or("gpu");
+                        let count = g["count"].as_u64().unwrap_or(1);
+                        let vendor = g["vendor"].as_str().unwrap_or("");
+                        format!("{count}x {vendor} {model}").trim().to_string()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            println!("{:<22} {:<24} {}", n["node_id"], s(&n["address"]), desc);
         }
-        Err(e) => {
-            tracing::error!("Failed to get cluster info: {e}");
-            tracing::error!("Is `orca server` running?");
+        if !any {
+            println!("\nNo GPUs declared. Add `[[node.gpus]]` to a node in cluster.toml.");
         }
+        return Ok(());
+    }
+
+    println!("{:<22} {:<24} LAST HEARTBEAT", "NODE ID", "ADDRESS");
+    for n in nodes {
+        println!(
+            "{:<22} {:<24} {}",
+            n["node_id"],
+            s(&n["address"]),
+            s(&n["last_heartbeat"])
+        );
     }
     Ok(())
-}
-
-pub fn handle_gpus() {
-    println!("GPU monitoring: use `orca nodes --gpus`");
 }
 
 pub async fn handle_redeploy(service: String, api: String) -> anyhow::Result<()> {

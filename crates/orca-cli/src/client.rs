@@ -39,6 +39,25 @@ impl OrcaClient {
         format!("{}{path}", self.base_url)
     }
 
+    /// GET the cluster info document (authenticated, status-checked).
+    pub async fn cluster_info(&self) -> anyhow::Result<serde_json::Value> {
+        let resp = self
+            .auth(self.client.get(self.url("/api/v1/cluster/info")))
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            if status.as_u16() == 401 {
+                anyhow::bail!(
+                    "unauthorized (HTTP 401) — set a token via ORCA_TOKEN or ~/.orca/cluster.token"
+                );
+            }
+            anyhow::bail!("cluster info failed (HTTP {status}): {}", body.trim());
+        }
+        Ok(resp.json().await?)
+    }
+
     pub async fn deploy(&self, config: &ServicesConfig) -> anyhow::Result<DeployResponse> {
         let req = DeployRequest {
             services: config.service.clone(),

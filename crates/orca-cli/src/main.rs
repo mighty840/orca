@@ -99,7 +99,7 @@ async fn main() -> anyhow::Result<()> {
         Command::Import { source } => handlers::import::handle_import(source),
         Command::Webhooks { action } => handlers::ops::handle_webhooks(action, cli.api).await?,
         Command::Nodes { gpus } => handlers::ops::handle_nodes(gpus, cli.api).await?,
-        Command::Gpus => handlers::ops::handle_gpus(),
+        Command::Gpus => handlers::ops::handle_nodes(true, cli.api).await?,
         Command::Reload => handlers::reload::handle_reload().await?,
         Command::Exec { service, cmd } => {
             handlers::exec::handle_exec(&service, &cmd, cli.api).await?;

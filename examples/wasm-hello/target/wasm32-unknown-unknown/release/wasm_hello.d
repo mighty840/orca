@@ -1,1 +1,0 @@
-/home/sharang/workspace/orca/examples/wasm-hello/target/wasm32-unknown-unknown/release/wasm_hello.wasm: /home/sharang/workspace/orca/examples/wasm-hello/src/lib.rs /home/sharang/workspace/orca/examples/wasm-hello/wit/world.wit
