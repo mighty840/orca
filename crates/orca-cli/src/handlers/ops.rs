@@ -68,48 +68,6 @@ pub async fn handle_start(service: &str, api: String) -> anyhow::Result<()> {
     Ok(())
 }
 
-pub async fn handle_logs(
-    service: String,
-    tail: u64,
-    summarize: bool,
-    api: String,
-) -> anyhow::Result<()> {
-    let client = OrcaClient::new(api);
-    match client.logs(&service, tail).await {
-        Ok(logs) => {
-            if summarize {
-                let ai_config = crate::handlers::ai_ops::load_ai_config();
-                match ai_config {
-                    Some(config) => {
-                        let prompt = format!(
-                            "Analyze and summarize these logs for the service '{service}'. \
-                             Highlight errors, warnings, and anomalies:\n\n{logs}"
-                        );
-                        match orca_ai::ops::ask(&config, &prompt, "", "").await {
-                            Ok(summary) => println!("{summary}"),
-                            Err(e) => {
-                                tracing::error!("AI summarization failed: {e}");
-                                print!("{logs}");
-                            }
-                        }
-                    }
-                    None => {
-                        println!("No AI configuration found. Configure [ai] in cluster.toml.");
-                        print!("{logs}");
-                    }
-                }
-            } else {
-                print!("{logs}");
-            }
-        }
-        Err(e) => {
-            tracing::error!("Failed to get logs for '{service}': {e}");
-            std::process::exit(1);
-        }
-    }
-    Ok(())
-}
-
 pub async fn handle_scale(service: String, replicas: u32, api: String) -> anyhow::Result<()> {
     let client = OrcaClient::new(api);
     match client.scale(&service, replicas).await {
@@ -293,9 +251,58 @@ pub async fn handle_webhooks(action: WebhookAction, api: String) -> anyhow::Resu
                 None => println!("No webhooks configured."),
             }
         }
-        WebhookAction::Remove { id } => {
-            client.remove_webhook(&id).await?;
-            println!("Webhook removed for service: {id}");
+        WebhookAction::Remove { ids } => {
+            // Resolve glob patterns against the live webhook list; plain names
+            // pass through. Deletion keys on service_name server-side, so a
+            // name removes every webhook registered for that service.
+            let has_glob = ids.iter().any(|p| p.contains('*') || p.contains('?'));
+            let targets: Vec<String> = if has_glob {
+                let resp = client.list_webhooks().await?;
+                let services: Vec<String> = resp["webhooks"]
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|h| h["service_name"].as_str().map(String::from))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let mut matched: Vec<String> = Vec::new();
+                for pat in &ids {
+                    if pat.contains('*') || pat.contains('?') {
+                        for s in &services {
+                            if glob_match(pat, s) && !matched.contains(s) {
+                                matched.push(s.clone());
+                            }
+                        }
+                    } else if !matched.contains(pat) {
+                        matched.push(pat.clone());
+                    }
+                }
+                matched
+            } else {
+                let mut t: Vec<String> = Vec::new();
+                for id in ids {
+                    if !t.contains(&id) {
+                        t.push(id);
+                    }
+                }
+                t
+            };
+            if targets.is_empty() {
+                println!("No webhooks matched.");
+                return Ok(());
+            }
+            let mut removed = 0usize;
+            for t in &targets {
+                match client.remove_webhook(t).await {
+                    Ok(_) => {
+                        println!("Removed webhook(s) for service: {t}");
+                        removed += 1;
+                    }
+                    Err(e) => eprintln!("Failed to remove {t}: {e}"),
+                }
+            }
+            println!("Removed {removed}/{} target(s).", targets.len());
         }
     }
     Ok(())
@@ -420,5 +427,38 @@ mod tests {
             find_orca_dir_from(dir.path()),
             Some(dir.path().to_path_buf())
         );
+    }
+}
+
+/// Minimal glob for webhook service-name matching: `*` matches any run
+/// (including empty), `?` matches exactly one character. Anchored (whole
+/// string must match), which is what `remove 'breakpilot-*'` expects.
+fn glob_match(pattern: &str, text: &str) -> bool {
+    fn m(p: &[u8], t: &[u8]) -> bool {
+        match p.first() {
+            None => t.is_empty(),
+            Some(b'*') => m(&p[1..], t) || (!t.is_empty() && m(p, &t[1..])),
+            Some(b'?') => !t.is_empty() && m(&p[1..], &t[1..]),
+            Some(&c) => !t.is_empty() && t[0] == c && m(&p[1..], &t[1..]),
+        }
+    }
+    m(pattern.as_bytes(), text.as_bytes())
+}
+
+#[cfg(test)]
+mod glob_tests {
+    use super::glob_match;
+
+    #[test]
+    fn glob_matches() {
+        assert!(glob_match("breakpilot-*", "breakpilot-erp"));
+        assert!(glob_match("breakpilot-*", "breakpilot-"));
+        assert!(glob_match("*", "anything"));
+        assert!(glob_match("navidrome", "navidrome"));
+        assert!(glob_match("svc-?", "svc-1"));
+        assert!(glob_match("*-db", "kitchenasty-db"));
+        assert!(!glob_match("breakpilot-*", "navidrome"));
+        assert!(!glob_match("svc-?", "svc-12"));
+        assert!(!glob_match("navidrome", "navidrome2"));
     }
 }

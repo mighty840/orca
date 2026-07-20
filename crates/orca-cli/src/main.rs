@@ -3,9 +3,11 @@ mod commands;
 mod handlers;
 mod subcommands;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 
 use commands::Command;
+
+mod completion;
 
 const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-", env!("ORCA_COMMIT"));
 
@@ -29,6 +31,10 @@ async fn main() -> anyhow::Result<()> {
     // rustls 0.23 requires an explicit provider when multiple crypto crates are
     // in the dependency graph (ring via reqwest + aws-lc-rs via orca-proxy).
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
+    // Dynamic completion: when COMPLETE=<shell> is set, print completions and
+    // exit; otherwise return and run normally. Must precede stdout writes.
+    clap_complete::CompleteEnv::with_factory(Cli::command).complete();
 
     let cli = Cli::parse();
 
@@ -84,10 +90,10 @@ async fn main() -> anyhow::Result<()> {
         Command::Logs {
             service,
             tail,
-            follow: _,
+            follow,
             summarize,
         } => {
-            handlers::ops::handle_logs(service, tail, summarize, cli.api).await?;
+            handlers::logs::handle_logs(service, tail, follow, summarize, cli.api).await?;
         }
         Command::Scale { service, replicas } => {
             handlers::ops::handle_scale(service, replicas, cli.api).await?;
@@ -171,6 +177,10 @@ async fn main() -> anyhow::Result<()> {
                 &mut <Cli as clap::CommandFactory>::command(),
                 "orca",
                 &mut std::io::stdout(),
+            );
+            eprintln!(
+                "# Static completion (names/flags only). For live values \
+                 (service/secret/webhook/alert), use: source <(COMPLETE={shell} orca)"
             );
         }
         Command::Build { service, file } => {

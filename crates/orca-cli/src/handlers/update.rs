@@ -114,7 +114,9 @@ async fn find_newest_release(client: &reqwest::Client) -> Result<GithubRelease> 
         .get(ALL_RELEASES_URL)
         .send()
         .await
-        .context("failed to fetch releases")?;
+        .context("failed to fetch releases")?
+        .error_for_status()
+        .context("GitHub releases request failed")?;
     let releases: Vec<GithubRelease> = resp.json().await.context("failed to parse releases")?;
 
     let mut best: Option<GithubRelease> = None;
