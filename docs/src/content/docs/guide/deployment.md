@@ -88,9 +88,7 @@ orca webhooks              # List registered webhooks
 ```
 
 ::: tip
-
 Webhook payloads are verified with HMAC-SHA256 signatures to prevent unauthorized deploys.
-
 :::
 
 ## TLS Certificates
@@ -109,9 +107,7 @@ acme_email = "ops@example.com"
 For BYO certs, place them in the configured cert directory and reference them in the service config.
 
 ::: warning
-
 Port 80 must be accessible from the internet for ACME HTTP-01 challenges to succeed.
-
 :::
 
 ## Persistent State

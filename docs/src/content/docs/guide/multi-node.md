@@ -94,6 +94,28 @@ The watchdog never triggers local reconciliation for services with a `placement.
 This means you can restart the master, upgrade it, or recover from a network
 partition -- agents will self-heal without manual intervention.
 
+### Control-session liveness
+
+A node is *reachable* exactly when its control session is alive, and a
+session is alive exactly when it carries traffic (#131). Agents heartbeat
+every 5s and the master pings every 30s, and both sides enforce
+**read-idle deadlines** on top of that:
+
+- The master closes a session that has been silent for
+  `[deploy].ws_idle_timeout_secs` (default 30s) — the node immediately
+  stops being reachable and its remote service state is dropped rather
+  than served stale.
+- The agent tears down its side after 90s of silence and reconnects with
+  backoff.
+
+This catches *half-open* connections — the peer vanished without closing
+the TCP stream (NAT timeout, VM freeze, cable pull) — which previously
+left a zombie session that looked healthy while every deploy timed out.
+A missed deploy acknowledgment also kills the session outright: the next
+deploy fails fast with `node is unreachable until it rejoins` instead of
+re-timing-out, and the node returns as soon as the agent's reconnect
+lands. No manual agent restart is ever required.
+
 ### Webhook behaviour when an agent is offline
 
 If a git push webhook fires while the target agent is disconnected, the API

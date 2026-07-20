@@ -133,9 +133,7 @@ orca tui             # Terminal dashboard
 ```
 
 ::: tip
-
 For single-node setups, just omit the `[[node]]` sections in `cluster.toml`. Orca runs everything locally by default.
-
 :::
 
 ## One-Click Database

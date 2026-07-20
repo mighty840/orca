@@ -92,9 +92,7 @@ When an alert fires, the AI investigates the root cause, suggests fixes, and tra
 ## Auto-Remediation
 
 ::: warning
-
 Auto-remediation is powerful but should be enabled cautiously in production. Start with `restart_crashed` only.
-
 :::
 
 ```toml
