@@ -22,6 +22,20 @@ authors = ["Sharang <sharang@meghsakha.com>"]
 keywords = ["orchestrator", "container", "wasm", "docker", "kubernetes"]
 categories = ["command-line-utilities"]
 
+# Portable build tuning (machine/infra-specific settings — jobs, mold linker,
+# the Kellnr registry mirror, RUSTC_WRAPPER=sccache — stay in each dev's local
+# ~/.cargo/config.toml, not here).
+[profile.dev]
+# Full debuginfo makes each debug test binary ~400MB; one `cargo test
+# --workspace` regenerates 30-40GB. Line tables keep file:line backtraces at
+# ~1/10th the size.
+debug = "line-tables-only"
+# sccache cannot cache incremental compilation and silently passes through
+# when it's on. Off = sccache actually caches every crate build (so rebuilds
+# after a `cargo clean` are mostly cache hits) and no multi-GB
+# target/debug/incremental dir. CI already builds with CARGO_INCREMENTAL=0.
+incremental = false
+
 [workspace.dependencies]
 # Shared across crates
 orca-core = { path = "crates/orca-core", version = "0.2.12-rc.4" }
