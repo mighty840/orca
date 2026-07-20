@@ -103,6 +103,30 @@ pub(crate) async fn reconcile_service(
 
     // Check if placement targets a specific remote node
     if let Some(target_node_id) = find_target_node(state, config).await? {
+        // Idempotency (#120): the LOCAL branch below has always skipped
+        // when the spec is unchanged and instances are running; the remote
+        // branch dispatched unconditionally — so any caller that reconciles
+        // the full tree (the infra webhook did) force-recreated every
+        // placement-pinned service on the agent while local services were
+        // spared. Skip the dispatch when the stored spec matches and the
+        // remote placeholder is already Running. Compare BEFORE the config
+        // is overwritten below.
+        {
+            let services = state.services.read().await;
+            if let Some(svc_state) = services.get(&config.name) {
+                let placeholder_id = format!("remote-{target_node_id}");
+                let placeholder_running = svc_state.instances.iter().any(|i| {
+                    i.handle.runtime_id == placeholder_id && i.status == WorkloadStatus::Running
+                });
+                if placeholder_running && svc_state.config.spec_matches(config) {
+                    info!(
+                        "Service {} already at desired state on node {} (same spec) — skipping",
+                        config.name, target_node_id
+                    );
+                    return Ok(());
+                }
+            }
+        }
         // Record the declared spec + a placeholder instance on the master
         // BEFORE dispatching the deploy. `orca status` then shows the
         // remote-scheduled workload (placeholder optimistically Running so the

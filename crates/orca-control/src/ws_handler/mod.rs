@@ -295,6 +295,15 @@ async fn handle_agent_message(
             let mut services = state.services.write().await;
             if let Some(svc) = services.get_mut(&service_name) {
                 let mut all = svc.config.all_domains();
+                // Only fold discovered domains into services with NO
+                // declared domains (adopted/unmanaged workloads). Mutating
+                // a declared service's domain set makes `spec_matches`
+                // diverge from the on-disk config, so the declarative loop
+                // saw a permanent "change" and redeployed it every pass —
+                // the 60s-cadence churn behind #120.
+                if !all.is_empty() {
+                    return Ok(());
+                }
                 if !all.contains(&domain) {
                     all.push(domain);
                     if all.len() == 1 {
@@ -426,13 +435,5 @@ async fn handle_agent_message(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ws_query_deserializes() {
-        let q: WsQuery = serde_json::from_str(r#"{"token":"abc123","node_id":42}"#).unwrap();
-        assert_eq!(q.token, "abc123");
-        assert_eq!(q.node_id, 42);
-    }
-}
+#[path = "tests.rs"]
+mod tests;

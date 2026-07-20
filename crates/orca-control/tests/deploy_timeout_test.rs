@@ -208,3 +208,72 @@ async fn real_agent_error_propagates_after_ack() {
         "should not be a timeout once the agent reported a result: {err}"
     );
 }
+
+/// #120 regression: reconciling an UNCHANGED placement-pinned service must
+/// not dispatch a deploy. The remote branch lacked the local branch's
+/// same-spec skip, so full-tree reconciles (the infra webhook) force-
+/// recreated every remote service across unrelated projects.
+#[tokio::test]
+async fn unchanged_remote_spec_is_not_redispatched() {
+    let state = make_state(ClusterConfig::default());
+    register_node(&state, 1).await;
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<MasterMessage>(8);
+    state
+        .ws_agents
+        .write()
+        .await
+        .insert(1, orca_control::state::AgentSession::new(tx));
+
+    let cfg = config_placed_on("svc", "1");
+
+    // Simulate a service already deployed to node 1: stored config matches
+    // and the remote placeholder is Running.
+    {
+        let mut services = state.services.write().await;
+        let mut svc = orca_control::state::ServiceState::from_config(cfg.clone());
+        svc.instances.push(orca_control::state::InstanceState {
+            handle: orca_core::runtime::WorkloadHandle {
+                runtime_id: "remote-1".into(),
+                name: "orca-svc".into(),
+                metadata: Default::default(),
+            },
+            status: orca_core::types::WorkloadStatus::Running,
+            host_port: None,
+            container_address: None,
+            health: orca_core::types::HealthState::NoCheck,
+            started_at: std::time::Instant::now(),
+            is_canary: false,
+        });
+        services.insert("svc".into(), svc);
+    }
+
+    let (deployed, errors) = orca_control::reconciler::reconcile(&state, &[cfg.clone()]).await;
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+    assert!(
+        deployed.contains(&"svc".to_string()),
+        "skip still counts as converged"
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "unchanged spec must not dispatch a Deploy to the agent"
+    );
+
+    // A CHANGED spec must still dispatch.
+    let mut changed = cfg;
+    changed.env.insert("NEW_VAR".into(), "value".into());
+    let state_c = state.clone();
+    let handle =
+        tokio::spawn(
+            async move { orca_control::reconciler::reconcile(&state_c, &[changed]).await },
+        );
+    let msg = tokio::time::timeout(std::time::Duration::from_secs(3), rx.recv())
+        .await
+        .expect("changed spec must dispatch")
+        .expect("channel open");
+    assert!(
+        matches!(msg, MasterMessage::Deploy { .. }),
+        "expected Deploy, got {msg:?}"
+    );
+    drop(rx); // no agent to ack — let the deploy fail; not under test here
+    let _ = handle.await;
+}
