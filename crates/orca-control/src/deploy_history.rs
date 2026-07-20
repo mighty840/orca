@@ -91,6 +91,7 @@ mod tests {
 
     fn test_config(name: &str, image: &str) -> ServiceConfig {
         ServiceConfig {
+            restart_policy: None,
             name: name.to_string(),
             project: None,
             runtime: Default::default(),

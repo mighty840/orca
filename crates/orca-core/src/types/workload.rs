@@ -62,6 +62,10 @@ pub struct WorkloadSpec {
     /// Image pull policy.
     #[serde(default)]
     pub pull_policy: super::PullPolicy,
+    /// Docker restart policy string ("no", "always", "unless-stopped",
+    /// "on-failure[:N]"). None = Docker default (no).
+    #[serde(default)]
+    pub restart_policy: Option<String>,
 }
 
 impl WorkloadSpec {

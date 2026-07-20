@@ -23,6 +23,28 @@ pub struct SetSecretRequest {
     pub value: String,
 }
 
+/// Merge cluster.toml's own `${secrets.X}` references (#137 prerequisite)
+/// into the usage map, deduped, attributed to a synthetic "cluster.toml"
+/// source. Pure so it can be unit-tested without the global store.
+fn merge_cluster_refs(
+    refs: &[orca_core::secrets::SecretReference],
+    map: &mut BTreeMap<String, Vec<SecretRef>>,
+) {
+    let mut seen = std::collections::HashSet::new();
+    for r in refs {
+        let target = match &r.scope {
+            Some(s) => format!("{s}.{}", r.key),
+            None => r.key.clone(),
+        };
+        if seen.insert(target.clone()) {
+            map.entry(target).or_default().push(SecretRef {
+                service_name: "cluster.toml".to_string(),
+                project: None,
+            });
+        }
+    }
+}
+
 /// `GET /api/v1/secrets` — return the list of secret keys (never values).
 pub async fn list_secrets() -> impl IntoResponse {
     match orca_core::secrets::open_configured() {
@@ -120,6 +142,13 @@ pub async fn secrets_usage(State(state): State<Arc<AppState>>) -> impl IntoRespo
         }
     }
 
+    // cluster.toml's own references (#137 prerequisite): AI api key, SMTP
+    // password, S3 backup credentials etc. resolve from the same store —
+    // without indexing them, those keys look orphaned in the dashboard
+    // (and a future GC would eat live cluster secrets). Raw refs are
+    // captured at config load, before resolution erases them.
+    merge_cluster_refs(&state.cluster_config.secret_refs, &mut refs_by_target);
+
     // Emit stored keys first (preserving alphabetical order from the store),
     // then any referenced-but-unstored keys as "broken" entries. `key` is
     // always the FULL stored key (delete/set target); `scope` is the
@@ -176,5 +205,37 @@ pub async fn remove_secret(Path(key): Path<String>) -> impl IntoResponse {
             Json(serde_json::json!({ "error": e.to_string() })),
         )
             .into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orca_core::secrets::SecretReference;
+
+    #[test]
+    fn cluster_refs_join_as_cluster_toml_source() {
+        let refs = vec![
+            SecretReference {
+                scope: None,
+                key: "ai_key".into(),
+            },
+            SecretReference {
+                scope: Some("proj".into()),
+                key: "tok".into(),
+            },
+            SecretReference {
+                scope: None,
+                key: "ai_key".into(),
+            },
+        ];
+        let mut map = BTreeMap::new();
+        merge_cluster_refs(&refs, &mut map);
+        assert_eq!(map["ai_key"].len(), 1, "duplicate refs dedupe");
+        assert_eq!(map["ai_key"][0].service_name, "cluster.toml");
+        assert!(
+            map.contains_key("proj.tok"),
+            "scoped cluster ref keyed by prefix"
+        );
     }
 }

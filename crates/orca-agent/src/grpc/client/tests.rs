@@ -28,6 +28,7 @@ fn test_backoff_doubles() {
 
 fn make_test_spec(name: &str) -> WorkloadSpec {
     WorkloadSpec {
+        restart_policy: None,
         name: name.to_string(),
         runtime: orca_core::types::RuntimeKind::Container,
         image: "test:latest".to_string(),

@@ -45,6 +45,7 @@ fn state_with_token(token: &str) -> Arc<AppState> {
 
 fn config(name: &str) -> ServiceConfig {
     ServiceConfig {
+        restart_policy: None,
         name: name.into(),
         project: None,
         runtime: RuntimeKind::Container,

@@ -5,7 +5,7 @@ mod helpers;
 use std::collections::HashMap;
 
 use bollard::container::Config;
-use bollard::models::{HostConfig, PortBinding};
+use bollard::models::{HostConfig, PortBinding, RestartPolicy, RestartPolicyNameEnum};
 
 use orca_core::types::WorkloadSpec;
 
@@ -66,6 +66,7 @@ pub(crate) fn build_container_config(spec: &WorkloadSpec) -> Config<String> {
         memory: memory_limit,
         nano_cpus,
         log_config: Some(log_config),
+        restart_policy: build_restart_policy(spec.restart_policy.as_deref()),
         ..Default::default()
     };
 
@@ -96,5 +97,55 @@ pub(crate) fn network_name(spec: &WorkloadSpec) -> String {
         // Derive from service name prefix (e.g., "kitchenasty-db" → "orca-kitchenasty")
         let prefix = spec.name.split('-').next().unwrap_or(&spec.name);
         format!("orca-{prefix}")
+    }
+}
+
+/// Map the spec's restart-policy string to Docker's (#121). Invalid values
+/// are rejected at config load (`ServiceConfig::validate`); anything
+/// unrecognized here degrades to None (Docker default: no restart) rather
+/// than failing the deploy.
+fn build_restart_policy(policy: Option<&str>) -> Option<RestartPolicy> {
+    let policy = policy?;
+    let (name, retries) = match policy {
+        "no" => (RestartPolicyNameEnum::NO, None),
+        "always" => (RestartPolicyNameEnum::ALWAYS, None),
+        "unless-stopped" => (RestartPolicyNameEnum::UNLESS_STOPPED, None),
+        _ => match policy.strip_prefix("on-failure") {
+            Some("") => (RestartPolicyNameEnum::ON_FAILURE, None),
+            Some(rest) => (
+                RestartPolicyNameEnum::ON_FAILURE,
+                rest.strip_prefix(':').and_then(|n| n.parse::<i64>().ok()),
+            ),
+            None => return None,
+        },
+    };
+    Some(RestartPolicy {
+        name: Some(name),
+        maximum_retry_count: retries,
+    })
+}
+
+#[cfg(test)]
+mod restart_policy_tests {
+    use super::*;
+
+    #[test]
+    fn restart_policy_mapping() {
+        use bollard::models::RestartPolicyNameEnum as N;
+        assert!(build_restart_policy(None).is_none());
+        assert_eq!(
+            build_restart_policy(Some("always")).unwrap().name,
+            Some(N::ALWAYS)
+        );
+        assert_eq!(
+            build_restart_policy(Some("unless-stopped")).unwrap().name,
+            Some(N::UNLESS_STOPPED)
+        );
+        let p = build_restart_policy(Some("on-failure:5")).unwrap();
+        assert_eq!(p.name, Some(N::ON_FAILURE));
+        assert_eq!(p.maximum_retry_count, Some(5));
+        let p = build_restart_policy(Some("on-failure")).unwrap();
+        assert_eq!(p.maximum_retry_count, None);
+        assert!(build_restart_policy(Some("garbage")).is_none());
     }
 }

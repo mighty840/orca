@@ -64,6 +64,7 @@ async fn handle_create(
     };
 
     let service = ServiceConfig {
+        restart_policy: None,
         name: name.to_string(),
         project: None,
         runtime: Default::default(),
@@ -149,19 +150,27 @@ async fn handle_list(client: &OrcaClient) -> Result<()> {
 }
 
 fn generate_password(len: usize) -> String {
-    use std::collections::hash_map::RandomState;
-    use std::hash::{BuildHasher, Hasher};
-
+    // CSPRNG, not a hash-table seed: these are real database passwords.
+    // The previous RandomState/DefaultHasher derivation was predictable
+    // relative to its (non-cryptographic) seed.
     const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let mut result = String::with_capacity(len);
+    (0..len)
+        .map(|_| CHARSET[rand::random::<u32>() as usize % CHARSET.len()] as char)
+        .collect()
+}
 
-    for i in 0..len {
-        let state = RandomState::new();
-        let mut hasher = state.build_hasher();
-        hasher.write_usize(i);
-        let idx = hasher.finish() as usize % CHARSET.len();
-        result.push(CHARSET[idx] as char);
+#[cfg(test)]
+mod tests {
+    use super::generate_password;
+
+    #[test]
+    fn password_length_and_charset() {
+        let p = generate_password(24);
+        assert_eq!(p.len(), 24);
+        assert!(p.chars().all(|c| c.is_ascii_alphanumeric()));
+        assert!(
+            p.chars().collect::<std::collections::HashSet<_>>().len() > 4,
+            "CSPRNG output must not be near-constant"
+        );
     }
-
-    result
 }

@@ -208,6 +208,7 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
         extra_ports: config.extra_ports.clone(),
         strip_prefix: config.strip_prefix.clone(),
         pull_policy: config.pull_policy,
+        restart_policy: config.restart_policy.clone(),
     })
 }
 
