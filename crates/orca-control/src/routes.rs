@@ -218,3 +218,7 @@ mod tests_spec;
 #[cfg(test)]
 #[path = "routes_tests_health.rs"]
 mod tests_health;
+
+#[cfg(test)]
+#[path = "routes_tests_merge.rs"]
+mod tests_merge;
