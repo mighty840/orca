@@ -29,6 +29,13 @@ pub struct ClusterConfig {
     /// Mesh networking configuration (NetBird).
     #[serde(default)]
     pub network: Option<NetworkConfig>,
+    /// Raw `${secrets.X}` references found anywhere in the cluster.toml
+    /// text, captured at load BEFORE resolution replaces them with values.
+    /// The secrets-usage index needs them (#137 prerequisite): without
+    /// this, keys used only by cluster.toml fields (AI api key, SMTP
+    /// password, S3 credentials) look orphaned in the dashboard.
+    #[serde(skip)]
+    pub secret_refs: Vec<crate::secrets::SecretReference>,
     /// Encrypted-secrets store (#109). When present, secrets come from a
     /// SOPS/age-encrypted file committed to the config repo instead of the
     /// machine-local AES store.

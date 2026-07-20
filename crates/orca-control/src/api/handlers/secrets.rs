@@ -120,6 +120,27 @@ pub async fn secrets_usage(State(state): State<Arc<AppState>>) -> impl IntoRespo
         }
     }
 
+    // cluster.toml's own references (#137 prerequisite): AI api key, SMTP
+    // password, S3 backup credentials etc. resolve from the same store —
+    // without indexing them, those keys look orphaned in the dashboard
+    // (and a future GC would eat live cluster secrets). Raw refs are
+    // captured at config load, before resolution erases them.
+    {
+        let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for r in &state.cluster_config.secret_refs {
+            let target = match &r.scope {
+                Some(s) => format!("{s}.{}", r.key),
+                None => r.key.clone(),
+            };
+            if seen.insert(target.clone()) {
+                refs_by_target.entry(target).or_default().push(SecretRef {
+                    service_name: "cluster.toml".to_string(),
+                    project: None,
+                });
+            }
+        }
+    }
+
     // Emit stored keys first (preserving alphabetical order from the store),
     // then any referenced-but-unstored keys as "broken" entries. `key` is
     // always the FULL stored key (delete/set target); `scope` is the

@@ -29,6 +29,9 @@ impl ClusterConfig {
             .map_err(|e| OrcaError::Config(format!("failed to read {}: {e}", path.display())))?;
         let mut config: Self = toml::from_str(&content)
             .map_err(|e| OrcaError::Config(format!("failed to parse {}: {e}", path.display())))?;
+        // Capture raw references before resolution erases them (see the
+        // `secret_refs` field docs).
+        config.secret_refs = crate::secrets::extract_refs(&content);
         // Install the encrypted-secrets backend BEFORE resolving
         // `${secrets.X}` fields below, so they resolve against the store
         // `[secrets]` selects (#109).

@@ -149,19 +149,11 @@ async fn handle_list(client: &OrcaClient) -> Result<()> {
 }
 
 fn generate_password(len: usize) -> String {
-    use std::collections::hash_map::RandomState;
-    use std::hash::{BuildHasher, Hasher};
-
+    // CSPRNG, not a hash-table seed: these are real database passwords.
+    // The previous RandomState/DefaultHasher derivation was predictable
+    // relative to its (non-cryptographic) seed.
     const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let mut result = String::with_capacity(len);
-
-    for i in 0..len {
-        let state = RandomState::new();
-        let mut hasher = state.build_hasher();
-        hasher.write_usize(i);
-        let idx = hasher.finish() as usize % CHARSET.len();
-        result.push(CHARSET[idx] as char);
-    }
-
-    result
+    (0..len)
+        .map(|_| CHARSET[rand::random::<u32>() as usize % CHARSET.len()] as char)
+        .collect()
 }

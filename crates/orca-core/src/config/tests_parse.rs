@@ -193,3 +193,34 @@ age_recipients = [
     let bare: ClusterConfig = toml::from_str("[cluster]\nname = \"t\"\n").unwrap();
     assert!(bare.secrets.is_none());
 }
+
+/// cluster.toml's own `${secrets.X}` refs are captured at load, before
+/// resolution erases them — the secrets-usage index depends on it (#137).
+#[test]
+fn load_captures_raw_secret_refs() {
+    let dir = std::env::temp_dir().join(format!("orca-refs-test-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("cluster.toml");
+    std::fs::write(
+        &path,
+        r#"
+[cluster]
+name = "t"
+
+[ai]
+provider = "litellm"
+api_key = "${secrets.ai_key}"
+
+[[token]]
+name = "admin"
+value = "${secrets.admin_token}"
+role = "admin"
+"#,
+    )
+    .unwrap();
+    let config = ClusterConfig::load(&path).unwrap();
+    let keys: Vec<&str> = config.secret_refs.iter().map(|r| r.key.as_str()).collect();
+    assert!(keys.contains(&"ai_key"), "got {keys:?}");
+    assert!(keys.contains(&"admin_token"), "got {keys:?}");
+    let _ = std::fs::remove_dir_all(&dir);
+}
