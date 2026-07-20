@@ -318,7 +318,7 @@ pub async fn handle_nodes(gpus: bool, api: String) -> anyhow::Result<()> {
 
     let s = |v: &serde_json::Value| v.as_str().unwrap_or("").to_string();
     if gpus {
-        println!("{:<22} {:<24} {}", "NODE", "ADDRESS", "GPUs");
+        println!("{:<22} {:<24} GPUs", "NODE", "ADDRESS");
         let mut any = false;
         for n in nodes {
             let list = n["gpus"].as_array().cloned().unwrap_or_default();
@@ -344,7 +344,7 @@ pub async fn handle_nodes(gpus: bool, api: String) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    println!("{:<22} {:<24} {}", "NODE ID", "ADDRESS", "LAST HEARTBEAT");
+    println!("{:<22} {:<24} LAST HEARTBEAT", "NODE ID", "ADDRESS");
     for n in nodes {
         println!(
             "{:<22} {:<24} {}",

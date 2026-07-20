@@ -1,7 +1,6 @@
 //! Unit tests for ServiceConfig validation and spec_matches.
 
 use super::*;
-use super::*;
 
 fn base_config() -> ServiceConfig {
     ServiceConfig {
