@@ -100,6 +100,14 @@ pub async fn redeploy(state: &AppState, service_name: &str) -> anyhow::Result<()
                     .filter(|h| *h == node_name)
                     .map(|_| *id)
             });
+            // The master self-registers in registered_nodes (#134), so a
+            // service pinned to the master's own node resolves here too —
+            // but it must take the LOCAL path below. Routing it through
+            // ws_agents fails with AgentOfflineError: the master holds no
+            // WS connection to itself. Surfaced as webhook/CLI redeploys
+            // 503ing for every master-hosted service the moment placement
+            // pins were added.
+            let found = found.filter(|id| *id != crate::master_node::master_node_id());
             if found.is_some() {
                 break 'remote found;
             }
