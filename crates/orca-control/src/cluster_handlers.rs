@@ -27,7 +27,38 @@ pub fn cluster_router() -> Router<Arc<AppState>> {
 
 pub async fn cluster_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let nodes = state.registered_nodes.read().await;
-    let node_list: Vec<&RegisteredNode> = nodes.values().collect();
+    // GPUs are declared in cluster.toml (`[[node.gpus]]`), not reported by
+    // heartbeats, so surface them here matched to each registered node by
+    // address (exact or host-portion — declared `ubuntu` matches registered
+    // `ubuntu:6881`). Enables `orca nodes --gpus`.
+    let host = |addr: &str| {
+        addr.rsplit_once(':')
+            .map(|(h, _)| h)
+            .unwrap_or(addr)
+            .to_string()
+    };
+    let node_list: Vec<serde_json::Value> = nodes
+        .values()
+        .map(|n| {
+            let gpus = state
+                .cluster_config
+                .node
+                .iter()
+                .find(|d| d.address == n.address || host(&d.address) == host(&n.address))
+                .map(|d| d.gpus.clone())
+                .unwrap_or_default();
+            serde_json::json!({
+                "node_id": n.node_id,
+                "address": n.address,
+                "labels": n.labels,
+                "last_heartbeat": n.last_heartbeat,
+                "cpu_percent": n.cpu_percent,
+                "memory_bytes": n.memory_bytes,
+                "memory_total": n.memory_total,
+                "gpus": gpus,
+            })
+        })
+        .collect();
     Json(serde_json::json!({
         "cluster_name": state.cluster_config.cluster.name,
         "domain": state.cluster_config.cluster.domain,
