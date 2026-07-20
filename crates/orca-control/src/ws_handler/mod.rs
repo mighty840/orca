@@ -85,7 +85,12 @@ pub async fn ws_agent_handler(
     let address = query.address;
     info!("WebSocket upgrade accepted for node {node_id}");
 
-    ws.on_upgrade(move |socket| handle_agent_ws(socket, state, node_id, address, peer.ip()))
+    // NOTE: requires the server to be built with
+    // `into_make_service_with_connect_info::<SocketAddr>()` — axum rejects
+    // the upgrade with a 500 otherwise. All production and test serve
+    // paths do; keep it that way when adding harnesses.
+    let peer_ip = Some(peer.ip());
+    ws.on_upgrade(move |socket| handle_agent_ws(socket, state, node_id, address, peer_ip))
         .into_response()
 }
 
@@ -95,7 +100,7 @@ async fn handle_agent_ws(
     state: Arc<AppState>,
     node_id: u64,
     agent_address: Option<String>,
-    peer_ip: std::net::IpAddr,
+    peer_ip: Option<std::net::IpAddr>,
 ) {
     let (mut ws_tx, mut ws_rx) = socket.split();
 
@@ -147,10 +152,11 @@ async fn handle_agent_ws(
             });
         node.last_heartbeat = chrono::Utc::now();
         node.address = addr;
-        node.peer_ip = Some(peer_ip.to_string());
+        node.peer_ip = peer_ip.map(|ip| ip.to_string());
         info!(
-            "Node {node_id} registered at {} (peer {peer_ip})",
-            node.address
+            "Node {node_id} registered at {} (peer {})",
+            node.address,
+            node.peer_ip.as_deref().unwrap_or("unknown")
         );
     }
 

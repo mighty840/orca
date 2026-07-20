@@ -420,6 +420,18 @@ async fn half_dead_session_is_closed_by_idle_deadline() {
         state.ws_agents.read().await.contains_key(&77),
         "session must be registered after connect"
     );
+    // #135: the peer IP must be captured when the server is served with
+    // connect_info — guards against the prod serve path losing it.
+    assert_eq!(
+        state
+            .registered_nodes
+            .read()
+            .await
+            .get(&77)
+            .and_then(|n| n.peer_ip.clone()),
+        Some("127.0.0.1".to_string()),
+        "peer IP must be recorded from ConnectInfo"
+    );
 
     // Go silent — no heartbeats, no close frame. The socket stays open,
     // exactly like a half-dead connection. The idle deadline must fire.
