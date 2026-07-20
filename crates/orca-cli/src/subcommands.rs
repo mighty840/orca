@@ -1,4 +1,5 @@
 use clap::Subcommand;
+use clap_complete::engine::ArgValueCandidates;
 
 #[derive(Subcommand)]
 pub enum AlertsAction {
@@ -7,19 +8,24 @@ pub enum AlertsAction {
         all: bool,
     },
     View {
+        #[arg(add = ArgValueCandidates::new(crate::completion::alert_ids))]
         id: String,
     },
     Reply {
+        #[arg(add = ArgValueCandidates::new(crate::completion::alert_ids))]
         id: String,
         message: Vec<String>,
     },
     Dismiss {
+        #[arg(add = ArgValueCandidates::new(crate::completion::alert_ids))]
         id: String,
     },
     Resolve {
+        #[arg(add = ArgValueCandidates::new(crate::completion::alert_ids))]
         id: String,
     },
     Fix {
+        #[arg(add = ArgValueCandidates::new(crate::completion::alert_ids))]
         id: String,
     },
 }
@@ -27,6 +33,7 @@ pub enum AlertsAction {
 #[derive(Subcommand)]
 pub enum SecretsAction {
     Set {
+        #[arg(add = ArgValueCandidates::new(crate::completion::secret_keys))]
         key: String,
         value: String,
         /// Scope the secret to a project (stored as `<project>.<key>`, #68).
@@ -35,12 +42,14 @@ pub enum SecretsAction {
     },
     /// Print a secret value to stdout.
     Get {
+        #[arg(add = ArgValueCandidates::new(crate::completion::secret_keys))]
         key: String,
         /// Look the key up in a project scope first.
         #[arg(short, long)]
         project: Option<String>,
     },
     Remove {
+        #[arg(add = ArgValueCandidates::new(crate::completion::secret_keys))]
         key: String,
         /// Remove the project-scoped variant (`<project>.<key>`).
         #[arg(short, long)]
@@ -140,6 +149,7 @@ pub enum WebhookAction {
     /// patterns (`*`, `?`), e.g. `orca webhooks remove 'breakpilot-*' navidrome`.
     Remove {
         #[arg(required = true, num_args = 1..)]
+        #[arg(add = ArgValueCandidates::new(crate::completion::webhook_services))]
         ids: Vec<String>,
     },
 }

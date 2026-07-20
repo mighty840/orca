@@ -25,7 +25,7 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 clap = { workspace = true }
-clap_complete = "4"
+clap_complete = { version = "4", features = ["unstable-dynamic"] }
 reqwest = { workspace = true }
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
 hostname = "0.4"

@@ -1,5 +1,6 @@
 use clap::Subcommand;
 use clap_complete::Shell;
+use clap_complete::engine::ArgValueCandidates;
 
 pub use crate::subcommands::{
     AlertsAction, BackupAction, DbAction, ImportSource, SecretsAction, TokenAction, WebhookAction,
@@ -35,6 +36,7 @@ pub enum Command {
     /// Stream logs from a service
     Logs {
         /// Service name
+        #[arg(add = ArgValueCandidates::new(crate::completion::services))]
         service: String,
         /// Number of lines to show
         #[arg(long, default_value = "100")]
@@ -50,6 +52,7 @@ pub enum Command {
     /// Scale a service
     Scale {
         /// Service name
+        #[arg(add = ArgValueCandidates::new(crate::completion::services))]
         service: String,
         /// Number of replicas
         replicas: u32,
@@ -61,6 +64,7 @@ pub enum Command {
     /// Execute a command inside a running container
     Exec {
         /// Service name
+        #[arg(add = ArgValueCandidates::new(crate::completion::services))]
         service: String,
         /// Command to run
         #[arg(trailing_var_arg = true)]
@@ -88,12 +92,14 @@ pub enum Command {
     /// Rollback a service to previous version
     Rollback {
         /// Service name
+        #[arg(add = ArgValueCandidates::new(crate::completion::services))]
         service: String,
     },
 
     /// Promote canary instances to stable (completes a canary deploy)
     Promote {
         /// Service name
+        #[arg(add = ArgValueCandidates::new(crate::completion::services))]
         service: String,
     },
 
@@ -207,6 +213,12 @@ pub enum Command {
     },
 
     /// Generate shell completion scripts
+    /// Generate a STATIC completion script (subcommands + flags only).
+    /// For completion of live values (service names, secret keys, webhook
+    /// and alert ids) use dynamic completion instead — add to your shell rc:
+    ///   bash: source <(COMPLETE=bash orca)
+    ///   zsh:  source <(COMPLETE=zsh orca)
+    ///   fish: COMPLETE=fish orca | source
     Completions {
         /// Shell to generate for (bash, zsh, fish, powershell)
         shell: Shell,
@@ -215,6 +227,7 @@ pub enum Command {
     /// Build a Docker image from source for a service
     Build {
         /// Service name to build (builds all if omitted)
+        #[arg(add = ArgValueCandidates::new(crate::completion::services))]
         service: Option<String>,
         /// Path to services dir or single .toml file
         #[arg(short, long, default_value = "services")]
