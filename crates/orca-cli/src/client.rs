@@ -95,6 +95,32 @@ impl OrcaClient {
         Ok(resp.text().await?)
     }
 
+    /// Stream logs to `out` as they arrive (`follow=true`). The master
+    /// streams a chunked body for local services; for agent-pinned services
+    /// it currently returns a one-shot body, so the stream ends quickly and
+    /// the caller polls instead (see `handle_logs`). Returns once the body
+    /// ends (or the process is interrupted). `chunk()` avoids needing the
+    /// reqwest `stream` feature.
+    pub async fn logs_follow<W: std::io::Write>(
+        &self,
+        service: &str,
+        tail: u64,
+        out: &mut W,
+    ) -> anyhow::Result<()> {
+        let mut resp = self
+            .auth(self.client.get(self.url(&format!(
+                "/api/v1/services/{service}/logs?tail={tail}&follow=true"
+            ))))
+            .send()
+            .await?
+            .error_for_status()?;
+        while let Some(chunk) = resp.chunk().await? {
+            out.write_all(&chunk)?;
+            out.flush()?;
+        }
+        Ok(())
+    }
+
     pub async fn scale(&self, service: &str, replicas: u32) -> anyhow::Result<ScaleResponse> {
         let req = ScaleRequest { replicas };
         let resp = self

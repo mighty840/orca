@@ -136,7 +136,10 @@ pub enum WebhookAction {
         infra: bool,
     },
     List,
+    /// Remove webhooks by service name. Accepts multiple names and glob
+    /// patterns (`*`, `?`), e.g. `orca webhooks remove 'breakpilot-*' navidrome`.
     Remove {
-        id: String,
+        #[arg(required = true, num_args = 1..)]
+        ids: Vec<String>,
     },
 }
