@@ -387,12 +387,30 @@ async fn handle_infra_deploy(state: &AppState) -> anyhow::Result<usize> {
     // Secrets are resolved in service_config_to_spec() at container creation
     // time, not here. This ensures spec_matches() compares unresolved templates
     // and doesn't restart containers just because a token was refreshed.
-    let count = configs.service.len();
-    let (deployed, errors) = reconciler::reconcile(state, &configs.service).await;
+    //
+    // Reconcile only NEW or SPEC-CHANGED services (#120) — same filter the
+    // declarative loop applies. Reconciling the full tree on every infra
+    // push recreated every placement-pinned service across unrelated
+    // projects (the 2026-07-07 incident); a push touching one file must
+    // only converge the services it actually changed.
+    let changed: Vec<orca_core::config::ServiceConfig> = {
+        let services = state.services.read().await;
+        configs
+            .service
+            .iter()
+            .filter(|cfg| match services.get(&cfg.name) {
+                None => true,
+                Some(svc) => !svc.config.spec_matches(cfg),
+            })
+            .cloned()
+            .collect()
+    };
+    let count = changed.len();
+    let (deployed, errors) = reconciler::reconcile(state, &changed).await;
 
     // Persist deployed services to store
     if let Some(store) = &state.store {
-        for config in &configs.service {
+        for config in &changed {
             if deployed.contains(&config.name)
                 && let Err(e) = store.set_service(&config.name, config)
             {
