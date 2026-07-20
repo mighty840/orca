@@ -87,7 +87,7 @@ async fn main() -> anyhow::Result<()> {
             follow,
             summarize,
         } => {
-            handlers::ops::handle_logs(service, tail, follow, summarize, cli.api).await?;
+            handlers::logs::handle_logs(service, tail, follow, summarize, cli.api).await?;
         }
         Command::Scale { service, replicas } => {
             handlers::ops::handle_scale(service, replicas, cli.api).await?;

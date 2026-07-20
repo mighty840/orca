@@ -9,6 +9,7 @@ pub mod exec;
 pub mod import;
 pub mod install_service;
 pub mod join;
+pub mod logs;
 pub mod ops;
 mod port;
 pub mod reload;
