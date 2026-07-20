@@ -110,6 +110,9 @@ port = 8080
 domain = "api.myapp.com"
 health = "/healthz"
 internal = true                       # Internal-only (no public route)
+restart_policy = "on-failure:5"       # no (default) | always | unless-stopped | on-failure[:N]
+                                      # Docker revives crashed containers on its own — masks
+                                      # transient boot races instead of dead-until-redeploy
 
 [service.env]
 DATABASE_URL = "${secrets.db_url}"    # Secret reference

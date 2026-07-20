@@ -187,6 +187,7 @@ async fn ws_master_pushes_deploy_via_channel() {
 
     // Push a deploy command via the ws_agents channel
     let spec = orca_core::types::WorkloadSpec {
+        restart_policy: None,
         name: "test-svc".into(),
         runtime: orca_core::types::RuntimeKind::Container,
         image: "nginx:latest".into(),
@@ -294,6 +295,7 @@ async fn ws_domain_discovered_updates_service_config() {
     {
         let mut services = state.services.write().await;
         let config = orca_core::config::ServiceConfig {
+            restart_policy: None,
             name: "dashboard".into(),
             project: None,
             runtime: Default::default(),

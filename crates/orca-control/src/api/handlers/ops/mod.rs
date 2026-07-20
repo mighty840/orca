@@ -47,6 +47,7 @@ mod tests {
 
     fn make_service_config(name: &str) -> orca_core::config::ServiceConfig {
         orca_core::config::ServiceConfig {
+            restart_policy: None,
             name: name.into(),
             project: None,
             runtime: Default::default(),

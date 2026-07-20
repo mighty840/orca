@@ -178,6 +178,7 @@ pub(crate) async fn adopt_container(state: &AppState, node_id: u64, c: &ManagedC
 /// treat it as a remote service.
 pub(crate) fn config_from_managed(node_id: u64, c: &ManagedContainer) -> ServiceConfig {
     ServiceConfig {
+        restart_policy: None,
         name: c.service_name.clone(),
         project: None,
         runtime: RuntimeKind::Container,

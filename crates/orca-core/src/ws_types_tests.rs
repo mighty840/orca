@@ -107,6 +107,7 @@ fn adoption_scan_request_roundtrip() {
 #[test]
 fn master_message_deploy_serde() {
     let spec = WorkloadSpec {
+        restart_policy: None,
         name: "web".into(),
         runtime: crate::types::RuntimeKind::Container,
         image: "nginx:latest".into(),

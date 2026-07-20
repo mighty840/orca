@@ -30,6 +30,7 @@ fn make_state(cfg: ClusterConfig) -> Arc<AppState> {
 
 fn config_placed_on(name: &str, node: &str) -> ServiceConfig {
     ServiceConfig {
+        restart_policy: None,
         name: name.into(),
         project: None,
         runtime: RuntimeKind::Container,

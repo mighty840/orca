@@ -335,6 +335,7 @@ mod tests {
     fn deploy_request_serialization_roundtrip() {
         let req = DeployRequest {
             services: vec![ServiceConfig {
+                restart_policy: None,
                 name: "web".into(),
                 project: None,
                 runtime: RuntimeKind::Container,

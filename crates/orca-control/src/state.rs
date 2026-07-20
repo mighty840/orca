@@ -369,6 +369,7 @@ mod tests {
 
     fn minimal_config(replicas: Replicas) -> ServiceConfig {
         ServiceConfig {
+            restart_policy: None,
             name: "test-svc".to_string(),
             project: None,
             runtime: Default::default(),

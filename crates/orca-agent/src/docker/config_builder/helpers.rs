@@ -253,6 +253,7 @@ mod tests {
 
     fn minimal_spec() -> WorkloadSpec {
         WorkloadSpec {
+            restart_policy: None,
             name: "test".to_string(),
             runtime: RuntimeKind::Container,
             image: "nginx:latest".to_string(),

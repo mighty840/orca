@@ -168,6 +168,13 @@ pub struct ServiceConfig {
     /// Per-service backup settings (pre-hook command, enable/disable).
     #[serde(default)]
     pub backup: Option<ServiceBackupConfig>,
+    /// Docker restart policy: "no" (default), "always", "unless-stopped",
+    /// or "on-failure[:max-retries]" (e.g. "on-failure:5"). Lets Docker
+    /// itself revive a container that crashed on a transient (DNS race at
+    /// boot, brief dependency outage) instead of it staying dead until the
+    /// next manual redeploy (#121, motivated by the #120 incident).
+    #[serde(default)]
+    pub restart_policy: Option<String>,
 }
 
 impl ServiceConfig {
@@ -199,6 +206,21 @@ impl ServiceConfig {
                 self.name
             ));
         }
+        if let Some(p) = &self.restart_policy
+            && !matches!(p.as_str(), "no" | "always" | "unless-stopped")
+            && !(p.strip_prefix("on-failure").is_some_and(|rest| {
+                rest.is_empty()
+                    || rest
+                        .strip_prefix(':')
+                        .is_some_and(|n| n.parse::<u32>().is_ok())
+            }))
+        {
+            return Err(format!(
+                "service '{}': invalid restart_policy {:?} — use \"no\", \"always\", \
+                 \"unless-stopped\", or \"on-failure[:max-retries]\"",
+                self.name, p
+            ));
+        }
         // #89 (network == name): NOT a hard error — prod runs five such
         // services healthily (incl. one agent-pinned), so the collision
         // alone doesn't break registration; the reported failure needs an
@@ -227,6 +249,7 @@ impl ServiceConfig {
             && self.extra_ports == other.extra_ports
             && self.strip_prefix == other.strip_prefix
             && self.network == other.network
+            && self.restart_policy == other.restart_policy
             && self.internal == other.internal
             && self.health == other.health
     }
@@ -238,6 +261,7 @@ mod tests {
 
     fn base_config() -> ServiceConfig {
         ServiceConfig {
+            restart_policy: None,
             name: "test-svc".into(),
             project: None,
             runtime: RuntimeKind::Container,
@@ -376,6 +400,36 @@ mod tests {
 
     /// #89: `network == name` silently broke registration; validate must
     /// refuse it loudly.
+    #[test]
+    fn validate_restart_policy_formats() {
+        let mut c = base_config();
+        for ok in [
+            "no",
+            "always",
+            "unless-stopped",
+            "on-failure",
+            "on-failure:5",
+        ] {
+            c.restart_policy = Some(ok.into());
+            assert!(c.validate().is_ok(), "{ok} should be valid");
+        }
+        for bad in ["sometimes", "on-failure:", "on-failure:x", "Always"] {
+            c.restart_policy = Some(bad.into());
+            assert!(c.validate().is_err(), "{bad} should be rejected");
+        }
+        c.restart_policy = None;
+        assert!(c.validate().is_ok());
+    }
+
+    /// restart_policy changes must trigger a redeploy.
+    #[test]
+    fn spec_matches_detects_restart_policy_change() {
+        let a = base_config();
+        let mut b = base_config();
+        b.restart_policy = Some("on-failure:5".into());
+        assert!(!a.spec_matches(&b));
+    }
+
     #[test]
     fn validate_allows_network_equal_to_name() {
         // #89: the collision is legal (prod runs several such services,

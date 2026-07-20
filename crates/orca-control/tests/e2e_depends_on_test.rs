@@ -60,6 +60,7 @@ async fn e2e_depends_on_db_before_app() {
 
     let services = vec![
         orca_core::config::ServiceConfig {
+            restart_policy: None,
             name: "e2e-dep-app".into(),
             project: None,
             runtime: Default::default(),
@@ -96,6 +97,7 @@ async fn e2e_depends_on_db_before_app() {
             depends_on: vec!["e2e-dep-db".into()],
         },
         orca_core::config::ServiceConfig {
+            restart_policy: None,
             name: "e2e-dep-db".into(),
             project: None,
             runtime: Default::default(),

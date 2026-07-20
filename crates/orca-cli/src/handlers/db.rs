@@ -64,6 +64,7 @@ async fn handle_create(
     };
 
     let service = ServiceConfig {
+        restart_policy: None,
         name: name.to_string(),
         project: None,
         runtime: Default::default(),

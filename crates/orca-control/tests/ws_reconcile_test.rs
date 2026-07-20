@@ -80,6 +80,7 @@ async fn ws_sends_reconcile_on_connect() {
     {
         let mut services = state.services.write().await;
         let config = orca_core::config::ServiceConfig {
+            restart_policy: None,
             name: "remote-web".into(),
             project: None,
             runtime: Default::default(),
