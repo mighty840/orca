@@ -40,7 +40,12 @@ pub async fn start_server() -> (u16, Arc<AppState>, tokio::task::JoinHandle<()>)
     let app = orca_control::api::router(state.clone());
 
     let handle = tokio::spawn(async move {
-        axum::serve(listener, app).await.unwrap();
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap();
     });
 
     // Wait for server to be ready

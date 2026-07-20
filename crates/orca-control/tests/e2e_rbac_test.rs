@@ -68,7 +68,14 @@ async fn start_rbac_server() -> u16 {
         Arc::new(RwLock::new(Vec::new())),
     ));
     let app = orca_control::api::router(state);
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
     tokio::time::sleep(Duration::from_millis(100)).await;
     port
 }

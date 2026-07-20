@@ -64,7 +64,14 @@ async fn e2e_rolling_update_multi_replica() {
     let state = test_state(port);
 
     let app = orca_control::api::router(state.clone());
-    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let client = reqwest::Client::new();
