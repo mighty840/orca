@@ -56,14 +56,14 @@ async fn start() -> u16 {
             address: "gpu-box:6881".into(),
             labels: HashMap::new(),
             last_heartbeat: chrono::Utc::now(),
-            drain: false,
-            cpu_percent: 0.0,
-            memory_bytes: 0,
-            memory_total: 0,
-            disk_used: 0,
-            disk_total: 0,
-            net_rx: 0,
-            net_tx: 0,
+            drain: true,
+            cpu_percent: 42.5,
+            memory_bytes: 100,
+            memory_total: 200,
+            disk_used: 300,
+            disk_total: 400,
+            net_rx: 500,
+            net_tx: 600,
         },
     );
     let app = orca_control::api::router(state);
@@ -104,4 +104,19 @@ async fn cluster_info_requires_auth_and_surfaces_gpus() {
     assert_eq!(node["node_id"], 7);
     assert_eq!(node["gpus"][0]["model"], "A100");
     assert_eq!(node["gpus"][0]["count"], 2);
+
+    // Regression guard (#143 rc.4 dropped these when cluster_info switched to
+    // hand-built JSON — the TUI Disk/Net columns went blank because the
+    // fields default to 0). Every heartbeat-reported metric must survive.
+    assert_eq!(node["cpu_percent"], 42.5, "cpu missing");
+    assert_eq!(node["memory_bytes"], 100, "mem missing");
+    assert_eq!(node["memory_total"], 200);
+    assert_eq!(
+        node["disk_used"], 300,
+        "disk_used missing (the reported bug)"
+    );
+    assert_eq!(node["disk_total"], 400, "disk_total missing");
+    assert_eq!(node["net_rx"], 500, "net_rx missing (the reported bug)");
+    assert_eq!(node["net_tx"], 600, "net_tx missing");
+    assert_eq!(node["drain"], true, "drain missing");
 }
