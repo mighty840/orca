@@ -47,16 +47,18 @@ pub async fn cluster_info(State(state): State<Arc<AppState>>) -> impl IntoRespon
                 .find(|d| d.address == n.address || host(&d.address) == host(&n.address))
                 .map(|d| d.gpus.clone())
                 .unwrap_or_default();
-            serde_json::json!({
-                "node_id": n.node_id,
-                "address": n.address,
-                "labels": n.labels,
-                "last_heartbeat": n.last_heartbeat,
-                "cpu_percent": n.cpu_percent,
-                "memory_bytes": n.memory_bytes,
-                "memory_total": n.memory_total,
-                "gpus": gpus,
-            })
+            // Serialize the WHOLE node, then enrich with GPUs. Hand-listing
+            // fields (as this did between #135 and now) silently dropped
+            // disk_used/disk_total/net_rx/net_tx — they're `#[serde(default)]`
+            // on the TUI side, so they read as 0 (blank) rather than erroring.
+            let mut obj = serde_json::to_value(n).unwrap_or_else(|_| serde_json::json!({}));
+            if let Some(map) = obj.as_object_mut() {
+                map.insert(
+                    "gpus".to_string(),
+                    serde_json::to_value(&gpus).unwrap_or_default(),
+                );
+            }
+            obj
         })
         .collect();
     Json(serde_json::json!({
