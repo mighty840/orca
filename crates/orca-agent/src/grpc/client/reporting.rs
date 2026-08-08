@@ -39,24 +39,47 @@ async fn read_log_tail(runtime: &dyn Runtime, handle: &WorkloadHandle) -> Option
 
 impl AgentClient {
     /// Collect workload status reports with per-container stats for heartbeat.
+    ///
+    /// Queries the runtime for each workload's OBSERVED state instead of
+    /// trusting the status recorded at deploy time — the map is written once
+    /// on deploy, so without the live check a container that crashed after
+    /// deploy would be reported "running" in every heartbeat forever (the
+    /// `orca status` said running / Docker said `Exited (1)` incident).
+    /// A workload the runtime no longer knows at all reports as failed.
     pub async fn collect_workload_reports(
         &self,
         runtime: &dyn Runtime,
     ) -> Vec<orca_core::ws_types::WorkloadReport> {
-        let workloads = self.workloads.read().await;
-        let mut reports = Vec::with_capacity(workloads.len());
+        // Snapshot ids under the read lock, then query the runtime without
+        // holding it (status/stats/log calls can be slow).
+        let snapshot: Vec<(String, String)> = self
+            .workloads
+            .read()
+            .await
+            .iter()
+            .map(|(id, info)| (id.clone(), info.service_name.clone()))
+            .collect();
 
-        for (id, info) in workloads.iter() {
+        let mut reports = Vec::with_capacity(snapshot.len());
+        let mut observed: Vec<(String, WorkloadStatus)> = Vec::with_capacity(snapshot.len());
+
+        for (id, service_name) in snapshot {
             let handle = WorkloadHandle {
                 runtime_id: id.clone(),
-                name: format!("orca-{}", info.service_name),
+                name: format!("orca-{service_name}"),
                 metadata: Default::default(),
             };
+            let status = runtime
+                .status(&handle)
+                .await
+                .unwrap_or(WorkloadStatus::Failed);
+            observed.push((id.clone(), status));
+
             // Running: collect live stats. Not running: collect crash detail
             // (exit code, restart count, log tail) so the master can explain
             // *why* without a separate fetch.
             let (cpu, mem, exit_code, restart_count, last_logs) =
-                if info.status == WorkloadStatus::Running {
+                if status == WorkloadStatus::Running {
                     let (cpu, mem) = match runtime.stats(&handle).await {
                         Ok(rs) => (rs.cpu_percent, rs.memory_bytes),
                         Err(_) => (0.0, 0),
@@ -69,8 +92,8 @@ impl AgentClient {
                 };
 
             reports.push(orca_core::ws_types::WorkloadReport {
-                service_name: info.service_name.clone(),
-                status: match info.status {
+                service_name,
+                status: match status {
                     WorkloadStatus::Running => "running",
                     WorkloadStatus::Stopped | WorkloadStatus::Completed => "stopped",
                     WorkloadStatus::Failed => "failed",
@@ -78,13 +101,21 @@ impl AgentClient {
                     WorkloadStatus::Stopping => "stopping",
                 }
                 .into(),
-                container_id: Some(id.clone()),
+                container_id: Some(id),
                 cpu_percent: cpu,
                 memory_bytes: mem,
                 exit_code,
                 restart_count,
                 last_logs,
             });
+        }
+
+        // Converge the cache to what was observed.
+        let mut workloads = self.workloads.write().await;
+        for (id, status) in observed {
+            if let Some(info) = workloads.get_mut(&id) {
+                info.status = status;
+            }
         }
 
         reports

@@ -80,11 +80,65 @@ pub(crate) struct StatusQuery {
     project: Option<String>,
 }
 
+/// Refresh local instance statuses from the runtime so `status` reports the
+/// OBSERVED container state, not what the deploy path recorded. Instances are
+/// marked Running optimistically on create and only corrected by the 30s
+/// watchdog cycle — inside that window a failed deploy reported `running`
+/// while Docker showed `Exited (1)`. Status is what an operator (or an AI
+/// agent) trusts to decide whether a deploy succeeded, so it must ask the
+/// runtime. Remote placeholders (`remote-*`) are owned by the heartbeat
+/// handler and are skipped here.
+async fn refresh_observed_statuses(state: &AppState) {
+    use orca_core::types::WorkloadStatus;
+
+    // Snapshot handles under the read lock, then query without holding it.
+    let handles: Vec<(String, usize, orca_core::runtime::WorkloadHandle, _)> = {
+        let services = state.services.read().await;
+        services
+            .values()
+            .flat_map(|svc| {
+                let name = svc.config.name.clone();
+                let kind = svc.config.runtime;
+                svc.instances
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, i)| !i.handle.runtime_id.starts_with("remote-"))
+                    .map(move |(idx, i)| (name.clone(), idx, i.handle.clone(), kind))
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    };
+
+    let mut observed = Vec::with_capacity(handles.len());
+    for (name, idx, handle, kind) in handles {
+        let Ok(runtime) = crate::reconciler::get_runtime(state, kind) else {
+            continue;
+        };
+        let status = runtime
+            .status(&handle)
+            .await
+            .unwrap_or(WorkloadStatus::Failed);
+        observed.push((name, idx, status));
+    }
+
+    let mut services = state.services.write().await;
+    for (name, idx, status) in observed {
+        if let Some(inst) = services
+            .get_mut(&name)
+            .and_then(|svc| svc.instances.get_mut(idx))
+        {
+            inst.status = status;
+        }
+    }
+}
+
 /// Get cluster and service status, optionally filtered by project.
 pub(crate) async fn status(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(query): axum::extract::Query<StatusQuery>,
 ) -> impl IntoResponse {
+    refresh_observed_statuses(&state).await;
+
     let services = state.services.read().await;
     let stats_cache = state.container_stats.read().await;
     let failures = state.last_failures.read().await;
