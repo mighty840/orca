@@ -4,6 +4,7 @@ pub mod api;
 pub mod auth;
 pub mod backup_scheduler;
 pub(crate) mod canary;
+pub mod certs;
 pub mod cleanup_scheduler;
 pub mod cluster_api;
 pub(crate) mod cluster_handlers;

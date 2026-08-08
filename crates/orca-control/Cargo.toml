@@ -55,5 +55,9 @@ futures-util = "0.3"
 [dev-dependencies.tempfile]
 version = "3"
 
+[dev-dependencies.tokio]
+workspace = true
+features = ["test-util"]
+
 [dev-dependencies.rcgen]
 version = "0.13"
