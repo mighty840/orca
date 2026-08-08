@@ -127,6 +127,15 @@ impl AcmeProvider {
 
         info!(email = %self.email, "Creating new ACME account");
         let contact = format!("mailto:{}", self.email);
+        // ORCA_ACME_DIRECTORY overrides the ACME directory URL — point it at
+        // Let's Encrypt staging (https://acme-staging-v02.api.letsencrypt.org/directory)
+        // for migration rehearsals so failed cutover attempts never burn
+        // production rate limits. Only consulted at account creation; cached
+        // credentials pin the directory they were created against, so switch
+        // directories by removing ~/.orca/acme-account.json.
+        let directory = std::env::var("ORCA_ACME_DIRECTORY")
+            .unwrap_or_else(|_| LetsEncrypt::Production.url().to_owned());
+        info!(directory = %directory, "Using ACME directory");
         let (account, credentials) = Account::builder()?
             .create(
                 &NewAccount {
@@ -134,7 +143,7 @@ impl AcmeProvider {
                     terms_of_service_agreed: true,
                     only_return_existing: false,
                 },
-                LetsEncrypt::Production.url().to_owned(),
+                directory,
                 None,
             )
             .await?;
