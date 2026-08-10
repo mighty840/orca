@@ -104,8 +104,7 @@ fn test_restart_set_direct_dependent() {
         make_service("app", vec!["postgres", "valkey"]),
     ];
 
-    let restarts =
-        orca_control::dependents::restart_set(&services, &["valkey".to_string()]);
+    let restarts = orca_control::dependents::restart_set(&services, &["valkey".to_string()]);
     assert_eq!(restarts, vec!["app".to_string()]);
 }
 
@@ -138,10 +137,8 @@ fn test_restart_set_skips_changed_and_unrelated() {
     ];
 
     // Both db and app were just recreated by the deploy itself — nothing to do.
-    let restarts = orca_control::dependents::restart_set(
-        &services,
-        &["db".to_string(), "app".to_string()],
-    );
+    let restarts =
+        orca_control::dependents::restart_set(&services, &["db".to_string(), "app".to_string()]);
     assert!(restarts.is_empty());
 
     // Nothing changed at all.

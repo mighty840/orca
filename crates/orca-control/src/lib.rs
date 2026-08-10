@@ -235,7 +235,9 @@ async fn restore_or_reconcile(
         }
     }
 
-    reconciler::reconcile_service(state, config).await.map(|_| ())
+    reconciler::reconcile_service(state, config)
+        .await
+        .map(|_| ())
 }
 
 /// Populate in-memory `ServiceState` from already-running Docker containers.
