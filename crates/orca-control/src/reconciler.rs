@@ -35,14 +35,18 @@ pub fn load_byo_cert(
 pub async fn reconcile(state: &AppState, services: &[ServiceConfig]) -> (Vec<String>, Vec<String>) {
     let mut deployed = Vec::new();
     let mut errors = Vec::new();
+    let mut changed = Vec::new();
 
     let ordered = crate::topo_sort::topo_sort(services);
     for svc_config in &ordered {
         match reconcile_service(state, svc_config).await {
-            Ok(()) => {
+            Ok(outcome) => {
                 // Record successful deploy in history and clear any prior failure.
                 state.deploy_history.write().await.record(svc_config);
                 state.last_failures.write().await.remove(&svc_config.name);
+                if outcome == ReconcileOutcome::Changed {
+                    changed.push(svc_config.name.clone());
+                }
                 deployed.push(svc_config.name.clone());
             }
             Err(e) => {
@@ -62,7 +66,25 @@ pub async fn reconcile(state: &AppState, services: &[ServiceConfig]) -> (Vec<Str
         .iter()
         .for_each(|name| info!("Deployed service: {name}"));
 
+    // Services whose workloads were replaced leave their dependents holding
+    // TCP connections to peers that no longer exist (a removed container
+    // never sends RST) — restart those dependents so they reconnect.
+    crate::dependents::restart_dependents(state, &changed).await;
+
     (deployed, errors)
+}
+
+/// Whether reconciling a service actually touched its workloads.
+///
+/// [`reconcile`] uses this to know which services' containers were replaced —
+/// their dependents (`depends_on`) are then restarted via
+/// [`crate::dependents::restart_dependents`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReconcileOutcome {
+    /// Spec unchanged, instances already at desired state — nothing touched.
+    Unchanged,
+    /// Workloads were created, replaced, scaled, or dispatched to an agent.
+    Changed,
 }
 
 /// Get the appropriate runtime for a service config.
@@ -81,7 +103,7 @@ pub(crate) fn get_runtime(state: &AppState, kind: RuntimeKind) -> anyhow::Result
 pub(crate) async fn reconcile_service(
     state: &AppState,
     config: &ServiceConfig,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<ReconcileOutcome> {
     let desired = match &config.replicas {
         Replicas::Fixed(n) => *n,
         Replicas::Auto => 1,
@@ -123,7 +145,7 @@ pub(crate) async fn reconcile_service(
                         "Service {} already at desired state on node {} (same spec) — skipping",
                         config.name, target_node_id
                     );
-                    return Ok(());
+                    return Ok(ReconcileOutcome::Unchanged);
                 }
             }
         }
@@ -168,7 +190,7 @@ pub(crate) async fn reconcile_service(
             "Queued deploy of {} to remote node {}",
             config.name, target_node_id
         );
-        return Ok(());
+        return Ok(ReconcileOutcome::Changed);
     }
 
     let runtime = get_runtime(state, config.runtime)?;
@@ -233,7 +255,7 @@ pub(crate) async fn reconcile_service(
             RuntimeKind::Container => update_container_routes(state, config).await,
             RuntimeKind::Wasm => update_wasm_triggers(state, config).await,
         }
-        return Ok(());
+        return Ok(ReconcileOutcome::Unchanged);
     }
 
     // Config changed but replica count is the same — update in place.
@@ -251,10 +273,10 @@ pub(crate) async fn reconcile_service(
             info!("Rolling update for {name} ({desired} replicas)");
             crate::operations::rolling_update(state, runtime, config, &spec, desired).await?;
         }
-        return Ok(());
+        return Ok(ReconcileOutcome::Changed);
     }
 
-    if current < desired {
+    let outcome = if current < desired {
         let to_create = desired - current;
         info!(
             "Scaling up {} ({:?}): {} -> {} (+{})",
@@ -318,6 +340,7 @@ pub(crate) async fn reconcile_service(
             let _ = runtime.stop(&handle, Duration::from_secs(10)).await;
             let _ = runtime.remove(&handle).await;
         }
+        ReconcileOutcome::Changed
     } else if current > desired {
         let to_remove = current - desired;
         info!(
@@ -344,9 +367,11 @@ pub(crate) async fn reconcile_service(
             let _ = runtime.stop(&handle, Duration::from_secs(10)).await;
             let _ = runtime.remove(&handle).await;
         }
+        ReconcileOutcome::Changed
     } else {
         drop(services);
-    }
+        ReconcileOutcome::Unchanged
+    };
 
     // Update routing based on runtime type
     match config.runtime {
@@ -379,7 +404,7 @@ pub(crate) async fn reconcile_service(
         }
     }
 
-    Ok(())
+    Ok(outcome)
 }
 
 /// Send a deploy command to a remote agent node and await the result.
