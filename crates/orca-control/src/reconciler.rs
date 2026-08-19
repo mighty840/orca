@@ -8,25 +8,14 @@ use orca_core::config::ServiceConfig;
 use orca_core::runtime::Runtime;
 use orca_core::types::{DeployKind, Replicas, RuntimeKind, WorkloadSpec, WorkloadStatus};
 
+use crate::certs::provision_service_certs;
 use crate::instance::create_and_start_instance;
 use crate::placement::find_target_node;
 use crate::routes::{service_config_to_spec, update_container_routes, update_wasm_triggers};
 use crate::state::{AppState, ServiceState};
 
-/// Load a BYO TLS certificate and key from PEM files.
-pub fn load_byo_cert(
-    cert_path: &str,
-    key_path: &str,
-) -> anyhow::Result<rustls::sign::CertifiedKey> {
-    let cert_pem = std::fs::read(cert_path)?;
-    let key_pem = std::fs::read(key_path)?;
-    let certs: Vec<_> =
-        rustls_pemfile::certs(&mut cert_pem.as_slice()).collect::<Result<Vec<_>, _>>()?;
-    let key = rustls_pemfile::private_key(&mut key_pem.as_slice())?
-        .ok_or_else(|| anyhow::anyhow!("no private key in {key_path}"))?;
-    let signing_key = rustls::crypto::aws_lc_rs::sign::any_supported_type(&key)?;
-    Ok(rustls::sign::CertifiedKey::new(certs, signing_key))
-}
+// Re-exported so external `use` paths survive the split into `certs.rs`.
+pub use crate::certs::load_byo_cert;
 
 /// Reconcile all services: make reality match the desired config.
 ///
@@ -255,6 +244,7 @@ pub(crate) async fn reconcile_service(
             RuntimeKind::Container => update_container_routes(state, config).await,
             RuntimeKind::Wasm => update_wasm_triggers(state, config).await,
         }
+        provision_service_certs(state, config).await;
         return Ok(ReconcileOutcome::Unchanged);
     }
 
@@ -273,6 +263,7 @@ pub(crate) async fn reconcile_service(
             info!("Rolling update for {name} ({desired} replicas)");
             crate::operations::rolling_update(state, runtime, config, &spec, desired).await?;
         }
+        provision_service_certs(state, config).await;
         return Ok(ReconcileOutcome::Changed);
     }
 
@@ -389,30 +380,7 @@ pub(crate) async fn reconcile_service(
         RuntimeKind::Wasm => update_wasm_triggers(state, config).await,
     }
 
-    // TLS cert provisioning — one cert per domain (apex + www, dual-TLD, etc.).
-    // BYO cert/key, when provided, applies to every listed domain.
-    if let Some(resolver) = &state.cert_resolver {
-        for domain in config.all_domains() {
-            if resolver.has_cert(&domain) {
-                continue;
-            }
-            if let (Some(cert_path), Some(key_path)) = (&config.tls_cert, &config.tls_key) {
-                // BYO cert: load from file
-                match load_byo_cert(cert_path, key_path) {
-                    Ok(key) => {
-                        resolver.add_cert(&domain, std::sync::Arc::new(key));
-                        tracing::info!(domain, "BYO TLS certificate loaded");
-                    }
-                    Err(e) => tracing::error!(domain, "Failed to load BYO cert: {e}"),
-                }
-            } else if let Some(acme) = &state.acme_manager {
-                // ACME auto-provisioning
-                if let Err(e) = acme.ensure_cert_for_resolver(&domain, resolver).await {
-                    tracing::error!(domain, "Hot cert provisioning failed: {e}");
-                }
-            }
-        }
-    }
+    provision_service_certs(state, config).await;
 
     Ok(outcome)
 }

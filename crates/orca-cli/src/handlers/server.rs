@@ -76,6 +76,14 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
         s.service
             .iter()
             .filter(|svc| is_master_placed(svc, &master_node))
+            // BYO-cert services provide their own certificate (tls_cert/tls_key);
+            // ACME must never provision or renew for them. Excluding them here
+            // keeps their domains out of the manager's registered set, so the
+            // 24h sweep and the fast-retry loop never fire an unsolicited Let's
+            // Encrypt order that could overwrite the operator's certificate.
+            // Their cert is loaded into the resolver by the reconciler
+            // (provision_service_certs), which already skips ACME for BYO.
+            .filter(|svc| svc.tls_cert.is_none() && svc.tls_key.is_none())
             .flat_map(|svc| svc.all_domains())
             .collect()
     };
@@ -103,12 +111,15 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
     // always win). Configurable via `[security_headers]` in cluster.toml.
     orca_proxy::init_security_headers(cluster_config.security_headers.clone());
 
-    // Start proxy and get ACME components for hot cert provisioning
+    // Start proxy and get ACME components for hot cert provisioning.
+    // Brought up whenever acme_email is configured, even with zero initial
+    // domains — otherwise the first service deployed with a domain after
+    // startup has no HTTPS listener, no resolver, and no ACME manager, and
+    // certs can't be provisioned until a restart (mirrors the joined-node
+    // proxy in join.rs, which always starts HTTP+HTTPS).
     let proxy_routes = route_table.clone();
     let proxy_triggers = wasm_triggers.clone();
-    let (acme_for_control, resolver_for_control) = if !domains.is_empty()
-        && let Some(email) = acme_email
-    {
+    let (acme_for_control, resolver_for_control) = if let Some(email) = acme_email {
         let cache = std::env::var("HOME")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|_| ".".into())

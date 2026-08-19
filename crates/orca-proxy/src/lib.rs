@@ -226,6 +226,11 @@ pub async fn run_proxy_with_acme_and_fallback(
         const PER_DOMAIN_PROVISION_TIMEOUT: std::time::Duration =
             std::time::Duration::from_secs(60);
         for domain in &domains {
+            // Register with the manager first: the renewal task's 24h sweep
+            // and fast-retry loop only iterate registered domains, so a
+            // failed or timed-out provision here is retried instead of
+            // staying broken until the next restart.
+            acme_mgr.add_domain(domain).await;
             let fut = acme_mgr.ensure_cert_for_resolver(domain, &resolver_clone);
             match tokio::time::timeout(PER_DOMAIN_PROVISION_TIMEOUT, fut).await {
                 Ok(Ok(())) => {}

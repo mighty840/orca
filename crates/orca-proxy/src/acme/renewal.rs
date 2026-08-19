@@ -1,28 +1,113 @@
 //! Background task for automatic ACME certificate renewal.
 //!
-//! Runs every 24 hours, checks all cached certificates for expiry,
-//! and re-provisions via ACME if a cert expires within 30 days.
+//! A single loop ticks every 60 seconds. Each tick fast-retries registered
+//! domains that have no certificate in the resolver (a failed or
+//! never-attempted provision) on a short backoff — one minute, then five,
+//! then fifteen. Every 24 hours a full sweep re-provisions certificates
+//! expiring within 30 days.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
+use tokio::time::Instant;
 use tracing::{error, info, warn};
 
 use super::AcmeManager;
 use crate::SharedCertResolver;
 
-/// Spawn a background task that periodically checks and renews expiring certs.
+/// Interval between fast-retry ticks (also the resolution of the 24h sweep).
+const RETRY_TICK: Duration = Duration::from_secs(60);
+/// Interval between full renewal sweeps.
+const SWEEP_INTERVAL: Duration = Duration::from_secs(24 * 3600);
+/// Per-domain cap on a single provision attempt. A domain whose HTTP-01
+/// challenge hangs (DNS misdirected, port 80 firewalled, a stalled LE
+/// endpoint) must not block the retry of every other registered domain — or
+/// the 24h sweep — since they share this one task. Mirrors the startup loop's
+/// `PER_DOMAIN_PROVISION_TIMEOUT`.
+const PROVISION_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Per-domain retry bookkeeping: consecutive failures and next attempt time.
+struct RetryState {
+    failures: u32,
+    next_attempt: Instant,
+}
+
+/// Backoff before retrying a failed provision: 1 min, then 5, then 15 (cap).
 ///
-/// Runs every 24 hours. For each domain registered with the ACME manager,
-/// checks if the certificate needs renewal (expires within 30 days) and
-/// re-provisions it via Let's Encrypt if needed.
+/// 15 min steady-state stays under Let's Encrypt's failed-validation rate
+/// limit (5 per hostname per hour) while turning a bad cutover — domain
+/// registered, initial order failed because DNS hadn't propagated — into a
+/// self-healing delay instead of a wait-for-tomorrow outage.
+fn retry_delay(failures: u32) -> Duration {
+    match failures {
+        0 | 1 => Duration::from_secs(60),
+        2 => Duration::from_secs(5 * 60),
+        _ => Duration::from_secs(15 * 60),
+    }
+}
+
+/// Spawn the background renewal task: fast retry for missing certs every
+/// minute (with per-domain backoff) and a full expiry sweep every 24 hours.
 pub fn spawn_renewal_task(manager: AcmeManager, resolver: SharedCertResolver) {
     tokio::spawn(async move {
-        info!("ACME renewal task started (24h interval)");
+        info!("ACME renewal task started (24h sweep + fast retry for missing certs)");
+        let mut retries: HashMap<String, RetryState> = HashMap::new();
+        let mut last_sweep = Instant::now();
         loop {
-            tokio::time::sleep(Duration::from_secs(24 * 3600)).await;
-            check_and_renew(&manager, &resolver).await;
+            tokio::time::sleep(RETRY_TICK).await;
+            retry_missing_certs(&manager, &resolver, &mut retries).await;
+            if last_sweep.elapsed() >= SWEEP_INTERVAL {
+                last_sweep = Instant::now();
+                check_and_renew(&manager, &resolver).await;
+            }
         }
     });
+}
+
+/// Provision certs for registered domains that have none in the resolver.
+async fn retry_missing_certs(
+    manager: &AcmeManager,
+    resolver: &SharedCertResolver,
+    retries: &mut HashMap<String, RetryState>,
+) {
+    let now = Instant::now();
+    for domain in manager.domains().await {
+        if resolver.has_cert(&domain) {
+            retries.remove(&domain);
+            continue;
+        }
+        if retries.get(&domain).is_some_and(|r| now < r.next_attempt) {
+            continue;
+        }
+        info!(domain = %domain, "Provisioning missing certificate");
+        let provision = manager.ensure_cert_for_resolver(&domain, resolver);
+        let failure = match tokio::time::timeout(PROVISION_TIMEOUT, provision).await {
+            Ok(Ok(())) => {
+                retries.remove(&domain);
+                info!(domain = %domain, "Certificate provisioned");
+                None
+            }
+            Ok(Err(e)) => Some(e.to_string()),
+            Err(_) => Some(format!("timed out after {}s", PROVISION_TIMEOUT.as_secs())),
+        };
+        if let Some(reason) = failure {
+            let failures = retries.get(&domain).map_or(1, |r| r.failures + 1);
+            let delay = retry_delay(failures);
+            warn!(
+                domain = %domain,
+                error = %reason,
+                retry_in_secs = delay.as_secs(),
+                "Certificate provisioning did not succeed, will retry"
+            );
+            retries.insert(
+                domain,
+                RetryState {
+                    failures,
+                    next_attempt: now + delay,
+                },
+            );
+        }
+    }
 }
 
 /// Check all registered domains and renew expiring certificates.
@@ -123,5 +208,14 @@ mod tests {
         std::fs::write(mgr.cert_path("junk.example.com"), b"fake-cert-data").unwrap();
 
         assert!(mgr.needs_renewal("junk.example.com"));
+    }
+
+    /// The fast-retry backoff schedule: 1 min, then 5, then 15 (capped).
+    #[test]
+    fn test_retry_backoff_is_one_five_fifteen_capped() {
+        assert_eq!(retry_delay(1), Duration::from_secs(60));
+        assert_eq!(retry_delay(2), Duration::from_secs(300));
+        assert_eq!(retry_delay(3), Duration::from_secs(900));
+        assert_eq!(retry_delay(100), Duration::from_secs(900));
     }
 }

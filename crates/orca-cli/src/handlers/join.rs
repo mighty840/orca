@@ -162,7 +162,8 @@ pub async fn handle_join(
             routes.insert(domain.clone(), vec![target]);
             drop(routes);
 
-            // Hot-provision TLS cert for the new domain
+            // Register for renewal/fast-retry, then hot-provision the cert
+            acme.add_domain(&domain).await;
             if let Some(res) = &resolver
                 && !res.has_cert(&domain)
             {
@@ -261,6 +262,12 @@ async fn spawn_local_proxy(
 
     let resolver_out = resolver_for_refresh.clone();
 
+    // Renew expiring certs and fast-retry failed provisions. Previously only
+    // the master ran this, so agent-served certs were never renewed.
+    if let Some(resolver) = &resolver_for_refresh {
+        orca_proxy::acme::renewal::spawn_renewal_task(acme.clone(), resolver.clone());
+    }
+
     // Background route refresher: rescans docker every 5s and rebuilds the
     // route table from `orca.domain` / `orca.port` labels. New domains get
     // their TLS cert hot-provisioned immediately.
@@ -305,6 +312,7 @@ async fn spawn_local_proxy(
             // New domains discovered since last refresh — hot-provision TLS certs.
             for d in current.difference(&known_domains) {
                 info!("Discovered new domain on this node: {d}");
+                acme_for_refresh.add_domain(d).await;
                 if let Some(resolver) = &resolver_for_refresh
                     && !resolver.has_cert(d)
                 {
