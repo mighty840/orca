@@ -100,6 +100,25 @@ pub(crate) fn network_name(spec: &WorkloadSpec) -> String {
     }
 }
 
+/// Detect a network-identity change for a service being (re)created (#163).
+///
+/// Given the network the service is about to be created on (`derived`) and the
+/// orca networks its existing container is currently attached to (`attached`),
+/// return the existing service network if it differs from `derived`. A
+/// mismatch means the redeploy would silently move the service off the network
+/// its project siblings share — their connections black-hole (aliases stop
+/// resolving) while the deploy still reports success.
+///
+/// `orca-internal` (the shared cross-service network that every `internal`
+/// service also joins) and non-orca networks (`bridge`, etc.) are ignored:
+/// only a real per-service orca network counts as drift.
+pub(crate) fn drifted_service_network(derived: &str, attached: &[String]) -> Option<String> {
+    attached
+        .iter()
+        .find(|n| n.starts_with("orca-") && n.as_str() != "orca-internal" && n.as_str() != derived)
+        .cloned()
+}
+
 /// Map the spec's restart-policy string to Docker's (#121). Invalid values
 /// are rejected at config load (`ServiceConfig::validate`); anything
 /// unrecognized here degrades to None (Docker default: no restart) rather
@@ -147,5 +166,38 @@ mod restart_policy_tests {
         let p = build_restart_policy(Some("on-failure")).unwrap();
         assert_eq!(p.maximum_retry_count, None);
         assert!(build_restart_policy(Some("garbage")).is_none());
+    }
+}
+
+#[cfg(test)]
+mod network_drift_tests {
+    use super::drifted_service_network;
+
+    #[test]
+    fn no_drift_when_on_the_derived_network() {
+        let attached = vec!["orca-dxseo".to_string(), "orca-internal".to_string()];
+        assert_eq!(drifted_service_network("orca-dxseo", &attached), None);
+    }
+
+    #[test]
+    fn drift_when_existing_service_network_differs() {
+        // The #163 case: existing container on orca-dxseo, redeploy derives
+        // orca-dx-seo — the service would move and split from its siblings.
+        let attached = vec!["orca-dxseo".to_string()];
+        assert_eq!(
+            drifted_service_network("orca-dx-seo", &attached),
+            Some("orca-dxseo".to_string())
+        );
+    }
+
+    #[test]
+    fn internal_and_non_orca_networks_are_ignored() {
+        let attached = vec!["orca-internal".to_string(), "bridge".to_string()];
+        assert_eq!(drifted_service_network("orca-app", &attached), None);
+    }
+
+    #[test]
+    fn no_container_no_drift() {
+        assert_eq!(drifted_service_network("orca-app", &[]), None);
     }
 }
