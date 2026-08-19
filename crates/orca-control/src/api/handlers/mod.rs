@@ -80,11 +80,84 @@ pub(crate) struct StatusQuery {
     project: Option<String>,
 }
 
+/// Refresh local instance statuses from the runtime so `status` reports the
+/// OBSERVED container state, not what the deploy path recorded. Instances are
+/// marked Running optimistically on create and only corrected by the 30s
+/// watchdog cycle — inside that window a failed deploy reported `running`
+/// while Docker showed `Exited (1)`. Status is what an operator (or an AI
+/// agent) trusts to decide whether a deploy succeeded, so it must ask the
+/// runtime. Remote placeholders (`remote-*`) are owned by the heartbeat
+/// handler and are skipped here.
+async fn refresh_observed_statuses(state: &AppState) {
+    use orca_core::types::WorkloadStatus;
+
+    /// Per-instance cap on the runtime status query. `GET /status` is polled
+    /// every 1-3s by the TUI/CLI/dashboards; without a bound, a slow or wedged
+    /// Docker daemon — exactly when operators most need status — would hang the
+    /// endpoint for every caller. On timeout we leave the recorded status
+    /// untouched (a slow daemon is not evidence the container is gone).
+    const STATUS_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+    // Snapshot (service name, stable runtime_id, handle, kind) under the read
+    // lock, then query without holding it. The write-back below is keyed by
+    // runtime_id, NOT a positional index: a concurrent reconcile/watchdog can
+    // prune or reorder `svc.instances` between this snapshot and the write-back
+    // (retain/sort/scale all do), and a positional index would then land an
+    // observed status on the wrong — possibly brand-new, healthy — instance,
+    // which routing (Running-only) would act on.
+    let handles: Vec<(String, String, orca_core::runtime::WorkloadHandle, _)> = {
+        let services = state.services.read().await;
+        services
+            .values()
+            .flat_map(|svc| {
+                let name = svc.config.name.clone();
+                let kind = svc.config.runtime;
+                svc.instances
+                    .iter()
+                    .filter(|i| !i.handle.runtime_id.starts_with("remote-"))
+                    .map(move |i| {
+                        (
+                            name.clone(),
+                            i.handle.runtime_id.clone(),
+                            i.handle.clone(),
+                            kind,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    };
+
+    let mut observed = Vec::with_capacity(handles.len());
+    for (name, runtime_id, handle, kind) in handles {
+        let Ok(runtime) = crate::reconciler::get_runtime(state, kind) else {
+            continue;
+        };
+        match tokio::time::timeout(STATUS_QUERY_TIMEOUT, runtime.status(&handle)).await {
+            Ok(res) => observed.push((name, runtime_id, res.unwrap_or(WorkloadStatus::Failed))),
+            Err(_) => continue, // daemon slow — keep the recorded status
+        }
+    }
+
+    let mut services = state.services.write().await;
+    for (name, runtime_id, status) in observed {
+        if let Some(inst) = services.get_mut(&name).and_then(|svc| {
+            svc.instances
+                .iter_mut()
+                .find(|i| i.handle.runtime_id == runtime_id)
+        }) {
+            inst.status = status;
+        }
+    }
+}
+
 /// Get cluster and service status, optionally filtered by project.
 pub(crate) async fn status(
     State(state): State<Arc<AppState>>,
     axum::extract::Query(query): axum::extract::Query<StatusQuery>,
 ) -> impl IntoResponse {
+    refresh_observed_statuses(&state).await;
+
     let services = state.services.read().await;
     let stats_cache = state.container_stats.read().await;
     let failures = state.last_failures.read().await;
@@ -129,6 +202,7 @@ pub(crate) async fn status(
                 domain: svc.config.primary_domain(),
                 domains: svc.config.all_domains(),
                 project: svc.config.project.clone(),
+                depends_on: svc.config.depends_on.clone(),
                 memory_usage: cached.map(|s| s.memory_usage.clone()),
                 cpu_percent: cached.map(|s| s.cpu_percent),
                 node: svc.config.placement.as_ref().and_then(|p| p.node.clone()),

@@ -146,7 +146,7 @@ pub async fn scale(state: &AppState, service_name: &str, replicas: u32) -> anyho
         config.replicas = Replicas::Fixed(replicas);
         config
     };
-    reconcile_service(state, &config).await
+    reconcile_service(state, &config).await.map(|_| ())
 }
 
 /// Perform a rolling update: start new instances, update routes to drain

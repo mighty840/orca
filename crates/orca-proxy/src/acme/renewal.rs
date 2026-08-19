@@ -88,10 +88,7 @@ async fn retry_missing_certs(
                 None
             }
             Ok(Err(e)) => Some(e.to_string()),
-            Err(_) => Some(format!(
-                "timed out after {}s",
-                PROVISION_TIMEOUT.as_secs()
-            )),
+            Err(_) => Some(format!("timed out after {}s", PROVISION_TIMEOUT.as_secs())),
         };
         if let Some(reason) = failure {
             let failures = retries.get(&domain).map_or(1, |r| r.failures + 1);
@@ -175,48 +172,50 @@ pub async fn check_and_renew_from_cache(manager: &AcmeManager, resolver: &Shared
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use std::time::{Duration, SystemTime};
     use tempfile::TempDir;
 
+    /// A certificate expiring within the 30-day threshold needs renewal —
+    /// regardless of how fresh the file on disk is (copied/restored certs
+    /// have a fresh mtime).
+    #[test]
+    fn test_cert_needs_renewal_when_expiring_soon() {
+        let tmp = TempDir::new().unwrap();
+        let mgr = AcmeManager::new("test@example.com", tmp.path());
+
+        let path = super::super::certs::mint_cert_expiring_in(tmp.path(), 10);
+        std::fs::rename(path, mgr.cert_path("old.example.com")).unwrap();
+
+        assert!(mgr.needs_renewal("old.example.com"));
+    }
+
+    /// A certificate with plenty of validity left does not need renewal.
+    #[test]
+    fn test_cert_ok_when_validity_remains() {
+        let tmp = TempDir::new().unwrap();
+        let mgr = AcmeManager::new("test@example.com", tmp.path());
+
+        let path = super::super::certs::mint_cert_expiring_in(tmp.path(), 60);
+        std::fs::rename(path, mgr.cert_path("fresh.example.com")).unwrap();
+
+        assert!(!mgr.needs_renewal("fresh.example.com"));
+    }
+
+    /// Unparseable cert data must be treated as needing renewal.
+    #[test]
+    fn test_garbage_cert_needs_renewal() {
+        let tmp = TempDir::new().unwrap();
+        let mgr = AcmeManager::new("test@example.com", tmp.path());
+        std::fs::write(mgr.cert_path("junk.example.com"), b"fake-cert-data").unwrap();
+
+        assert!(mgr.needs_renewal("junk.example.com"));
+    }
+
+    /// The fast-retry backoff schedule: 1 min, then 5, then 15 (capped).
     #[test]
     fn test_retry_backoff_is_one_five_fifteen_capped() {
         assert_eq!(retry_delay(1), Duration::from_secs(60));
         assert_eq!(retry_delay(2), Duration::from_secs(300));
         assert_eq!(retry_delay(3), Duration::from_secs(900));
         assert_eq!(retry_delay(100), Duration::from_secs(900));
-    }
-
-    #[test]
-    fn test_cert_needs_renewal_when_old() {
-        let tmp = TempDir::new().unwrap();
-        let mgr = AcmeManager::new("test@example.com", tmp.path());
-
-        // Create a cert file with old modification time (91 days ago)
-        let cert_path = mgr.cert_path("old.example.com");
-        fs::write(&cert_path, b"fake-cert-data").unwrap();
-        let old_time = SystemTime::now() - Duration::from_secs(91 * 24 * 3600);
-        filetime::set_file_mtime(&cert_path, filetime::FileTime::from_system_time(old_time))
-            .unwrap();
-
-        assert!(mgr.needs_renewal("old.example.com"));
-    }
-
-    #[test]
-    fn test_cert_ok_when_fresh() {
-        let tmp = TempDir::new().unwrap();
-        let mgr = AcmeManager::new("test@example.com", tmp.path());
-
-        // Create a cert file with recent modification time (1 day ago)
-        let cert_path = mgr.cert_path("fresh.example.com");
-        fs::write(&cert_path, b"fake-cert-data").unwrap();
-        let recent_time = SystemTime::now() - Duration::from_secs(24 * 3600);
-        filetime::set_file_mtime(
-            &cert_path,
-            filetime::FileTime::from_system_time(recent_time),
-        )
-        .unwrap();
-
-        assert!(!mgr.needs_renewal("fresh.example.com"));
     }
 }

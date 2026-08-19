@@ -162,6 +162,24 @@ impl ContainerRuntime {
         Ok(ip)
     }
 
+    /// List the Docker networks a container is currently attached to. Returns
+    /// an empty list if the container does not exist or can't be inspected —
+    /// this is best-effort (it only drives a warning), never a hard error.
+    pub async fn container_networks(&self, container_id: &str) -> Vec<String> {
+        match self
+            .docker
+            .inspect_container(container_id, None::<InspectContainerOptions>)
+            .await
+        {
+            Ok(info) => info
+                .network_settings
+                .and_then(|ns| ns.networks)
+                .map(|nets| nets.into_keys().collect())
+                .unwrap_or_default(),
+            Err(_) => Vec::new(),
+        }
+    }
+
     /// Inspect a container and return its assigned host port for the primary port.
     pub async fn get_host_port(
         &self,

@@ -37,6 +37,26 @@ impl Runtime for ContainerRuntime {
         let config = super::config_builder::build_container_config(spec);
         let network = super::config_builder::network_name(spec);
 
+        // #163: warn if this (re)deploy would move the service onto a different
+        // orca network than its existing container is on. That silently splits
+        // the service from its project siblings (aliases stop resolving) while
+        // the deploy still reports success. Inspect BEFORE the old container is
+        // removed below. Best-effort and non-fatal; we don't auto-reattach,
+        // because the control plane derives the network name for routing and
+        // the two layers must agree — see issue #163 for the full analysis.
+        let attached = self.container_networks(&container_name).await;
+        if let Some(existing) = super::config_builder::drifted_service_network(&network, &attached)
+        {
+            tracing::warn!(
+                service = %spec.name,
+                from_network = %existing,
+                to_network = %network,
+                "service is being recreated on a different network than its running \
+                 container uses — project siblings on {existing} will lose it. Redeploy \
+                 the whole project together, or pin `network` in the service config."
+            );
+        }
+
         // Ensure the service network exists
         let _ = self.ensure_network(&network).await;
 

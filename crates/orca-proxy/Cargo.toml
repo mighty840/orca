@@ -23,10 +23,11 @@ rustls = "0.23"
 tokio-rustls = "0.26"
 rcgen = "0.13"
 rustls-pemfile = "2"
+x509-parser = "0.18"
 instant-acme = "0.8"
 serde_json = { workspace = true }
 dirs = "6"
 
 [dev-dependencies]
 tempfile = "3"
-filetime = "0.2"
+time = "0.3"

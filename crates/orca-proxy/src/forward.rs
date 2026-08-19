@@ -3,10 +3,49 @@
 use http_body_util::BodyDataStream;
 use hyper::body::Incoming;
 use hyper::{Response, StatusCode};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::RouteTarget;
 use crate::body::{ProxyBody, full_body, stream_body};
+
+/// First-byte latency beyond which the backend is called out explicitly.
+///
+/// A backend that stalls until the client read timeout otherwise surfaces
+/// only as a proxy-side 502, which reads as a proxy fault. 2026-08-10:
+/// black-holed session-store connections made login POSTs hang for the full
+/// 120s read timeout, and the resulting 502s were initially blamed on the
+/// proxy. 30s is far above any healthy backend's first byte but well below
+/// the read timeout, so the log points at the backend while the request is
+/// still pending.
+const SLOW_BACKEND_WARN_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Await `send()`, emitting a warning *while the request is still pending* if
+/// the backend takes longer than [`SLOW_BACKEND_WARN_AFTER`] to respond, then
+/// continuing to wait for the eventual result. Racing the send against a timer
+/// (rather than measuring after it resolves) means the log lands at the 30s
+/// mark during a live stall — not at ~120s alongside the read-timeout 502,
+/// where it would add nothing over the error itself.
+async fn send_with_slow_warn(
+    forward_req: reqwest::RequestBuilder,
+    address: &str,
+    path_and_query: &str,
+) -> Result<reqwest::Response, reqwest::Error> {
+    let send = forward_req.send();
+    tokio::pin!(send);
+    tokio::select! {
+        result = &mut send => result,
+        _ = tokio::time::sleep(SLOW_BACKEND_WARN_AFTER) => {
+            warn!(
+                backend = %address,
+                path = %path_and_query,
+                threshold_secs = SLOW_BACKEND_WARN_AFTER.as_secs(),
+                "slow backend: no response after threshold and still waiting — \
+                 if this surfaces as a 502, the backend stalled, not the proxy"
+            );
+            send.await
+        }
+    }
+}
 
 /// Select a target index using weighted round-robin.
 ///
@@ -80,7 +119,7 @@ fn build_forward_request(
     let uri = format!("http://{}{}", target.address, forwarded_path);
 
     let mut forward_req = client.request(method.clone(), &uri);
-    let mut saw_xff = false;
+    let mut incoming_xff: Option<String> = None;
     let mut saw_proto = false;
     let mut saw_fhost = false;
     for (key, value) in headers {
@@ -104,7 +143,24 @@ fn build_forward_request(
             continue;
         }
         if name == "x-forwarded-for" {
-            saw_xff = true;
+            // Capture but do NOT forward the client's value verbatim. A client
+            // can send any X-Forwarded-For it likes; passing it through would
+            // let it choose the address downstream consumers key on (rate
+            // limits, one-vote-per-visitor). We re-emit a single header below
+            // with our observed peer appended, so the right-most entry — the
+            // one hop-counting consumers read — is always the address WE saw.
+            //
+            // Accumulate across repeated header lines rather than overwriting:
+            // RFC 7230 allows a header to arrive as several lines, each a
+            // segment of the same chain, so joining preserves a legitimate
+            // multi-hop chain (only the last line would otherwise survive).
+            if let Ok(v) = value.to_str() {
+                incoming_xff = Some(match incoming_xff.take() {
+                    Some(prev) => format!("{prev}, {v}"),
+                    None => v.to_string(),
+                });
+            }
+            continue;
         } else if name == "x-forwarded-proto" {
             saw_proto = true;
         } else if name == "x-forwarded-host" {
@@ -124,10 +180,26 @@ fn build_forward_request(
     if !saw_fhost {
         forward_req = forward_req.header("X-Forwarded-Host", host);
     }
-    if !saw_xff {
-        forward_req = forward_req.header("X-Forwarded-For", client_ip);
-    }
+    // X-Forwarded-For: append the peer we actually saw to any prior chain and
+    // emit it as ONE header. Consumers count hops in from the right, so the
+    // appended peer is authoritative and a client-supplied prefix is inert.
+    // (A second header line would not do — HeaderMap::get reads the first, so
+    // the client's forged value would win; this replaces rather than adds.)
+    forward_req = forward_req.header(
+        "X-Forwarded-For",
+        forwarded_for_value(incoming_xff.as_deref(), client_ip),
+    );
     (forward_req, uri)
+}
+
+/// Build the outgoing `X-Forwarded-For` value: the peer address we observed,
+/// appended to whatever chain arrived (if any non-empty one did). Kept pure so
+/// the append semantics are unit-testable without a live client.
+fn forwarded_for_value(incoming: Option<&str>, client_ip: &str) -> String {
+    match incoming.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(prev) => format!("{prev}, {client_ip}"),
+        None => client_ip.to_string(),
+    }
 }
 
 /// Convert an upstream reqwest response into the proxy's streaming response,
@@ -204,7 +276,7 @@ pub(crate) async fn forward_with_retry(
         debug!("Proxying {host}{path_and_query} -> {uri} (attempt {attempt})");
         let forward_req = forward_req.body(body.clone());
 
-        match forward_req.send().await {
+        match send_with_slow_warn(forward_req, &target.address, path_and_query).await {
             Ok(resp) if resp.status() == StatusCode::BAD_GATEWAY && attempt + 1 < max_attempts => {
                 debug!("Got 502 from {}, retrying", target.address);
                 continue;
@@ -278,7 +350,7 @@ pub(crate) async fn forward_streaming(
         forward_req.body(reqwest::Body::wrap_stream(BodyDataStream::new(body)))
     };
 
-    match forward_req.send().await {
+    match send_with_slow_warn(forward_req, &target.address, path_and_query).await {
         Ok(resp) => build_response(resp),
         Err(e) => {
             error!("Proxy error to {}: {e}", target.address);
@@ -389,5 +461,139 @@ mod tests {
         // Should not panic, falls back to round-robin
         let idx = weighted_index(&targets, 0);
         assert!(idx < targets.len());
+    }
+
+    #[test]
+    fn forwarded_for_value_appends_peer_to_a_client_chain() {
+        // The forged prefix is preserved but ends up to the LEFT of our peer,
+        // where hop-counting consumers ignore it.
+        assert_eq!(
+            forwarded_for_value(Some("9.9.9.9"), "203.0.113.7"),
+            "9.9.9.9, 203.0.113.7"
+        );
+        // A multi-entry chain is preserved wholesale, peer still appended last.
+        assert_eq!(
+            forwarded_for_value(Some("9.9.9.9, 10.0.0.1"), "203.0.113.7"),
+            "9.9.9.9, 10.0.0.1, 203.0.113.7"
+        );
+    }
+
+    #[test]
+    fn forwarded_for_value_is_peer_only_when_chain_absent_or_blank() {
+        assert_eq!(forwarded_for_value(None, "203.0.113.7"), "203.0.113.7");
+        assert_eq!(forwarded_for_value(Some(""), "203.0.113.7"), "203.0.113.7");
+        assert_eq!(
+            forwarded_for_value(Some("   "), "203.0.113.7"),
+            "203.0.113.7"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_forward_request_appends_peer_and_never_trusts_client_xff() {
+        // Regression guard for the spoof: a client pre-fills X-Forwarded-For,
+        // and the proxy must (a) NOT forward that value as its own header and
+        // (b) emit exactly ONE X-Forwarded-For whose right-most entry is the
+        // peer we observed. Two header lines would let HeaderMap::get read the
+        // client's forged copy first.
+        let client = reqwest::Client::new();
+        let target = make_target("127.0.0.1:8080", 100);
+        let mut headers = hyper::HeaderMap::new();
+        headers.insert(
+            hyper::header::HeaderName::from_static("x-forwarded-for"),
+            hyper::header::HeaderValue::from_static("9.9.9.9"),
+        );
+
+        let (builder, _uri) = build_forward_request(
+            &client,
+            &target,
+            &reqwest::Method::GET,
+            &headers,
+            "/",
+            "example.com",
+            true,
+            "203.0.113.7", // the peer the proxy actually saw
+        );
+        let req = builder.build().expect("request should build");
+
+        let values: Vec<_> = req
+            .headers()
+            .get_all("x-forwarded-for")
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            values,
+            vec!["9.9.9.9, 203.0.113.7".to_string()],
+            "must be a single merged header ending in the observed peer"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_forward_request_merges_multiple_xff_header_lines() {
+        // A legitimate multi-hop chain can arrive as several X-Forwarded-For
+        // lines (RFC 7230). All segments must survive, in order, with the
+        // observed peer appended last — not be collapsed to the final line.
+        let client = reqwest::Client::new();
+        let target = make_target("127.0.0.1:8080", 100);
+        let mut headers = hyper::HeaderMap::new();
+        headers.append(
+            hyper::header::HeaderName::from_static("x-forwarded-for"),
+            hyper::header::HeaderValue::from_static("1.1.1.1"),
+        );
+        headers.append(
+            hyper::header::HeaderName::from_static("x-forwarded-for"),
+            hyper::header::HeaderValue::from_static("2.2.2.2"),
+        );
+
+        let (builder, _uri) = build_forward_request(
+            &client,
+            &target,
+            &reqwest::Method::GET,
+            &headers,
+            "/",
+            "example.com",
+            true,
+            "203.0.113.7",
+        );
+        let req = builder.build().expect("request should build");
+
+        let values: Vec<_> = req
+            .headers()
+            .get_all("x-forwarded-for")
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            values,
+            vec!["1.1.1.1, 2.2.2.2, 203.0.113.7".to_string()],
+            "every incoming segment must be preserved, peer appended last"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_forward_request_sets_peer_when_client_sends_no_xff() {
+        let client = reqwest::Client::new();
+        let target = make_target("127.0.0.1:8080", 100);
+        let headers = hyper::HeaderMap::new();
+
+        let (builder, _uri) = build_forward_request(
+            &client,
+            &target,
+            &reqwest::Method::GET,
+            &headers,
+            "/",
+            "example.com",
+            true,
+            "203.0.113.7",
+        );
+        let req = builder.build().expect("request should build");
+        assert_eq!(
+            req.headers()
+                .get("x-forwarded-for")
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "203.0.113.7"
+        );
     }
 }

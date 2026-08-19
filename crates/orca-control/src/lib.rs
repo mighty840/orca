@@ -10,6 +10,7 @@ pub mod cluster_api;
 pub(crate) mod cluster_handlers;
 pub mod cluster_state;
 pub mod declarative;
+pub mod dependents;
 pub mod deploy_history;
 pub mod failures;
 pub mod health;
@@ -235,7 +236,9 @@ async fn restore_or_reconcile(
         }
     }
 
-    reconciler::reconcile_service(state, config).await
+    reconciler::reconcile_service(state, config)
+        .await
+        .map(|_| ())
 }
 
 /// Populate in-memory `ServiceState` from already-running Docker containers.
