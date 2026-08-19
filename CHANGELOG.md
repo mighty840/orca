@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.13-rc.1] - 2026-08-19
+
+Contributor release: six PRs from @hauju plus a network-split diagnostic,
+reviewed and hardened before merge (see the release PR for the review notes).
+
+### Added
+
+- **`depends_on` exposed in the status API.** `ServiceStatus` now carries the service's `depends_on` list (omitted when empty), so dashboards and the TUI can draw the dependency graph without fetching every service config. Pairs with the dependency-aware restarts below. (#161)
+
+### Fixed
+
+- **Certificates are provisioned on every reconcile path, and failed orders self-heal.** A domain added to a running service after startup never got a cert until a full restart, and a provision that failed (DNS not yet cut over, port 80 briefly blocked) stayed broken until the next day. Cert provisioning now runs on the same-spec, rolling/canary, and scale paths — not just first boot — and a 60s fast-retry loop (1m → 5m → 15m backoff, under Let's Encrypt's failed-validation limit) recovers failed or never-attempted orders. The ACME stack now also starts with zero domains whenever `acme_email` is set, and `ORCA_ACME_DIRECTORY` lets migration rehearsals run against LE staging. BYO-cert domains are never registered for ACME, and the fast-retry loop is per-domain time-boxed so one hung challenge can't stall the others. (#152)
+- **Certificate expiry is read from the certificate, not the file's mtime.** `check_cert_expiry` now parses the leaf cert's `NotAfter` instead of assuming `mtime + 90 days`, so a copied, backup-restored, or node-migrated cert reports its true remaining validity (an expired one reports negative days) instead of looking freshly issued and silently skipping renewal. Unparseable cert data is treated as needs-renewal. (#156)
+- **`orca status` reports observed container state, not deploy-time state.** Instances were marked `running` optimistically on create and only corrected by the 30s watchdog, so a failed deploy read as `running` while Docker showed `Exited (1)`. Agent heartbeats and the status endpoint now query the runtime for the real state (a vanished container surfaces as `failed`); the endpoint's refresh is keyed by container id (never a positional index, which a concurrent reconcile could invalidate) and each query is time-boxed so a wedged Docker daemon can't hang `/status`. (#154)
+- **Recreating a service restarts its dependents.** Recreating a container gives it a new network identity while its `depends_on` dependents keep pooled TCP connections to the dead address — a removed container never sends RST, so those connections black-hole and the deploy still reports success (the 2026-08-10 login outage). After a reconcile — and after a manual `orca redeploy` / `orca rollback` — running dependents are now restarted in dependency order so they reconnect. The proxy also warns when a backend exceeds 30s to first byte (mid-flight, during the stall), so a backend hang is no longer mistaken for a proxy fault. (#159)
+- **Security: the proxy no longer trusts a client-supplied `X-Forwarded-For`.** The proxy forwarded the client's `X-Forwarded-For` verbatim when present, letting any client pick the address downstream consumers key on (rate limiting, per-visitor logic). It now always appends the observed peer and re-emits a single header, so the right-most entry is the address the proxy actually saw; a client-supplied prefix is preserved but inert, and a legitimate multi-hop chain (several header lines) is kept intact. (#162)
+- **Warn when a redeploy would move a service to a different network.** A service's orca network name is path-dependent (directory-loaded services get `orca-<dir>`; other paths fall back to `orca-<prefix>`), so a partial redeploy could land a service on a different network than its already-running siblings, black-holing their connections (aliases stop resolving) while the deploy reported success. The agent now warns, before replacing a container, when the derived network differs from the one the existing container is on — telling the operator to redeploy the whole project or pin `network`. (Automatic reattach is deferred: the control plane derives the same name independently for routing, so the two must agree — tracked as follow-up.) (#163)
+
 ## [0.2.12] - 2026-07-21
 
 ### Added
