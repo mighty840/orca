@@ -94,3 +94,54 @@ fn test_missing_dependency_handled() {
     let ordered = topo_sort(&services);
     assert_eq!(ordered.len(), 2, "all services must be present");
 }
+
+/// A recreated dependency puts its direct dependents in the restart set.
+#[test]
+fn test_restart_set_direct_dependent() {
+    let services = vec![
+        make_service("postgres", vec![]),
+        make_service("valkey", vec![]),
+        make_service("app", vec!["postgres", "valkey"]),
+    ];
+
+    let restarts = orca_control::dependents::restart_set(&services, &["valkey".to_string()]);
+    assert_eq!(restarts, vec!["app".to_string()]);
+}
+
+/// The cascade is transitive: restarting a dependent counts as a change for
+/// its own dependents, in dependency order.
+#[test]
+fn test_restart_set_transitive() {
+    let services = vec![
+        make_service("db", vec![]),
+        make_service("api", vec!["db"]),
+        make_service("frontend", vec!["api"]),
+    ];
+
+    let restarts = orca_control::dependents::restart_set(&services, &["db".to_string()]);
+    assert_eq!(
+        restarts,
+        vec!["api".to_string(), "frontend".to_string()],
+        "api must restart before frontend"
+    );
+}
+
+/// Services already recreated in the deploy are never restarted again, and
+/// unrelated services are untouched.
+#[test]
+fn test_restart_set_skips_changed_and_unrelated() {
+    let services = vec![
+        make_service("db", vec![]),
+        make_service("app", vec!["db"]),
+        make_service("other", vec![]),
+    ];
+
+    // Both db and app were just recreated by the deploy itself — nothing to do.
+    let restarts =
+        orca_control::dependents::restart_set(&services, &["db".to_string(), "app".to_string()]);
+    assert!(restarts.is_empty());
+
+    // Nothing changed at all.
+    let restarts = orca_control::dependents::restart_set(&services, &[]);
+    assert!(restarts.is_empty());
+}

@@ -3,10 +3,49 @@
 use http_body_util::BodyDataStream;
 use hyper::body::Incoming;
 use hyper::{Response, StatusCode};
-use tracing::{debug, error};
+use tracing::{debug, error, warn};
 
 use crate::RouteTarget;
 use crate::body::{ProxyBody, full_body, stream_body};
+
+/// First-byte latency beyond which the backend is called out explicitly.
+///
+/// A backend that stalls until the client read timeout otherwise surfaces
+/// only as a proxy-side 502, which reads as a proxy fault. 2026-08-10:
+/// black-holed session-store connections made login POSTs hang for the full
+/// 120s read timeout, and the resulting 502s were initially blamed on the
+/// proxy. 30s is far above any healthy backend's first byte but well below
+/// the read timeout, so the log points at the backend while the request is
+/// still pending.
+const SLOW_BACKEND_WARN_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Await `send()`, emitting a warning *while the request is still pending* if
+/// the backend takes longer than [`SLOW_BACKEND_WARN_AFTER`] to respond, then
+/// continuing to wait for the eventual result. Racing the send against a timer
+/// (rather than measuring after it resolves) means the log lands at the 30s
+/// mark during a live stall — not at ~120s alongside the read-timeout 502,
+/// where it would add nothing over the error itself.
+async fn send_with_slow_warn(
+    forward_req: reqwest::RequestBuilder,
+    address: &str,
+    path_and_query: &str,
+) -> Result<reqwest::Response, reqwest::Error> {
+    let send = forward_req.send();
+    tokio::pin!(send);
+    tokio::select! {
+        result = &mut send => result,
+        _ = tokio::time::sleep(SLOW_BACKEND_WARN_AFTER) => {
+            warn!(
+                backend = %address,
+                path = %path_and_query,
+                threshold_secs = SLOW_BACKEND_WARN_AFTER.as_secs(),
+                "slow backend: no response after threshold and still waiting — \
+                 if this surfaces as a 502, the backend stalled, not the proxy"
+            );
+            send.await
+        }
+    }
+}
 
 /// Select a target index using weighted round-robin.
 ///
@@ -237,7 +276,7 @@ pub(crate) async fn forward_with_retry(
         debug!("Proxying {host}{path_and_query} -> {uri} (attempt {attempt})");
         let forward_req = forward_req.body(body.clone());
 
-        match forward_req.send().await {
+        match send_with_slow_warn(forward_req, &target.address, path_and_query).await {
             Ok(resp) if resp.status() == StatusCode::BAD_GATEWAY && attempt + 1 < max_attempts => {
                 debug!("Got 502 from {}, retrying", target.address);
                 continue;
@@ -311,7 +350,7 @@ pub(crate) async fn forward_streaming(
         forward_req.body(reqwest::Body::wrap_stream(BodyDataStream::new(body)))
     };
 
-    match forward_req.send().await {
+    match send_with_slow_warn(forward_req, &target.address, path_and_query).await {
         Ok(resp) => build_response(resp),
         Err(e) => {
             error!("Proxy error to {}: {e}", target.address);
