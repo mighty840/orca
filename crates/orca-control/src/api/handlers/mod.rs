@@ -91,8 +91,21 @@ pub(crate) struct StatusQuery {
 async fn refresh_observed_statuses(state: &AppState) {
     use orca_core::types::WorkloadStatus;
 
-    // Snapshot handles under the read lock, then query without holding it.
-    let handles: Vec<(String, usize, orca_core::runtime::WorkloadHandle, _)> = {
+    /// Per-instance cap on the runtime status query. `GET /status` is polled
+    /// every 1-3s by the TUI/CLI/dashboards; without a bound, a slow or wedged
+    /// Docker daemon — exactly when operators most need status — would hang the
+    /// endpoint for every caller. On timeout we leave the recorded status
+    /// untouched (a slow daemon is not evidence the container is gone).
+    const STATUS_QUERY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+    // Snapshot (service name, stable runtime_id, handle, kind) under the read
+    // lock, then query without holding it. The write-back below is keyed by
+    // runtime_id, NOT a positional index: a concurrent reconcile/watchdog can
+    // prune or reorder `svc.instances` between this snapshot and the write-back
+    // (retain/sort/scale all do), and a positional index would then land an
+    // observed status on the wrong — possibly brand-new, healthy — instance,
+    // which routing (Running-only) would act on.
+    let handles: Vec<(String, String, orca_core::runtime::WorkloadHandle, _)> = {
         let services = state.services.read().await;
         services
             .values()
@@ -101,32 +114,38 @@ async fn refresh_observed_statuses(state: &AppState) {
                 let kind = svc.config.runtime;
                 svc.instances
                     .iter()
-                    .enumerate()
-                    .filter(|(_, i)| !i.handle.runtime_id.starts_with("remote-"))
-                    .map(move |(idx, i)| (name.clone(), idx, i.handle.clone(), kind))
+                    .filter(|i| !i.handle.runtime_id.starts_with("remote-"))
+                    .map(move |i| {
+                        (
+                            name.clone(),
+                            i.handle.runtime_id.clone(),
+                            i.handle.clone(),
+                            kind,
+                        )
+                    })
                     .collect::<Vec<_>>()
             })
             .collect()
     };
 
     let mut observed = Vec::with_capacity(handles.len());
-    for (name, idx, handle, kind) in handles {
+    for (name, runtime_id, handle, kind) in handles {
         let Ok(runtime) = crate::reconciler::get_runtime(state, kind) else {
             continue;
         };
-        let status = runtime
-            .status(&handle)
-            .await
-            .unwrap_or(WorkloadStatus::Failed);
-        observed.push((name, idx, status));
+        match tokio::time::timeout(STATUS_QUERY_TIMEOUT, runtime.status(&handle)).await {
+            Ok(res) => observed.push((name, runtime_id, res.unwrap_or(WorkloadStatus::Failed))),
+            Err(_) => continue, // daemon slow — keep the recorded status
+        }
     }
 
     let mut services = state.services.write().await;
-    for (name, idx, status) in observed {
-        if let Some(inst) = services
-            .get_mut(&name)
-            .and_then(|svc| svc.instances.get_mut(idx))
-        {
+    for (name, runtime_id, status) in observed {
+        if let Some(inst) = services.get_mut(&name).and_then(|svc| {
+            svc.instances
+                .iter_mut()
+                .find(|i| i.handle.runtime_id == runtime_id)
+        }) {
             inst.status = status;
         }
     }
