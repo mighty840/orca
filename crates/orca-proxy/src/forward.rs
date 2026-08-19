@@ -110,7 +110,17 @@ fn build_forward_request(
             // limits, one-vote-per-visitor). We re-emit a single header below
             // with our observed peer appended, so the right-most entry — the
             // one hop-counting consumers read — is always the address WE saw.
-            incoming_xff = value.to_str().ok().map(str::to_owned);
+            //
+            // Accumulate across repeated header lines rather than overwriting:
+            // RFC 7230 allows a header to arrive as several lines, each a
+            // segment of the same chain, so joining preserves a legitimate
+            // multi-hop chain (only the last line would otherwise survive).
+            if let Ok(v) = value.to_str() {
+                incoming_xff = Some(match incoming_xff.take() {
+                    Some(prev) => format!("{prev}, {v}"),
+                    None => v.to_string(),
+                });
+            }
             continue;
         } else if name == "x-forwarded-proto" {
             saw_proto = true;
@@ -476,6 +486,48 @@ mod tests {
             values,
             vec!["9.9.9.9, 203.0.113.7".to_string()],
             "must be a single merged header ending in the observed peer"
+        );
+    }
+
+    #[tokio::test]
+    async fn build_forward_request_merges_multiple_xff_header_lines() {
+        // A legitimate multi-hop chain can arrive as several X-Forwarded-For
+        // lines (RFC 7230). All segments must survive, in order, with the
+        // observed peer appended last — not be collapsed to the final line.
+        let client = reqwest::Client::new();
+        let target = make_target("127.0.0.1:8080", 100);
+        let mut headers = hyper::HeaderMap::new();
+        headers.append(
+            hyper::header::HeaderName::from_static("x-forwarded-for"),
+            hyper::header::HeaderValue::from_static("1.1.1.1"),
+        );
+        headers.append(
+            hyper::header::HeaderName::from_static("x-forwarded-for"),
+            hyper::header::HeaderValue::from_static("2.2.2.2"),
+        );
+
+        let (builder, _uri) = build_forward_request(
+            &client,
+            &target,
+            &reqwest::Method::GET,
+            &headers,
+            "/",
+            "example.com",
+            true,
+            "203.0.113.7",
+        );
+        let req = builder.build().expect("request should build");
+
+        let values: Vec<_> = req
+            .headers()
+            .get_all("x-forwarded-for")
+            .iter()
+            .map(|v| v.to_str().unwrap().to_string())
+            .collect();
+        assert_eq!(
+            values,
+            vec!["1.1.1.1, 2.2.2.2, 203.0.113.7".to_string()],
+            "every incoming segment must be preserved, peer appended last"
         );
     }
 
