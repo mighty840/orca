@@ -129,6 +129,7 @@ pub(crate) async fn status(
                 domain: svc.config.primary_domain(),
                 domains: svc.config.all_domains(),
                 project: svc.config.project.clone(),
+                depends_on: svc.config.depends_on.clone(),
                 memory_usage: cached.map(|s| s.memory_usage.clone()),
                 cpu_percent: cached.map(|s| s.cpu_percent),
                 node: svc.config.placement.as_ref().and_then(|p| p.node.clone()),

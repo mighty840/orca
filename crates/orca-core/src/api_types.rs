@@ -78,6 +78,10 @@ pub struct ServiceStatus {
     /// Project name (from service directory).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<String>,
+    /// Services this one depends on (`depends_on` from the service config).
+    /// Lets dashboards draw the dependency graph without fetching configs.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub depends_on: Vec<String>,
     /// Current memory usage (e.g. "128Mi"), if stats are available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_usage: Option<String>,
