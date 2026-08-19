@@ -19,28 +19,32 @@ use crate::body::{ProxyBody, full_body, stream_body};
 /// still pending.
 const SLOW_BACKEND_WARN_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
 
-/// Await `send()`, warning once if the backend takes longer than
-/// [`SLOW_BACKEND_WARN_AFTER`] to produce response headers — whether or not
-/// it eventually succeeds.
+/// Await `send()`, emitting a warning *while the request is still pending* if
+/// the backend takes longer than [`SLOW_BACKEND_WARN_AFTER`] to respond, then
+/// continuing to wait for the eventual result. Racing the send against a timer
+/// (rather than measuring after it resolves) means the log lands at the 30s
+/// mark during a live stall — not at ~120s alongside the read-timeout 502,
+/// where it would add nothing over the error itself.
 async fn send_with_slow_warn(
     forward_req: reqwest::RequestBuilder,
     address: &str,
     path_and_query: &str,
 ) -> Result<reqwest::Response, reqwest::Error> {
-    let started = std::time::Instant::now();
-    let result = forward_req.send().await;
-    let elapsed = started.elapsed();
-    if elapsed > SLOW_BACKEND_WARN_AFTER {
-        warn!(
-            backend = %address,
-            path = %path_and_query,
-            elapsed_ms = elapsed.as_millis() as u64,
-            ok = result.is_ok(),
-            "slow backend: first byte exceeded warn threshold — if this \
-             surfaces as a 502, the backend stalled, not the proxy"
-        );
+    let send = forward_req.send();
+    tokio::pin!(send);
+    tokio::select! {
+        result = &mut send => result,
+        _ = tokio::time::sleep(SLOW_BACKEND_WARN_AFTER) => {
+            warn!(
+                backend = %address,
+                path = %path_and_query,
+                threshold_secs = SLOW_BACKEND_WARN_AFTER.as_secs(),
+                "slow backend: no response after threshold and still waiting — \
+                 if this surfaces as a 502, the backend stalled, not the proxy"
+            );
+            send.await
+        }
     }
-    result
 }
 
 /// Select a target index using weighted round-robin.

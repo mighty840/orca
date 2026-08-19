@@ -41,20 +41,29 @@ pub(crate) async fn rollback(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> impl IntoResponse {
-    ok_or_500(
-        reconciler::rollback(&state, &name).await,
-        &format!("rollback {name}"),
-    )
+    let result = reconciler::rollback(&state, &name).await;
+    if result.is_ok() {
+        // Rollback recreates the container (new network identity); its
+        // dependents must reconnect. reconcile() does this for the declarative
+        // path — the manual path goes straight through operations::redeploy,
+        // so trigger it here. restart_dependents computes the full transitive
+        // set and never re-enters this handler, so no recursion.
+        crate::dependents::restart_dependents(&state, std::slice::from_ref(&name)).await;
+    }
+    ok_or_500(result, &format!("rollback {name}"))
 }
 
 pub(crate) async fn redeploy(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
 ) -> impl IntoResponse {
-    ok_or_500(
-        reconciler::redeploy(&state, &name).await,
-        &format!("redeploy {name}"),
-    )
+    let result = reconciler::redeploy(&state, &name).await;
+    if result.is_ok() {
+        // See rollback: a manual redeploy replaces the container, so its
+        // dependents are restarted to drop black-holed connections.
+        crate::dependents::restart_dependents(&state, std::slice::from_ref(&name)).await;
+    }
+    ok_or_500(result, &format!("redeploy {name}"))
 }
 
 pub(crate) async fn promote(

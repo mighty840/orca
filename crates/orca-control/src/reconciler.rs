@@ -314,9 +314,10 @@ pub(crate) async fn reconcile_service(
         }
         // Re-acquire write lock and guard against concurrent deploy overshoot:
         // another reconcile may have created instances while the lock was dropped.
-        let excess_handles = {
+        let (excess_handles, added) = {
             let mut services = state.services.write().await;
             let mut excess = Vec::new();
+            let mut added = 0usize;
             if let Some(svc_state) = services.get_mut(&config.name) {
                 let already = svc_state
                     .instances
@@ -332,15 +333,24 @@ pub(crate) async fn reconcile_service(
                         .map(|i| i.handle)
                         .collect();
                 }
+                added = to_add.len();
                 svc_state.instances.extend(to_add);
             }
-            excess
+            (excess, added)
         };
         for handle in excess_handles {
             let _ = runtime.stop(&handle, Duration::from_secs(10)).await;
             let _ = runtime.remove(&handle).await;
         }
-        ReconcileOutcome::Changed
+        // A scale-up only counts as Changed if at least one instance was
+        // actually added. If every create failed (or all were trimmed as
+        // concurrent-overshoot), nothing was touched — reporting Changed here
+        // would restart healthy dependents for a no-op deploy.
+        if added > 0 {
+            ReconcileOutcome::Changed
+        } else {
+            ReconcileOutcome::Unchanged
+        }
     } else if current > desired {
         let to_remove = current - desired;
         info!(
