@@ -76,6 +76,14 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
         s.service
             .iter()
             .filter(|svc| is_master_placed(svc, &master_node))
+            // BYO-cert services provide their own certificate (tls_cert/tls_key);
+            // ACME must never provision or renew for them. Excluding them here
+            // keeps their domains out of the manager's registered set, so the
+            // 24h sweep and the fast-retry loop never fire an unsolicited Let's
+            // Encrypt order that could overwrite the operator's certificate.
+            // Their cert is loaded into the resolver by the reconciler
+            // (provision_service_certs), which already skips ACME for BYO.
+            .filter(|svc| svc.tls_cert.is_none() && svc.tls_key.is_none())
             .flat_map(|svc| svc.all_domains())
             .collect()
     };

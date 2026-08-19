@@ -19,6 +19,12 @@ use crate::SharedCertResolver;
 const RETRY_TICK: Duration = Duration::from_secs(60);
 /// Interval between full renewal sweeps.
 const SWEEP_INTERVAL: Duration = Duration::from_secs(24 * 3600);
+/// Per-domain cap on a single provision attempt. A domain whose HTTP-01
+/// challenge hangs (DNS misdirected, port 80 firewalled, a stalled LE
+/// endpoint) must not block the retry of every other registered domain — or
+/// the 24h sweep — since they share this one task. Mirrors the startup loop's
+/// `PER_DOMAIN_PROVISION_TIMEOUT`.
+const PROVISION_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Per-domain retry bookkeeping: consecutive failures and next attempt time.
 struct RetryState {
@@ -74,28 +80,35 @@ async fn retry_missing_certs(
             continue;
         }
         info!(domain = %domain, "Provisioning missing certificate");
-        match manager.ensure_cert_for_resolver(&domain, resolver).await {
-            Ok(()) => {
+        let provision = manager.ensure_cert_for_resolver(&domain, resolver);
+        let failure = match tokio::time::timeout(PROVISION_TIMEOUT, provision).await {
+            Ok(Ok(())) => {
                 retries.remove(&domain);
                 info!(domain = %domain, "Certificate provisioned");
+                None
             }
-            Err(e) => {
-                let failures = retries.get(&domain).map_or(1, |r| r.failures + 1);
-                let delay = retry_delay(failures);
-                warn!(
-                    domain = %domain,
-                    error = %e,
-                    retry_in_secs = delay.as_secs(),
-                    "Certificate provisioning failed, will retry"
-                );
-                retries.insert(
-                    domain,
-                    RetryState {
-                        failures,
-                        next_attempt: now + delay,
-                    },
-                );
-            }
+            Ok(Err(e)) => Some(e.to_string()),
+            Err(_) => Some(format!(
+                "timed out after {}s",
+                PROVISION_TIMEOUT.as_secs()
+            )),
+        };
+        if let Some(reason) = failure {
+            let failures = retries.get(&domain).map_or(1, |r| r.failures + 1);
+            let delay = retry_delay(failures);
+            warn!(
+                domain = %domain,
+                error = %reason,
+                retry_in_secs = delay.as_secs(),
+                "Certificate provisioning did not succeed, will retry"
+            );
+            retries.insert(
+                domain,
+                RetryState {
+                    failures,
+                    next_attempt: now + delay,
+                },
+            );
         }
     }
 }
