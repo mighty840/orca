@@ -27,9 +27,9 @@ use std::sync::atomic::AtomicUsize;
 
 use hyper::Request;
 use hyper::body::Incoming;
-use hyper::server::conn::http1;
 use hyper::service::service_fn;
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto;
 use tokio::net::TcpListener;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
@@ -248,9 +248,11 @@ pub async fn run_proxy_with_acme_and_fallback(
         }
 
         // Build TlsAcceptor with SNI resolver for multi-domain support
-        let config = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_cert_resolver(resolver_clone);
+        let config = tls::with_h2_alpn(
+            rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_cert_resolver(resolver_clone),
+        );
 
         let acceptor = tokio_rustls::TlsAcceptor::from(Arc::new(config));
         info!(
@@ -444,9 +446,12 @@ pub(crate) async fn serve_loop_with_fallback(
                 match acceptor.accept(stream).await {
                     Ok(tls_stream) => {
                         let io = TokioIo::new(tls_stream);
-                        if let Err(e) = http1::Builder::new()
-                            .serve_connection(io, service)
-                            .with_upgrades()
+                        // h1 or h2, picked by the ALPN result. WebSocket
+                        // upgrades stay on h1: extended CONNECT (RFC 8441)
+                        // is not enabled, so browsers open a separate
+                        // HTTP/1.1 connection for them, as before.
+                        if let Err(e) = auto::Builder::new(TokioExecutor::new())
+                            .serve_connection_with_upgrades(io, service)
                             .await
                         {
                             debug!("TLS proxy error from {peer}: {e}");
@@ -456,9 +461,8 @@ pub(crate) async fn serve_loop_with_fallback(
                 }
             } else {
                 let io = TokioIo::new(stream);
-                if let Err(e) = http1::Builder::new()
-                    .serve_connection(io, service)
-                    .with_upgrades()
+                if let Err(e) = auto::Builder::new(TokioExecutor::new())
+                    .serve_connection_with_upgrades(io, service)
                     .await
                 {
                     debug!("Proxy connection error from {peer}: {e}");
