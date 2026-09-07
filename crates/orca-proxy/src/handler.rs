@@ -141,11 +141,13 @@ pub(crate) async fn handle_request(
         }
     }
 
-    // Extract host header
+    // Extract the host: the Host header on HTTP/1.1, the `:authority`
+    // pseudo-header (surfaced on the URI) on HTTP/2, which carries no Host.
     let host = req
         .headers()
         .get("host")
         .and_then(|h| h.to_str().ok())
+        .or_else(|| req.uri().authority().map(|a| a.as_str()))
         .map(|h| h.split(':').next().unwrap_or(h).to_string());
 
     let Some(host) = host else {

@@ -141,9 +141,11 @@ impl AcmeManager {
         if self.needs_renewal(domain) {
             warn!(domain, "Cert expiring soon — will auto-renew");
         }
-        let config = rustls::ServerConfig::builder()
-            .with_no_client_auth()
-            .with_single_cert(certs, key)?;
+        let config = crate::tls::with_h2_alpn(
+            rustls::ServerConfig::builder()
+                .with_no_client_auth()
+                .with_single_cert(certs, key)?,
+        );
         Ok(Some(TlsAcceptor::from(Arc::new(config))))
     }
 

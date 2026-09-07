@@ -12,6 +12,13 @@ use tracing::info;
 
 use crate::acme::AcmeManager;
 
+/// Offer HTTP/2 via ALPN, HTTP/1.1 as fallback. The serve loop handles both
+/// through `hyper_util::server::conn::auto`.
+pub(crate) fn with_h2_alpn(mut config: ServerConfig) -> ServerConfig {
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+    config
+}
+
 /// TLS mode for the proxy.
 #[derive(Debug, Clone)]
 pub enum TlsMode {
@@ -59,9 +66,11 @@ pub fn create_tls_acceptor_for_domain(
             let certs = vec![cert_der];
             let key = rustls::pki_types::PrivatePkcs8KeyDer::from(key_der).into();
 
-            let config = ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(certs, key)?;
+            let config = with_h2_alpn(
+                ServerConfig::builder()
+                    .with_no_client_auth()
+                    .with_single_cert(certs, key)?,
+            );
 
             Ok(Some(TlsAcceptor::from(Arc::new(config))))
         }
@@ -78,9 +87,11 @@ pub fn create_tls_acceptor_for_domain(
             let key = rustls_pemfile::private_key(&mut key_file.as_slice())?
                 .ok_or_else(|| anyhow::anyhow!("no private key found in {key_path}"))?;
 
-            let config = ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(certs, key)?;
+            let config = with_h2_alpn(
+                ServerConfig::builder()
+                    .with_no_client_auth()
+                    .with_single_cert(certs, key)?,
+            );
 
             Ok(Some(TlsAcceptor::from(Arc::new(config))))
         }

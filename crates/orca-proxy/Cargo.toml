@@ -14,8 +14,8 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
-hyper = { version = "1", features = ["http1", "server", "client"] }
-hyper-util = { version = "0.1", features = ["tokio", "http1", "client-legacy"] }
+hyper = { version = "1", features = ["http1", "http2", "server", "client"] }
+hyper-util = { version = "0.1", features = ["tokio", "http1", "http2", "server-auto", "client-legacy"] }
 http-body-util = "0.1"
 reqwest = { workspace = true, features = ["stream"] }
 futures-util = "0.3"
@@ -29,5 +29,9 @@ serde_json = { workspace = true }
 dirs = "6"
 
 [dev-dependencies]
+# `http2` so the HTTP/2 integration test can negotiate h2 against the proxy;
+# `aws-lc-rs` so it can install the same crypto provider the binary does.
+reqwest = { workspace = true, features = ["http2"] }
+rustls = { version = "0.23", features = ["aws-lc-rs"] }
 tempfile = "3"
 time = "0.3"
