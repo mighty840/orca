@@ -55,7 +55,7 @@ pub(super) async fn run_agent_backup(
         .await
     {
         Ok(out) if out.status.success() => {
-            let msg = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            let msg = run_message(&out);
             info!("WS: agent backup complete: {msg}");
             let _ = out_tx
                 .send(AgentMessage::BackupResult {
@@ -66,7 +66,7 @@ pub(super) async fn run_agent_backup(
                 .await;
         }
         Ok(out) => {
-            let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
+            let msg = run_message(&out);
             error!("WS: agent backup failed: {msg}");
             let _ = out_tx
                 .send(AgentMessage::BackupResult {
@@ -101,6 +101,24 @@ fn cache_backup_config(json: &str) {
 /// object-storage access key and secret key for every S3 target.
 fn cache_backup_config_at(path: &std::path::Path, json: &str) -> std::io::Result<()> {
     orca_core::fsutil::write_private(path, json.as_bytes())
+}
+
+/// The run's summary: the last stdout line ("Backup OK: …" / "Backup FAILED
+/// (n): …", #197), or the last stderr line if the run died before printing
+/// one. Sending all of stdout made the recorded message the whole log.
+fn run_message(out: &std::process::Output) -> String {
+    let last = |b: &[u8]| {
+        String::from_utf8_lossy(b)
+            .lines()
+            .rev()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .map(String::from)
+    };
+    last(&out.stdout)
+        .filter(|l| l.starts_with("Backup "))
+        .or_else(|| last(&out.stderr))
+        .unwrap_or_else(|| "backup produced no output".to_string())
 }
 
 #[cfg(test)]

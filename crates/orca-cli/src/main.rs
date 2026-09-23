@@ -157,7 +157,13 @@ async fn main() -> anyhow::Result<()> {
             )
             .await?;
         }
-        Command::Backup { action } => handlers::backup::handle_backup(action).await,
+        Command::Backup { action } => {
+            // A failed backup must fail the process (#197): the scheduler,
+            // agents and cron all judge the run by its exit code.
+            if !handlers::backup::handle_backup(action).await {
+                std::process::exit(1);
+            }
+        }
         Command::Update => handlers::update::handle_update().await?,
         Command::Cleanup => {
             handlers::cleanup::handle_cleanup().await?;

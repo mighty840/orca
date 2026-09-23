@@ -140,6 +140,21 @@ pub(super) async fn handle_agent_message(
                 info!("Node {node_id}: backup complete — {message}");
             } else {
                 error!("Node {node_id}: backup failed — {message}");
+                // Name the node by its hostname, not its numeric id.
+                let node = state
+                    .registered_nodes
+                    .read()
+                    .await
+                    .get(&node_id)
+                    .map(|n| {
+                        n.address
+                            .split(':')
+                            .next()
+                            .unwrap_or(&n.address)
+                            .to_string()
+                    })
+                    .unwrap_or_else(|| format!("node {node_id}"));
+                crate::alerts::alert_backup_failure(state, &node, &message).await;
             }
             // Cache for the cluster-backups dashboard so it can surface the
             // last-known failure without rescanning logs.

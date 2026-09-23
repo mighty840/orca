@@ -58,6 +58,29 @@ pub fn try_build_alert_engine(cfg: Option<&AiConfig>) -> Option<SharedAlertEngin
     ))))
 }
 
+/// Raise a critical alert for a failed backup (#197) through every configured
+/// channel. It uses the deterministic path (no LLM call), so it's delivered
+/// even when the model endpoint is down. Without `[ai.alerts]` there are no
+/// channels, and the failure is only logged.
+pub async fn alert_backup_failure(state: &AppState, node: &str, message: &str) {
+    let Some(engine) = &state.alerts else {
+        tracing::warn!("Backup failed on {node}, but no alert channels are configured: {message}");
+        return;
+    };
+    engine
+        .write()
+        .await
+        .open_system_alert(
+            &format!("backup:{node}"),
+            orca_core::types::AlertSeverity::Critical,
+            &format!(
+                "The scheduled backup on {node} failed. Until this is fixed, the \
+                 affected data is not being backed up.\n\n{message}"
+            ),
+        )
+        .await;
+}
+
 /// Spawn `AiMonitor::run` as a background task. No-op when alerts are
 /// disabled or the engine isn't built.
 pub fn spawn_alert_monitor(state: Arc<AppState>) -> Option<tokio::task::JoinHandle<()>> {

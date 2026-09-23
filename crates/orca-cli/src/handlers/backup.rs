@@ -1,22 +1,27 @@
 use crate::commands::BackupAction;
 use orca_core::backup::{BackupConfig, BackupManager, BackupTarget};
 
+use super::backup_report::BackupReport;
 use super::volume_backup;
 
-pub async fn handle_backup(action: BackupAction) {
+/// Run a backup command. Returns `false` when a backup ran and anything in it
+/// failed, so `main` can exit non-zero (#197). The scheduler and agents judge
+/// a run by that exit code.
+pub async fn handle_backup(action: BackupAction) -> bool {
     // The two volume operations are async, so we just `.await` them on the
     // ambient `#[tokio::main]` runtime — creating a nested `Runtime::new()`
     // here would panic with "Cannot start a runtime from within a runtime".
     match &action {
         BackupAction::All => {
-            volume_backup::backup_all_volumes().await;
+            let mut report = BackupReport::default();
+            volume_backup::backup_all_volumes(&mut report).await;
             let backup_cfg = load_backup_config();
-            handle_basic(&BackupManager::new(backup_cfg));
-            return;
+            handle_basic(&BackupManager::new(backup_cfg), &mut report);
+            return finish(&report);
         }
         BackupAction::RestoreVolume { volume_name } => {
             volume_backup::restore_volume(volume_name).await;
-            return;
+            return true;
         }
         _ => {}
     }
@@ -25,12 +30,32 @@ pub async fn handle_backup(action: BackupAction) {
     let mgr = BackupManager::new(backup_cfg.clone());
 
     match action {
-        BackupAction::Basic => handle_basic(&mgr),
-        BackupAction::List => handle_list(&mgr, &backup_cfg),
-        BackupAction::Restore { id } => restore_backup(&mgr, &backup_cfg, &id),
-        BackupAction::RestoreBasic => restore_basic(&backup_cfg),
+        BackupAction::Basic => {
+            let mut report = BackupReport::default();
+            handle_basic(&mgr, &mut report);
+            finish(&report)
+        }
+        BackupAction::List => {
+            handle_list(&mgr, &backup_cfg);
+            true
+        }
+        BackupAction::Restore { id } => {
+            restore_backup(&mgr, &backup_cfg, &id);
+            true
+        }
+        BackupAction::RestoreBasic => {
+            restore_basic(&backup_cfg);
+            true
+        }
         BackupAction::All | BackupAction::RestoreVolume { .. } => unreachable!(),
     }
+}
+
+/// Print the run's summary as the LAST stdout line (it becomes the recorded
+/// message) and report success.
+fn finish(report: &BackupReport) -> bool {
+    println!("{}", report.summary());
+    report.ok()
 }
 
 pub(crate) fn load_backup_config() -> BackupConfig {
@@ -78,12 +103,17 @@ fn load_cached_agent_config() -> Option<BackupConfig> {
     }
 }
 
-fn handle_basic(mgr: &BackupManager) {
+fn handle_basic(mgr: &BackupManager, report: &mut BackupReport) {
     let date = chrono::Utc::now().format("%Y-%m-%d");
     let prefix = format!("master/{date}");
     let home = dirs_next::home_dir();
     let outcome = super::backup_files::run(mgr, home.as_deref(), &prefix);
     super::backup_files::report(&outcome);
+    report.config_stored += outcome.stored.len() as u32;
+    report.config_skipped += outcome.skipped_unencrypted.len() as u32;
+    for name in &outcome.failed {
+        report.fail(format!("backup of config file {name} failed"));
+    }
 }
 
 fn handle_list(mgr: &BackupManager, backup_cfg: &BackupConfig) {
