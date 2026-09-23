@@ -192,7 +192,7 @@ pub(crate) async fn reconcile_service(
     // Skip scaling if we already have the right number of instances
     // with the same spec — prevents duplicate containers on re-deploy.
     // Compares image, env, cmd, ports, mounts, volume, domain, aliases,
-    // extra_ports, strip_prefix, network, internal, and health.
+    // extra_ports, strip_prefix, network, internal, health, and resources.
     let same_spec = svc_state.config.spec_matches(config);
 
     svc_state.config = config.clone();
