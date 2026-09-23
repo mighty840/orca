@@ -249,6 +249,8 @@ fn backup_request_service_hooks_default_empty() {
         config: Box::new(BackupConfig {
             age_recipients: Vec::new(),
             bind_mount_max_mb: 512,
+            keep_min: 7,
+            prune_s3: false,
             schedule: None,
             retention_days: 30,
             targets: vec![],

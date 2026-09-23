@@ -9,6 +9,7 @@ mod volume_owner;
 use bollard::Docker;
 use helpers::{find_latest_backup_dir, run_restore_container};
 
+pub(crate) use helpers::prune_old_backup_dirs;
 pub use run::backup_all_volumes;
 
 /// Restore a Docker volume from the latest local backup directory, or from
@@ -142,6 +143,8 @@ mod tests {
         let config = BackupConfig {
             age_recipients: Vec::new(),
             bind_mount_max_mb: 512,
+            keep_min: 7,
+            prune_s3: false,
             schedule: None,
             retention_days: 7,
             targets: vec![BackupTarget::Local {
@@ -165,6 +168,8 @@ mod tests {
         let config = BackupConfig {
             age_recipients: Vec::new(),
             bind_mount_max_mb: 512,
+            keep_min: 7,
+            prune_s3: false,
             schedule: None,
             retention_days: 7,
             targets: vec![BackupTarget::S3 {
@@ -209,40 +214,33 @@ mod tests {
     /// older than retention_days are removed — the most-recent good backup is never
     /// deleted before a new one exists.
     #[test]
-    fn prune_does_not_remove_recent_backup_dirs() {
-        let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path().join(".orca/backups");
-
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        // Create a "recent" dir (1 hour ago) and a "stale" dir (30 days ago).
-        let recent = base.join((now - 3600).to_string());
-        let stale = base.join((now - 30 * 86400 - 1).to_string());
-        std::fs::create_dir_all(&recent).unwrap();
-        std::fs::create_dir_all(&stale).unwrap();
-
-        // Override home — prune_old_backup_dirs uses dirs_next::home_dir() so
-        // we test the underlying logic directly instead.
-        let cutoff = now.saturating_sub(7 * 86400);
-        for entry in std::fs::read_dir(&base).unwrap().flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let epoch: u64 = entry
-                .file_name()
-                .to_str()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(u64::MAX);
-            if epoch < cutoff {
-                std::fs::remove_dir_all(&path).unwrap();
-            }
+    fn prune_backup_dirs_keeps_the_floor_and_never_touches_odd_names() {
+        // #204: every snapshot is past retention (e.g. after a streak of
+        // failed nights); the newest keep_min stay, odd names stay.
+        let base = tempfile::tempdir().unwrap();
+        let now = 1_790_000_000u64;
+        for d in 20..25u64 {
+            std::fs::create_dir(base.path().join((now - d * 86_400).to_string())).unwrap();
         }
-
-        assert!(recent.exists(), "recent dir must survive pruning");
-        assert!(!stale.exists(), "stale dir must be removed by pruning");
+        std::fs::create_dir(base.path().join("manual-copy")).unwrap();
+        let deleted = helpers::prune_backup_dirs_in(base.path(), now, 14, 2);
+        assert_eq!(deleted, 3);
+        let mut left: Vec<String> = std::fs::read_dir(base.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        let newest = [
+            (now - 21 * 86_400).to_string(),
+            (now - 20 * 86_400).to_string(),
+        ];
+        assert_eq!(
+            left,
+            [
+                newest[0].clone(),
+                newest[1].clone(),
+                "manual-copy".to_string()
+            ]
+        );
     }
 }

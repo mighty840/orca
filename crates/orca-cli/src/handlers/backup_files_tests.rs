@@ -31,6 +31,8 @@ fn manager(dest: &Path, recipients: Vec<String>) -> BackupManager {
     BackupManager::new(BackupConfig {
         age_recipients: recipients,
         bind_mount_max_mb: 512,
+        keep_min: 7,
+        prune_s3: false,
         schedule: None,
         retention_days: 30,
         targets: vec![BackupTarget::Local {

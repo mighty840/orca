@@ -136,7 +136,7 @@ pub(crate) fn run(mgr: &BackupManager, home: Option<&Path>, prefix: &str) -> Out
             }
             Err(e) => {
                 tracing::error!("Failed to back up {}: {e:#}", a.name);
-                out.failed.push(a.name.to_string());
+                out.failed.push(format!("{}: {e:#}", a.name));
             }
         }
     }

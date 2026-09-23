@@ -1,6 +1,7 @@
 mod config;
 pub mod encrypt;
 mod manager;
+pub mod retention;
 pub mod s3;
 mod status;
 

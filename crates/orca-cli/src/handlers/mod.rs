@@ -17,6 +17,7 @@ mod port;
 pub mod reload;
 pub(crate) mod restore;
 pub(crate) mod restore_cmd;
+pub(crate) mod retention;
 pub mod secrets;
 pub mod server;
 pub mod status;

@@ -131,6 +131,8 @@ mod tests {
         let cfg = BackupConfig {
             age_recipients: Vec::new(),
             bind_mount_max_mb: 512,
+            keep_min: 7,
+            prune_s3: false,
             schedule: Some("0 0 2 * * *".into()),
             retention_days: 14,
             targets: vec![BackupTarget::Local {

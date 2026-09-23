@@ -19,6 +19,8 @@ pub(crate) struct BackupReport {
     pub bind_mounts: Option<String>,
     pub config_stored: u32,
     pub config_skipped: u32,
+    /// What retention did (or why it didn't run), #204.
+    pub retention: Option<String>,
 }
 
 impl BackupReport {
@@ -55,6 +57,9 @@ impl BackupReport {
                 "config files {} stored, {} skipped",
                 self.config_stored, self.config_skipped
             ));
+        }
+        if let Some(r) = &self.retention {
+            parts.push(r.clone());
         }
         let detail = parts.join("; ");
         if self.ok() {
