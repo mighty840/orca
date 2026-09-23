@@ -2,7 +2,7 @@
 //! agent node.
 
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::{info, warn};
 
 use orca_core::ws_types::MasterMessage;
 
@@ -78,11 +78,20 @@ pub(super) async fn send_reconcile(
                         == crate::placement::PlacementResolution::Node(node_id)
                 })
         })
-        .filter_map(|svc| {
-            crate::routes::service_config_to_spec(&svc.config)
-                .ok()
-                .map(Box::new)
-        })
+        .filter_map(
+            |svc| match crate::routes::service_config_to_spec(&svc.config) {
+                Ok(spec) => Some(Box::new(spec)),
+                Err(e) => {
+                    // Left out of the Reconcile, so the agent keeps whatever it
+                    // runs now. Say why instead of skipping it silently.
+                    warn!(
+                        "Reconcile for node {node_id}: skipping {}: {e:#}",
+                        svc.config.name
+                    );
+                    None
+                }
+            },
+        )
         .collect();
     // Release both read guards before the channel send below — holding a
     // read across an await lets a queued writer (heartbeats write
