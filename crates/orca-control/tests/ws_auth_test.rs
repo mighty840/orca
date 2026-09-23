@@ -15,7 +15,10 @@ use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 use orca_control::state::{AppState, RegisteredNode};
 use orca_core::config::{ApiToken, ClusterConfig, Role};
 use orca_core::testing::MockRuntime;
-use orca_core::ws_types::{AgentMessage, HostStats};
+use orca_core::ws_types::{AgentMessage, HostStats, MasterMessage};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::HeaderValue;
+use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
 
 const ADMIN: &str = "legacy-admin-token";
 const VIEWER: &str = "dashboard-viewer-token";
@@ -96,9 +99,11 @@ fn node(node_id: u64) -> RegisteredNode {
 }
 
 #[tokio::test]
-async fn admin_token_opens_the_agent_channel() {
-    // The cluster token agents join with is a legacy admin token. Requiring
-    // admin must not lock out an agent that has not been upgraded.
+async fn legacy_query_token_still_opens_the_agent_channel() {
+    // Two compatibility guarantees in one: the cluster token agents join with
+    // is a legacy admin token, so requiring admin (#201) must not lock it out;
+    // and a pre-v0.3 agent still sends it in the query string (#182), which an
+    // upgraded master must keep accepting until the agent is upgraded too.
     let addr = start_server(test_state()).await;
     let url = format!("ws://{addr}/api/v1/ws/agent?token={ADMIN}&node_id=1");
     assert!(tokio_tungstenite::connect_async(&url).await.is_ok());
@@ -186,4 +191,61 @@ async fn heartbeat_is_attributed_to_the_session_node_not_the_claimed_one() {
         Some(0.0),
         "the claimed node 99 must be untouched"
     );
+}
+
+// --- #182: the token travels in a header, not the URL -----------------------
+
+#[tokio::test]
+async fn upgraded_agent_request_connects_and_receives_the_ack() {
+    // Contract test: the agent's real request builder against the master's
+    // real handler. If these two ever disagree, a live agent disconnects.
+    use orca_agent::ws_client::connect::{build_ws_request, build_ws_url};
+
+    let addr = start_server(test_state()).await;
+    let url = build_ws_url(&format!("http://{addr}"), 7, "agent-host:6881");
+    assert!(!url.contains(ADMIN), "the token must not be in the URL");
+
+    let request = build_ws_request(&url, ADMIN).unwrap();
+    let (mut ws, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(2), ws.next())
+        .await
+        .expect("timed out waiting for Ack")
+        .expect("stream ended")
+        .expect("ws error");
+    let msg: MasterMessage = serde_json::from_str(&frame.into_text().unwrap()).unwrap();
+    assert!(matches!(msg, MasterMessage::Ack { node_id: 7 }), "{msg:?}");
+}
+
+#[tokio::test]
+async fn header_token_is_role_checked_like_any_other() {
+    use orca_agent::ws_client::connect::{build_ws_request, build_ws_url};
+
+    let addr = start_server(test_state()).await;
+    let url = build_ws_url(&format!("http://{addr}"), 1, "h:1");
+    let err = tokio_tungstenite::connect_async(build_ws_request(&url, VIEWER).unwrap())
+        .await
+        .unwrap_err();
+    assert_eq!(refusal_status(err), 403);
+}
+
+#[tokio::test]
+async fn a_rejected_header_never_falls_back_to_the_query_string() {
+    // Header present but wrong, query string right: refuse. Falling back would
+    // let a request carry two credentials and succeed on the weaker path.
+    let addr = start_server(test_state()).await;
+    let url = format!("ws://{addr}/api/v1/ws/agent?token={ADMIN}&node_id=1");
+    let mut request = url.into_client_request().unwrap();
+    request
+        .headers_mut()
+        .insert(AUTHORIZATION, HeaderValue::from_static("Bearer wrong"));
+    let err = tokio_tungstenite::connect_async(request).await.unwrap_err();
+    assert_eq!(refusal_status(err), 401);
+}
+
+#[tokio::test]
+async fn no_token_anywhere_is_unauthorized() {
+    let addr = start_server(test_state()).await;
+    let url = format!("ws://{addr}/api/v1/ws/agent?node_id=1");
+    let err = tokio_tungstenite::connect_async(&url).await.unwrap_err();
+    assert_eq!(refusal_status(err), 401);
 }

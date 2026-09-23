@@ -66,8 +66,18 @@ async fn domain_discovery_never_mutates_declared_services() {
 }
 
 #[test]
-fn ws_query_deserializes() {
+fn ws_query_deserializes_a_legacy_query_token() {
     let q: WsQuery = serde_json::from_str(r#"{"token":"abc123","node_id":42}"#).unwrap();
-    assert_eq!(q.token, "abc123");
+    assert_eq!(q.token.as_deref(), Some("abc123"));
+    assert_eq!(q.node_id, 42);
+}
+
+#[test]
+fn ws_query_deserializes_without_a_token() {
+    // Upgraded agents send the token in a header and none in the query (#182).
+    // When `token` was required, this failed to parse, which is why an older
+    // master answers an upgraded agent with 400.
+    let q: WsQuery = serde_json::from_str(r#"{"node_id":42}"#).unwrap();
+    assert_eq!(q.token, None);
     assert_eq!(q.node_id, 42);
 }

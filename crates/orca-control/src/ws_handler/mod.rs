@@ -1,6 +1,9 @@
 //! WebSocket handler for agent↔master streaming communication.
 //!
-//! Agents connect to `GET /api/v1/ws/agent?token=<cluster_token>&node_id=<id>`.
+//! Agents connect to `GET /api/v1/ws/agent?node_id=<id>&address=<addr>` with an
+//! `Authorization: Bearer <cluster_token>` header. Agents older than v0.3 send
+//! the token as a `token` query parameter instead, which is still accepted
+//! with a deprecation warning so the master can be upgraded first (#182).
 //! After the upgrade, messages flow bidirectionally using [`AgentMessage`] and
 //! [`MasterMessage`] JSON frames.
 
@@ -14,6 +17,7 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{ConnectInfo, Query, State, WebSocketUpgrade};
+use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
@@ -32,7 +36,10 @@ use reconcile::{drain_pending_commands, send_reconcile};
 /// Query params for the WS upgrade request.
 #[derive(Deserialize)]
 pub struct WsQuery {
-    token: String,
+    /// Deprecated (#182): pre-v0.3 agents send the token here, which puts it
+    /// in URLs and logs. Accepted only when no `Authorization` header is sent.
+    #[serde(default)]
+    token: Option<String>,
     node_id: u64,
     /// Agent's address (e.g. "10.0.0.5:6881") for node registration.
     #[serde(default)]
@@ -71,10 +78,28 @@ pub async fn ws_agent_handler(
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
     Query(query): Query<WsQuery>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
+    // Prefer the header. Fall back to the query string only when there is no
+    // header at all — never from a rejected header to the query.
+    let token = match crate::auth::bearer_token(&headers) {
+        Some(token) => token.to_owned(),
+        None => {
+            if query.token.is_some() {
+                warn!(
+                    node_id = query.node_id,
+                    peer = %peer.ip(),
+                    "agent sent its token in the URL query string, which is deprecated \
+                     (#182): upgrade the agent so the token travels in a header"
+                );
+            }
+            query.token.clone().unwrap_or_default()
+        }
+    };
+
     // Opening the agent channel is admin-only (#201): the master sends this
     // node resolved secrets for every service pinned to it.
-    match authorize_agent(&state, &query.token) {
+    match authorize_agent(&state, &token) {
         Ok(_) => {}
         Err(Refusal::Unauthorized) => {
             return (axum::http::StatusCode::UNAUTHORIZED, "invalid token").into_response();

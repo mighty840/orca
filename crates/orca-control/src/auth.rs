@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Request, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use orca_core::config::Role;
@@ -47,6 +47,18 @@ fn required_action(path: &str, method: &str) -> &'static str {
 /// a token's length is not secret, only its contents are.
 fn ct_eq(presented: &str, configured: &str) -> bool {
     presented.as_bytes().ct_eq(configured.as_bytes()).into()
+}
+
+/// The token from an `Authorization: Bearer <token>` header, if present.
+///
+/// Shared by the HTTP middleware and the agent WebSocket so both read the
+/// header the same way.
+pub(crate) fn bearer_token(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(axum::http::header::AUTHORIZATION)?
+        .to_str()
+        .ok()?
+        .strip_prefix("Bearer ")
 }
 
 /// The role a presented token grants, or `None` if it grants nothing.
@@ -93,15 +105,8 @@ pub async fn auth_middleware(
         return next.run(request).await;
     }
 
-    // Extract bearer token
-    let auth_header = request
-        .headers()
-        .get("authorization")
-        .and_then(|v| v.to_str().ok());
-
-    let token = match auth_header {
-        Some(header) if header.starts_with("Bearer ") => &header[7..],
-        _ => return (StatusCode::UNAUTHORIZED, "missing bearer token").into_response(),
+    let Some(token) = bearer_token(request.headers()) else {
+        return (StatusCode::UNAUTHORIZED, "missing bearer token").into_response();
     };
 
     let Some(role) = resolve_token(&state, token) else {
