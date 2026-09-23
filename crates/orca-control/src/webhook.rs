@@ -11,17 +11,14 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{delete, post};
 use axum::{Json, Router};
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
 use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
 use crate::operations::AgentOfflineError;
 use crate::reconciler;
 use crate::state::AppState;
+use crate::webhook_auth::{SECRET_REQUIRED, short_sha, validate_signature};
 use crate::webhook_invocations::record_invocation;
-
-type HmacSha256 = Hmac<Sha256>;
 
 /// Configuration for a webhook trigger.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -65,6 +62,15 @@ pub fn new_store() -> WebhookStore {
         .ok()
         .and_then(|raw| serde_json::from_str(&raw).ok())
         .unwrap_or_default();
+    for wh in configs.iter().filter(|w| w.effective_secret().is_none()) {
+        error!(
+            repo = %wh.repo,
+            branch = %wh.branch,
+            service = %wh.service_name,
+            "Webhook has no secret and will reject every push. \
+             Re-register it with `orca webhooks add`."
+        );
+    }
     Arc::new(RwLock::new(configs))
 }
 
@@ -110,24 +116,6 @@ struct CommitInfo {
 /// Extract branch name from a git ref like "refs/heads/main".
 fn branch_from_ref(git_ref: &str) -> Option<&str> {
     git_ref.strip_prefix("refs/heads/")
-}
-
-/// Validate HMAC-SHA256 signature from the `X-Hub-Signature-256` header.
-fn validate_signature(secret: &str, body: &[u8], signature_header: &str) -> bool {
-    let Some(hex_sig) = signature_header.strip_prefix("sha256=") else {
-        return false;
-    };
-
-    let Ok(expected) = hex::decode(hex_sig) else {
-        return false;
-    };
-
-    let Ok(mut mac) = HmacSha256::new_from_slice(secret.as_bytes()) else {
-        return false;
-    };
-
-    mac.update(body);
-    mac.verify_slice(&expected).is_ok()
 }
 
 /// Handle a GitHub/Gitea push webhook.
@@ -176,7 +164,7 @@ pub async fn handle_push(
         .as_ref()
         .and_then(|c| c.message.lines().next())
         .unwrap_or("");
-    let short_sha = &commit_id[..commit_id.len().min(8)];
+    let short_sha = short_sha(commit_id);
 
     info!("Webhook: push to {repo}#{branch} (commit {short_sha}: {commit_msg})");
 
@@ -209,10 +197,21 @@ pub async fn handle_push(
     let mut agent_offline = false;
 
     for wh in &matching {
-        // Validate secret if configured
-        if let Some(secret) = &wh.secret
-            && (sig_header.is_empty() || !validate_signature(secret, &body, sig_header))
-        {
+        // Fail closed. A webhook without a secret cannot authenticate a push,
+        // so it must never deploy. The API refuses to register one, but a
+        // legacy entry in webhooks.json can still carry `secret: None`.
+        let authenticated = match wh.effective_secret() {
+            Some(secret) => !sig_header.is_empty() && validate_signature(secret, &body, sig_header),
+            None => {
+                error!(
+                    "Webhook: {} has no secret configured; rejecting push. \
+                     Re-register it with `orca webhooks add`.",
+                    wh.service_name
+                );
+                false
+            }
+        };
+        if !authenticated {
             sig_failures += 1;
             warn!("Webhook: HMAC validation failed for {}", wh.service_name);
             record_invocation(&state, wh, short_sha, 401, false).await;
@@ -281,6 +280,17 @@ pub async fn register(
     State(state): State<Arc<AppState>>,
     Json(config): Json<WebhookConfig>,
 ) -> impl IntoResponse {
+    if config.effective_secret().is_none() {
+        warn!(
+            "Webhook: refusing to register {}#{} -> {} without a secret",
+            config.repo, config.branch, config.service_name
+        );
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": SECRET_REQUIRED })),
+        )
+            .into_response();
+    }
     info!(
         "Webhook: registering {}#{} -> {}",
         config.repo, config.branch, config.service_name
@@ -300,6 +310,7 @@ pub async fn register(
         StatusCode::CREATED,
         Json(serde_json::json!({"status": "registered"})),
     )
+        .into_response()
 }
 
 /// List all webhook configs.
@@ -316,7 +327,7 @@ pub async fn list(State(state): State<Arc<AppState>>) -> impl IntoResponse {
             repo: w.repo.clone(),
             service_name: w.service_name.clone(),
             branch: w.branch.clone(),
-            has_secret: w.secret.is_some(),
+            has_secret: w.effective_secret().is_some(),
             infra: w.infra,
             last_invocation: invocations
                 .get(&w.service_name)

@@ -94,3 +94,7 @@ hex = "0.4"
 uuid = { version = "1", features = ["v4", "v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 async-trait = "0.1"
+
+# Testing
+# Property tests for parsers of untrusted input (webhook payloads, log tails).
+proptest = "1"
