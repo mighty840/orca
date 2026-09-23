@@ -19,9 +19,11 @@ pub async fn handle_backup(action: BackupAction) -> bool {
             handle_basic(&BackupManager::new(backup_cfg), &mut report);
             return finish(&report);
         }
-        BackupAction::RestoreVolume { volume_name } => {
-            volume_backup::restore_volume(volume_name).await;
-            return true;
+        BackupAction::RestoreVolume {
+            volume_name,
+            from_s3,
+        } => {
+            return volume_backup::restore_volume(volume_name, from_s3.as_deref()).await;
         }
         _ => {}
     }
@@ -39,13 +41,11 @@ pub async fn handle_backup(action: BackupAction) -> bool {
             handle_list(&mgr, &backup_cfg);
             true
         }
-        BackupAction::Restore { id } => {
-            restore_backup(&mgr, &backup_cfg, &id);
-            true
+        BackupAction::Restore { id, identity } => {
+            super::restore_cmd::restore_by_id(&backup_cfg, &id, identity.as_deref())
         }
-        BackupAction::RestoreBasic => {
-            restore_basic(&backup_cfg);
-            true
+        BackupAction::RestoreBasic { identity, force } => {
+            super::restore_cmd::restore_basic(&backup_cfg, identity.as_deref(), force)
         }
         BackupAction::All | BackupAction::RestoreVolume { .. } => unreachable!(),
     }
@@ -134,183 +134,6 @@ fn handle_list(mgr: &BackupManager, backup_cfg: &BackupConfig) {
     }
 }
 
-/// Parse a backup filename like `secrets_20260329T120000Z.json` into (name, ext).
-fn parse_backup_filename(filename: &str) -> Option<(&str, &str)> {
-    // Format: {name}_{timestamp}.{ext}
-    let underscore = filename.find('_')?;
-    let name = &filename[..underscore];
-    let rest = &filename[underscore + 1..];
-    let dot = rest.find('.')?;
-    let ext = &rest[dot + 1..];
-    Some((name, ext))
-}
-
-/// Determine the restore target path from a backup filename.
-fn restore_target(filename: &str) -> Option<String> {
-    let (name, ext) = parse_backup_filename(filename)?;
-    match (name, ext) {
-        ("secrets", "json") => Some("secrets.json".to_string()),
-        ("cluster", "toml") => Some("cluster.toml".to_string()),
-        (_, "tar.gz" | "tgz") => None, // volume backups handled separately
-        (n, e) => Some(format!("{n}.{e}")),
-    }
-}
-
-fn restore_backup(mgr: &BackupManager, config: &BackupConfig, id: &str) {
-    // Find the backup file in the first local target
-    for target in &config.targets {
-        match target {
-            BackupTarget::Local { path } => {
-                let dir = std::path::Path::new(path);
-                let entries = match mgr.list_backups(target) {
-                    Ok(e) => e,
-                    Err(e) => {
-                        tracing::error!("Failed to list backups: {e}");
-                        continue;
-                    }
-                };
-                let matched: Vec<_> = entries.iter().filter(|e| e.contains(id)).collect();
-                if matched.is_empty() {
-                    println!("No backups matching '{id}' in {path}");
-                    continue;
-                }
-                if matched.len() > 1 {
-                    println!("Multiple matches for '{id}':");
-                    for m in &matched {
-                        println!("  {m}");
-                    }
-                    println!("Please specify a more precise id.");
-                    return;
-                }
-                let filename = matched[0];
-                let src = dir.join(filename);
-                if filename.ends_with(".tar.gz") || filename.ends_with(".tgz") {
-                    let tmp = std::env::temp_dir().join(format!("orca-restore-{id}"));
-                    std::fs::create_dir_all(&tmp).ok();
-                    let status = std::process::Command::new("tar")
-                        .args(["-xzf", &src.display().to_string(), "-C"])
-                        .arg(&tmp)
-                        .status();
-                    match status {
-                        Ok(s) if s.success() => {
-                            println!("Extracted volume backup to {}", tmp.display());
-                        }
-                        _ => {
-                            tracing::error!("Failed to extract {filename}");
-                        }
-                    }
-                } else if let Some(target_path) = restore_target(filename) {
-                    match std::fs::copy(&src, &target_path) {
-                        Ok(_) => println!("Restored {filename} -> {target_path}"),
-                        Err(e) => tracing::error!("Failed to restore: {e}"),
-                    }
-                } else {
-                    println!("Cannot determine restore target for {filename}");
-                }
-                return;
-            }
-            BackupTarget::S3 { .. } => {
-                let objects = match orca_core::backup::s3::list_objects(target) {
-                    Ok(o) => o,
-                    Err(e) => {
-                        tracing::error!("Failed to list S3 objects: {e}");
-                        continue;
-                    }
-                };
-                let matched: Vec<_> = objects.iter().filter(|n| n.contains(id)).collect();
-                if matched.is_empty() {
-                    println!("No S3 backups matching '{id}'");
-                    continue;
-                }
-                if matched.len() > 1 {
-                    println!("Multiple S3 matches for '{id}':");
-                    for m in &matched {
-                        println!("  {m}");
-                    }
-                    println!("Please specify a more precise id.");
-                    return;
-                }
-                let name = matched[0];
-                let dest = std::path::Path::new(name);
-                match orca_core::backup::s3::download(target, name, dest) {
-                    Ok(()) => println!("Downloaded S3 backup → {name}"),
-                    Err(e) => tracing::error!("S3 download failed: {e}"),
-                }
-                return;
-            }
-        }
-    }
-}
-
-/// Restore the latest backup of each config file from the first local target.
-fn restore_basic(config: &BackupConfig) {
-    let local_path = config.targets.iter().find_map(|t| match t {
-        BackupTarget::Local { path } => Some(path.clone()),
-        _ => None,
-    });
-    let Some(path) = local_path else {
-        println!("No local backup target configured.");
-        return;
-    };
-    let dir = std::path::Path::new(&path);
-    if !dir.exists() {
-        println!("Backup directory does not exist: {path}");
-        return;
-    }
-
-    // For each config file, find the most recent backup by filename sort.
-    let targets = [("secrets", "secrets.json"), ("cluster", "cluster.toml")];
-    let mut restored = 0u32;
-    for (prefix, dest) in &targets {
-        let latest = std::fs::read_dir(dir).ok().and_then(|entries| {
-            let mut matches: Vec<_> = entries
-                .flatten()
-                .filter(|e| {
-                    // `<name>_`, not just `<name>`: "cluster" must not match
-                    // "cluster-db_…" and restore the database as cluster.toml.
-                    e.file_name()
-                        .to_str()
-                        .map(|n| n.starts_with(&format!("{prefix}_")))
-                        .unwrap_or(false)
-                })
-                .collect();
-            matches.sort_by_key(|e| e.file_name());
-            matches.into_iter().next_back()
-        });
-        let Some(entry) = latest else {
-            println!("No backup found for {dest}");
-            continue;
-        };
-        // Encrypted artifacts (#199) need the age identity, which restore
-        // doesn't handle yet (#200). Never copy ciphertext over the live file.
-        if entry
-            .file_name()
-            .to_string_lossy()
-            .ends_with(orca_core::backup::encrypt::AGE_SUFFIX)
-        {
-            eprintln!(
-                "{} is age-encrypted; decrypt it yourself: \
-                 age -d -i <your-age-key.txt> {} > {dest}",
-                entry.file_name().to_string_lossy(),
-                entry.path().display()
-            );
-            continue;
-        }
-        match std::fs::copy(entry.path(), dest) {
-            Ok(_) => {
-                println!("Restored {} -> {dest}", entry.file_name().to_string_lossy());
-                restored += 1;
-            }
-            Err(e) => tracing::error!("Failed to restore {dest}: {e}"),
-        }
-    }
-    if restored == 0 {
-        println!("No config files restored.");
-    } else {
-        println!("Restored {restored} file(s).");
-    }
-}
-
 fn default_backup_config() -> BackupConfig {
     BackupConfig {
         age_recipients: Vec::new(),
@@ -326,41 +149,6 @@ fn default_backup_config() -> BackupConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_secrets_backup_filename() {
-        let (name, ext) = parse_backup_filename("secrets_20260329T120000Z.json").unwrap();
-        assert_eq!(name, "secrets");
-        assert_eq!(ext, "json");
-    }
-
-    #[test]
-    fn parse_cluster_backup_filename() {
-        let (name, ext) = parse_backup_filename("cluster_20260329T120000Z.toml").unwrap();
-        assert_eq!(name, "cluster");
-        assert_eq!(ext, "toml");
-    }
-
-    #[test]
-    fn restore_target_secrets() {
-        assert_eq!(
-            restore_target("secrets_20260329T120000Z.json"),
-            Some("secrets.json".to_string())
-        );
-    }
-
-    #[test]
-    fn restore_target_cluster() {
-        assert_eq!(
-            restore_target("cluster_20260329T120000Z.toml"),
-            Some("cluster.toml".to_string())
-        );
-    }
-
-    #[test]
-    fn parse_invalid_filename_returns_none() {
-        assert!(parse_backup_filename("nounderscorehere").is_none());
-    }
 
     // Serialize tests that mutate ORCA_BACKUP_CONFIG_JSON to prevent races.
     static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());

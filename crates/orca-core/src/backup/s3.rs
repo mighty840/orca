@@ -118,6 +118,11 @@ pub fn download(target: &BackupTarget, name: &str, dest_path: &Path) -> Result<(
 
     let src = s3_path(bucket, prefix, name);
     info!("Downloading {src} → {}", dest_path.display());
+    // Keys are nested (`master/<date>/…`), so the destination's parent may
+    // not exist yet (#200).
+    if let Some(parent) = dest_path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
+    }
 
     let mut cmd = Command::new("rclone");
     cmd.arg("copyto").arg(&src).arg(dest_path);
@@ -158,7 +163,10 @@ pub fn list_objects(target: &BackupTarget) -> Result<Vec<String>> {
         _ => return Ok(vec![]),
     };
 
-    // List the prefix directory; `--format p` returns just the relative path per line.
+    // List every object under the prefix, recursively (#200). Without `-R`,
+    // `lsf` returns only the top-level "directories" (`agents/`, `master/`)
+    // and no backup could ever be found; `--files-only` drops those entries.
+    // `--format p` prints each object's path relative to the prefix.
     let remote_dir = if prefix.is_empty() {
         format!(":s3:{bucket}/")
     } else {
@@ -166,7 +174,7 @@ pub fn list_objects(target: &BackupTarget) -> Result<Vec<String>> {
     };
 
     let mut cmd = Command::new("rclone");
-    cmd.args(["lsf", &remote_dir, "--format", "p"]);
+    cmd.args(["lsf", "-R", "--files-only", &remote_dir, "--format", "p"]);
     apply_s3_flags(&mut cmd, region, endpoint, access_key, secret_key);
 
     let output = cmd

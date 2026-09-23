@@ -15,6 +15,8 @@ pub mod logs;
 pub mod ops;
 mod port;
 pub mod reload;
+pub(crate) mod restore;
+pub(crate) mod restore_cmd;
 pub mod secrets;
 pub mod server;
 pub mod status;
