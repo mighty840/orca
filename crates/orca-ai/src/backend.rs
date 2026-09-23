@@ -45,6 +45,10 @@ impl LlmBackend for Box<dyn LlmBackend> {
     }
 }
 
+/// Upper bound for one LLM call. Alerting never waits longer than this for a
+/// diagnosis; after it, the alert goes out without one (#181).
+pub const LLM_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// OpenAI-compatible backend (works with LiteLLM, Ollama, vLLM, OpenAI, Anthropic proxy, etc.)
 pub struct OpenAiCompatibleBackend {
     client: reqwest::Client,
@@ -56,8 +60,16 @@ pub struct OpenAiCompatibleBackend {
 
 impl OpenAiCompatibleBackend {
     pub fn new(endpoint: String, model: String, api_key: Option<String>) -> Self {
+        // reqwest's default client never times out. A model endpoint that
+        // accepts the connection and then never answers (a starved LiteLLM on
+        // the very master being monitored) hung the alert path forever (#181).
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(LLM_TIMEOUT)
+            .build()
+            .unwrap_or_default();
         Self {
-            client: reqwest::Client::new(),
+            client,
             endpoint,
             model,
             api_key,

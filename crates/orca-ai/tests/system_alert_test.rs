@@ -71,9 +71,9 @@ async fn system_alert_is_delivered_with_the_llm_down() {
 }
 
 #[tokio::test]
-async fn the_ai_path_delivers_nothing_with_the_llm_down() {
-    // Documents why backups can't use open_alert: with the model endpoint
-    // down, it errors before dispatching anything.
+async fn the_ai_path_now_degrades_instead_of_delivering_nothing() {
+    // Before #181, `open_alert` errored with the model down and nothing was
+    // dispatched. Now it opens a degraded alert carrying the raw signal.
     let rec = Recorder::default();
     let mut engine = ConversationEngine::with_dispatcher(
         DownBackend,
@@ -86,11 +86,14 @@ async fn the_ai_path_delivers_nothing_with_the_llm_down() {
         recent_events: vec![],
         active_alerts: vec![],
     };
+    let conv = engine
+        .open_alert("x", AlertSeverity::Critical, "boom", &ctx)
+        .await
+        .expect("a model failure is no longer an error");
     assert!(
-        engine
-            .open_alert("x", AlertSeverity::Critical, "boom", &ctx)
-            .await
-            .is_err()
+        conv.messages[1]
+            .content
+            .contains("AI diagnosis unavailable")
     );
-    assert!(rec.0.lock().unwrap().is_empty());
+    assert_eq!(rec.0.lock().unwrap().len(), 1);
 }
