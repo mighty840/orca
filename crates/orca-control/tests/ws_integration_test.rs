@@ -190,6 +190,7 @@ async fn ws_master_pushes_deploy_via_channel() {
     // Push a deploy command via the ws_agents channel
     let spec = orca_core::types::WorkloadSpec {
         restart_policy: None,
+        fingerprint: None,
         name: "test-svc".into(),
         runtime: orca_core::types::RuntimeKind::Container,
         image: "nginx:latest".into(),

@@ -114,3 +114,25 @@ fn restart_policy_propagates_to_spec() {
     let spec = service_config_to_spec(&c).unwrap();
     assert_eq!(spec.restart_policy.as_deref(), Some("on-failure:5"));
 }
+
+#[test]
+fn spec_is_fingerprinted_consistently_for_the_deploy_and_rejoin_paths() {
+    // #213: `reconcile_service` (deploy) and `send_reconcile` (rejoin) both
+    // convert the stored config, so they must agree, even when the env maps
+    // were built in a different order (e.g. after a master restart).
+    let mut a = minimal_config(Some("nginx:1".into()), None);
+    let mut b = a.clone();
+    for i in 0..32 {
+        a.env.insert(format!("K{i}"), format!("v{i}"));
+    }
+    for i in (0..32).rev() {
+        b.env.insert(format!("K{i}"), format!("v{i}"));
+    }
+    let fa = service_config_to_spec(&a).unwrap().fingerprint;
+    let fb = service_config_to_spec(&b).unwrap().fingerprint;
+    assert!(fa.is_some());
+    assert_eq!(fa, fb);
+
+    b.env.insert("K0".into(), "changed".into());
+    assert_ne!(fa, service_config_to_spec(&b).unwrap().fingerprint);
+}

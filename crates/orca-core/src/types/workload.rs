@@ -66,6 +66,13 @@ pub struct WorkloadSpec {
     /// "on-failure[:N]"). None = Docker default (no).
     #[serde(default)]
     pub restart_policy: Option<String>,
+    /// Fingerprint of the declared spec, stamped by the master (see
+    /// `fingerprint.rs`). The agent labels containers with it and, when an
+    /// agent rejoins, recreates any running container whose label differs
+    /// from the expected spec's, so a change that missed a disconnected
+    /// agent still lands (#213). `None` from masters older than v0.3.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fingerprint: Option<String>,
 }
 
 impl WorkloadSpec {
@@ -148,7 +155,7 @@ impl<'de> serde::Deserialize<'de> for Replicas {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ResourceLimits {
     pub memory: Option<String>,
     pub cpu: Option<f64>,

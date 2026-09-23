@@ -51,6 +51,7 @@ pub fn spec(name: &str) -> WorkloadSpec {
         strip_prefix: None,
         pull_policy: PullPolicy::default(),
         restart_policy: None,
+        fingerprint: None,
     }
 }
 

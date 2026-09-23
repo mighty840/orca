@@ -101,6 +101,13 @@ pub trait Runtime: AsAny + Send + Sync + 'static {
         Ok(ContainerExit::default())
     }
 
+    /// The spec fingerprint a workload was created with (#213), read back
+    /// from the runtime (a container label for Docker). `None` when the
+    /// runtime doesn't record it or the workload predates fingerprinting.
+    async fn spec_fingerprint(&self, _handle: &WorkloadHandle) -> Result<Option<String>> {
+        Ok(None)
+    }
+
     /// Resolve the host-accessible port for a workload after it has been started.
     ///
     /// Returns `None` if the runtime does not expose ports or the workload has no port mapping.

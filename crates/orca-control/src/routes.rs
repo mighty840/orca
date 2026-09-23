@@ -174,7 +174,10 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
             )
         })?;
 
-    Ok(WorkloadSpec {
+    // Fingerprint the DECLARED spec here, before any build step swaps the
+    // image for a freshly built tag, so the deploy path and an agent's
+    // rejoin re-sync (both call this) agree on it (#213).
+    let mut spec = WorkloadSpec {
         name: config.name.clone(),
         runtime: config.runtime,
         image,
@@ -209,7 +212,10 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
         strip_prefix: config.strip_prefix.clone(),
         pull_policy: config.pull_policy,
         restart_policy: config.restart_policy.clone(),
-    })
+        fingerprint: None,
+    };
+    spec.stamp_fingerprint();
+    Ok(spec)
 }
 
 #[cfg(test)]

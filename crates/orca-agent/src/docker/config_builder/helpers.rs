@@ -216,6 +216,9 @@ pub(super) fn build_labels(spec: &WorkloadSpec) -> HashMap<String, String> {
     let mut labels = HashMap::new();
     labels.insert(ORCA_LABEL.to_string(), "true".to_string());
     labels.insert("orca.service".to_string(), spec.name.clone());
+    if let Some(fp) = &spec.fingerprint {
+        labels.insert(orca_core::types::FINGERPRINT_LABEL.to_string(), fp.clone());
+    }
     if let Some(net) = &spec.network {
         labels.insert("orca.network".to_string(), net.clone());
     }
@@ -254,6 +257,7 @@ mod tests {
     fn minimal_spec() -> WorkloadSpec {
         WorkloadSpec {
             restart_policy: None,
+            fingerprint: None,
             name: "test".to_string(),
             runtime: RuntimeKind::Container,
             image: "nginx:latest".to_string(),
