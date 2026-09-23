@@ -38,6 +38,10 @@ pub struct MockRuntime {
     failures: Arc<Mutex<HashMap<MockOpKind, FailMode>>>,
     /// If set, the mock host port returned by `resolve_host_port`.
     pub mock_host_port: Option<u16>,
+    /// Spec fingerprint per container name (`orca-<service>`), as the Docker
+    /// runtime keeps it in a label. Set by `create`, or by
+    /// [`MockRuntime::set_fingerprint`] to model an older container.
+    fingerprints: Arc<Mutex<HashMap<String, Option<String>>>>,
 }
 
 impl MockRuntime {
@@ -49,6 +53,7 @@ impl MockRuntime {
             counter: Arc::new(Mutex::new(0)),
             failures: Arc::new(Mutex::new(HashMap::new())),
             mock_host_port: None,
+            fingerprints: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -58,6 +63,16 @@ impl MockRuntime {
             mock_host_port: Some(port),
             ..Self::new()
         }
+    }
+
+    /// Set (or clear, with `None`) the fingerprint recorded for container
+    /// `orca-<service>`: models a container created before fingerprinting,
+    /// or one created from a different spec.
+    pub async fn set_fingerprint(&self, service: &str, fingerprint: Option<&str>) {
+        self.fingerprints
+            .lock()
+            .await
+            .insert(format!("orca-{service}"), fingerprint.map(String::from));
     }
 
     // --- inspection -----------------------------------------------------

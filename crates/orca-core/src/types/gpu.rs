@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use super::WorkloadId;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GpuSpec {
     /// Number of GPUs required.
     pub count: u32,

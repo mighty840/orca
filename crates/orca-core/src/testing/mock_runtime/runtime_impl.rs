@@ -44,6 +44,10 @@ impl Runtime for MockRuntime {
         };
 
         self.record(MockOp::Create(spec.name.clone())).await;
+        self.fingerprints
+            .lock()
+            .await
+            .insert(format!("orca-{}", spec.name), spec.fingerprint.clone());
         self.statuses
             .lock()
             .await
@@ -54,6 +58,15 @@ impl Runtime for MockRuntime {
             name: format!("orca-{}", spec.name),
             metadata: HashMap::new(),
         })
+    }
+
+    async fn spec_fingerprint(&self, handle: &WorkloadHandle) -> Result<Option<String>> {
+        let fps = self.fingerprints.lock().await;
+        Ok(fps
+            .get(&handle.name)
+            .or_else(|| fps.get(&handle.runtime_id))
+            .cloned()
+            .flatten())
     }
 
     async fn start(&self, handle: &WorkloadHandle) -> Result<()> {

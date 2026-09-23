@@ -1,4 +1,5 @@
 mod alert;
+mod fingerprint;
 mod gpu;
 mod node;
 mod trigger;
@@ -42,6 +43,7 @@ pub enum PullPolicy {
 // -- Re-exports --
 
 pub use alert::{AlertConversation, AlertMessage, AlertSender, AlertSeverity, AlertState};
+pub use fingerprint::FINGERPRINT_LABEL;
 pub use gpu::{GpuInfo, GpuSpec, GpuStats};
 pub use node::{NodeInfo, NodeResources, NodeStatus};
 pub use trigger::Trigger;

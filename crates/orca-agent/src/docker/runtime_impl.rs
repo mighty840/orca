@@ -156,6 +156,18 @@ impl Runtime for ContainerRuntime {
         Ok(())
     }
 
+    async fn spec_fingerprint(&self, handle: &WorkloadHandle) -> Result<Option<String>> {
+        let info = self
+            .docker
+            .inspect_container(&handle.runtime_id, None::<InspectContainerOptions>)
+            .await
+            .map_err(|e| OrcaError::Runtime(format!("inspect failed: {e}")))?;
+        Ok(info
+            .config
+            .and_then(|c| c.labels)
+            .and_then(|l| l.get(orca_core::types::FINGERPRINT_LABEL).cloned()))
+    }
+
     async fn status(&self, handle: &WorkloadHandle) -> Result<WorkloadStatus> {
         let info = self
             .docker
