@@ -220,7 +220,11 @@ pub(crate) async fn handle_request(
         let idx = crate::forward::weighted_index(&matched, base_idx);
         let target = &matched[idx];
         debug!("WebSocket upgrade: {host}{path} -> {}", target.address);
-        return Ok(crate::websocket::handle_websocket_proxy(req, &target.address).await);
+        let client_ip = peer.ip().to_string();
+        return Ok(crate::websocket::handle_websocket_proxy(
+            req, target, &host, is_tls, &client_ip,
+        )
+        .await);
     }
 
     // Snapshot request metadata before consuming the body below.

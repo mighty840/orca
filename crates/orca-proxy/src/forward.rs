@@ -80,7 +80,7 @@ pub(crate) fn weighted_index(targets: &[RouteTarget], counter: usize) -> usize {
 /// Apply per-target prefix stripping so backends that expect a clean URL
 /// (e.g. `/users`) don't see the full routed path (e.g. `/admin/users`).
 /// No-op when `strip_prefix` is `None`.
-fn strip_target_prefix<'a>(
+pub(crate) fn strip_target_prefix<'a>(
     target: &RouteTarget,
     path_and_query: &'a str,
 ) -> std::borrow::Cow<'a, str> {
@@ -195,7 +195,7 @@ fn build_forward_request(
 /// Build the outgoing `X-Forwarded-For` value: the peer address we observed,
 /// appended to whatever chain arrived (if any non-empty one did). Kept pure so
 /// the append semantics are unit-testable without a live client.
-fn forwarded_for_value(incoming: Option<&str>, client_ip: &str) -> String {
+pub(crate) fn forwarded_for_value(incoming: Option<&str>, client_ip: &str) -> String {
     match incoming.map(str::trim).filter(|s| !s.is_empty()) {
         Some(prev) => format!("{prev}, {client_ip}"),
         None => client_ip.to_string(),
