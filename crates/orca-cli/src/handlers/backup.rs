@@ -16,7 +16,9 @@ pub async fn handle_backup(action: BackupAction) -> bool {
             let mut report = BackupReport::default();
             volume_backup::backup_all_volumes(&mut report).await;
             let backup_cfg = load_backup_config();
-            handle_basic(&BackupManager::new(backup_cfg), &mut report);
+            let mgr = BackupManager::new(backup_cfg.clone());
+            handle_basic(&mgr, &mut report);
+            super::retention::apply(&backup_cfg, &mgr, &mut report);
             return finish(&report);
         }
         BackupAction::RestoreVolume {
@@ -35,6 +37,7 @@ pub async fn handle_backup(action: BackupAction) -> bool {
         BackupAction::Basic => {
             let mut report = BackupReport::default();
             handle_basic(&mgr, &mut report);
+            super::retention::apply(&backup_cfg, &mgr, &mut report);
             finish(&report)
         }
         BackupAction::List => {
@@ -112,7 +115,7 @@ fn handle_basic(mgr: &BackupManager, report: &mut BackupReport) {
     report.config_stored += outcome.stored.len() as u32;
     report.config_skipped += outcome.skipped_unencrypted.len() as u32;
     for name in &outcome.failed {
-        report.fail(format!("backup of config file {name} failed"));
+        report.fail(format!("config file {name}"));
     }
 }
 
@@ -138,6 +141,8 @@ fn default_backup_config() -> BackupConfig {
     BackupConfig {
         age_recipients: Vec::new(),
         bind_mount_max_mb: 512,
+        keep_min: 7,
+        prune_s3: false,
         schedule: None,
         retention_days: 30,
         targets: vec![BackupTarget::Local {
@@ -160,6 +165,8 @@ mod tests {
         let cfg = BackupConfig {
             age_recipients: Vec::new(),
             bind_mount_max_mb: 512,
+            keep_min: 7,
+            prune_s3: false,
             schedule: Some("0 0 2 * * *".to_string()),
             retention_days: 14,
             targets: vec![BackupTarget::S3 {

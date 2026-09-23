@@ -101,37 +101,48 @@ pub(crate) async fn run_restore_container(
 }
 
 /// Remove timestamped backup subdirs older than `retention_days`.
-pub(crate) fn prune_old_backup_dirs(retention_days: u32) {
-    let Some(home) = dirs_next::home_dir() else {
-        return;
-    };
-    let base = home.join(".orca/backups");
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let cutoff = now.saturating_sub(u64::from(retention_days) * 86400);
-    let Ok(entries) = std::fs::read_dir(&base) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
+/// Apply retention to the snapshot directories in `~/.orca/backups` (#204).
+/// Returns how many were deleted.
+pub(crate) fn prune_old_backup_dirs(retention_days: u32, keep_min: u32, now: u64) -> usize {
+    match dirs_next::home_dir() {
+        Some(home) => {
+            prune_backup_dirs_in(&home.join(".orca/backups"), now, retention_days, keep_min)
         }
-        let epoch: u64 = entry
-            .file_name()
-            .to_str()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(u64::MAX);
-        if epoch < cutoff {
-            if let Err(e) = std::fs::remove_dir_all(&path) {
-                tracing::warn!(path = %path.display(), "Failed to prune backup dir: {e}");
-            } else {
+        None => 0,
+    }
+}
+
+/// Snapshot directories are named by their creation epoch. The newest
+/// `keep_min` are always kept; of the rest, those older than
+/// `retention_days` go. A directory whose name isn't an epoch is never
+/// deleted.
+pub(crate) fn prune_backup_dirs_in(
+    base: &std::path::Path,
+    now: u64,
+    retention_days: u32,
+    keep_min: u32,
+) -> usize {
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return 0;
+    };
+    let dirs: Vec<(std::path::PathBuf, u64)> = entries
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| Some((e.path(), e.file_name().to_str()?.parse().ok()?)))
+        .collect();
+    let mut deleted = 0;
+    for path in
+        orca_core::backup::retention::to_prune(&dirs, now, retention_days, keep_min as usize)
+    {
+        match std::fs::remove_dir_all(&path) {
+            Ok(()) => {
                 tracing::info!(path = %path.display(), "Pruned old backup dir");
+                deleted += 1;
             }
+            Err(e) => tracing::warn!(path = %path.display(), "Failed to prune backup dir: {e}"),
         }
     }
+    deleted
 }
 
 /// Build the backup directory path from a home dir and timestamp.

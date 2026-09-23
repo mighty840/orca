@@ -118,19 +118,31 @@ impl BackupManager {
         } else {
             format!("{s3_prefix}/{local_name}")
         };
-        let mut any_ok = false;
+        // Every target must store the artifact. "Stored somewhere" used to
+        // count as success, so a broken target (rotated S3 credentials, a
+        // full disk) went unreported as long as another one worked (#197,
+        // found by #204's tests).
+        let mut stored = 0usize;
+        let mut errors = Vec::new();
         for t in &self.config.targets {
             let key = match t {
                 BackupTarget::S3 { .. } => s3_name.as_str(),
                 BackupTarget::Local { .. } => &local_name,
             };
             match self.store(path, t, key) {
-                Ok(_) => any_ok = true,
-                Err(e) => warn!("backup target failed for {name}: {e}"),
+                Ok(_) => stored += 1,
+                Err(e) => {
+                    warn!("backup target failed for {name}: {e}");
+                    errors.push(format!("{e:#}"));
+                }
             }
         }
-        if !any_ok && !self.config.targets.is_empty() {
-            anyhow::bail!("all backup targets failed for {name}");
+        if !errors.is_empty() {
+            anyhow::bail!(
+                "{name} stored on {stored}/{} target(s): {}",
+                self.config.targets.len(),
+                errors.join("; ")
+            );
         }
         Ok(())
     }
@@ -150,7 +162,6 @@ impl BackupManager {
                 std::fs::copy(data_path, &dest)
                     .with_context(|| format!("copy to {}", dest.display()))?;
                 info!(dest = %dest.display(), "Stored backup locally");
-                self.prune_local(dest_dir);
                 Ok(format!("local:{path}"))
             }
             t @ BackupTarget::S3 { bucket, .. } => {
@@ -161,30 +172,55 @@ impl BackupManager {
     }
 
     /// Delete local backup files older than `retention_days`.
-    fn prune_local(&self, dir: &Path) {
-        let cutoff = Utc::now() - chrono::Duration::days(i64::from(self.config.retention_days));
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if !path.is_file() {
+    /// Apply retention to the config artifacts in every local target
+    /// (#204): per artifact name, keep the newest `keep_min`, delete the rest
+    /// once older than `retention_days`. Only files named like artifacts
+    /// (`<name>_<timestamp>.<ext>`) are considered; anything else in the
+    /// directory is never touched. Returns how many files were deleted.
+    ///
+    /// Called by the CLI after a successful run only, never mid-run.
+    pub fn prune_local_files(&self, now: u64) -> usize {
+        let mut deleted = 0;
+        for t in &self.config.targets {
+            let BackupTarget::Local { path } = t else {
                 continue;
+            };
+            let Ok(entries) = std::fs::read_dir(path) else {
+                continue;
+            };
+            let mut groups: std::collections::BTreeMap<String, Vec<(std::path::PathBuf, u64)>> =
+                Default::default();
+            for e in entries.flatten() {
+                let p = e.path();
+                if !p.is_file() {
+                    continue;
+                }
+                if let Some((name, time)) = e
+                    .file_name()
+                    .to_str()
+                    .and_then(super::retention::artifact_time)
+                {
+                    groups.entry(name).or_default().push((p, time));
+                }
             }
-            let mtime = entry
-                .metadata()
-                .and_then(|m| m.modified())
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .and_then(|d| chrono::DateTime::from_timestamp(d.as_secs() as i64, 0));
-            if mtime.is_some_and(|t| t < cutoff) {
-                if let Err(e) = std::fs::remove_file(&path) {
-                    warn!(path = %path.display(), "Failed to prune old backup: {e}");
-                } else {
-                    info!(path = %path.display(), "Pruned old backup");
+            for items in groups.values() {
+                for p in super::retention::to_prune(
+                    items,
+                    now,
+                    self.config.retention_days,
+                    self.config.keep_min as usize,
+                ) {
+                    match std::fs::remove_file(&p) {
+                        Ok(()) => {
+                            info!(path = %p.display(), "Pruned old backup");
+                            deleted += 1;
+                        }
+                        Err(e) => warn!(path = %p.display(), "Failed to prune old backup: {e}"),
+                    }
                 }
             }
         }
+        deleted
     }
 
     /// List backups in a target.
@@ -220,6 +256,8 @@ mod tests {
         let config = BackupConfig {
             age_recipients: Vec::new(),
             bind_mount_max_mb: 512,
+            keep_min: 7,
+            prune_s3: false,
             schedule: None,
             retention_days: 7,
             targets: vec![BackupTarget::Local {
@@ -232,5 +270,50 @@ mod tests {
         mgr.backup_file("secrets", &src, "").unwrap();
         let backups = std::fs::read_dir(&target_dir).unwrap().count();
         assert_eq!(backups, 1);
+    }
+
+    #[test]
+    fn prune_local_files_keeps_a_floor_per_artifact_and_ignores_foreign_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = BackupManager::new(BackupConfig {
+            age_recipients: Vec::new(),
+            bind_mount_max_mb: 512,
+            keep_min: 2,
+            prune_s3: false,
+            schedule: None,
+            retention_days: 7,
+            targets: vec![BackupTarget::Local {
+                path: dir.path().display().to_string(),
+            }],
+        });
+        // 5 nights of two artifacts, all older than retention, plus a file
+        // that isn't an orca artifact.
+        for d in 1..=5 {
+            for name in ["secrets", "cluster"] {
+                let f = dir.path().join(format!("{name}_2026080{d}T030000Z.json"));
+                std::fs::write(f, "x").unwrap();
+            }
+        }
+        std::fs::write(dir.path().join("operator-notes.txt"), "keep me").unwrap();
+
+        let now = super::super::retention::artifact_time("x_20260930T000000Z.json")
+            .unwrap()
+            .1;
+        assert_eq!(mgr.prune_local_files(now), 6);
+        let mut left: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            [
+                "cluster_20260804T030000Z.json",
+                "cluster_20260805T030000Z.json",
+                "operator-notes.txt",
+                "secrets_20260804T030000Z.json",
+                "secrets_20260805T030000Z.json",
+            ]
+        );
     }
 }

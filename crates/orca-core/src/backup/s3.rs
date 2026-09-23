@@ -142,6 +142,35 @@ pub fn download(target: &BackupTarget, name: &str, dest_path: &Path) -> Result<(
     }
 }
 
+/// Delete one object (a key relative to the target's prefix). Used by S3
+/// retention (#204).
+pub fn delete(target: &BackupTarget, name: &str) -> Result<()> {
+    let BackupTarget::S3 {
+        bucket,
+        region,
+        prefix,
+        endpoint,
+        access_key,
+        secret_key,
+    } = target
+    else {
+        anyhow::bail!("delete called with non-S3 target");
+    };
+    let path = s3_path(bucket, prefix.as_deref().unwrap_or(""), name);
+    let mut cmd = Command::new("rclone");
+    cmd.arg("deletefile").arg(&path);
+    apply_s3_flags(&mut cmd, region, endpoint, access_key, secret_key);
+    let output = cmd
+        .output()
+        .context("failed to run `rclone deletefile` — is rclone installed?")?;
+    anyhow::ensure!(
+        output.status.success(),
+        "S3 delete of {name} failed: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(())
+}
+
 /// List backups in an S3 prefix.
 pub fn list_objects(target: &BackupTarget) -> Result<Vec<String>> {
     let (bucket, region, prefix, endpoint, access_key, secret_key) = match target {

@@ -200,6 +200,8 @@ mod tests {
         let config = BackupConfig {
             age_recipients: Vec::new(),
             bind_mount_max_mb: 512,
+            keep_min: 7,
+            prune_s3: false,
             schedule: Some("0 0 2 * * *".to_string()),
             retention_days: 7,
             targets: vec![BackupTarget::Local {
@@ -222,6 +224,8 @@ mod tests {
         let config = BackupConfig {
             age_recipients: Vec::new(),
             bind_mount_max_mb: 512,
+            keep_min: 7,
+            prune_s3: false,
             schedule: Some("not a cron".to_string()),
             retention_days: 30,
             targets: vec![],
@@ -236,6 +240,8 @@ mod tests {
         let config = BackupConfig {
             age_recipients: Vec::new(),
             bind_mount_max_mb: 512,
+            keep_min: 7,
+            prune_s3: false,
             schedule: None,
             retention_days: 30,
             targets: vec![],
@@ -287,6 +293,8 @@ mod tests {
         let config = BackupConfig {
             age_recipients: Vec::new(),
             bind_mount_max_mb: 512,
+            keep_min: 7,
+            prune_s3: false,
             schedule: Some("0 0 2 * * *".to_string()),
             retention_days: 7,
             targets: vec![],
@@ -313,6 +321,8 @@ mod tests {
         let config = BackupConfig {
             age_recipients: Vec::new(),
             bind_mount_max_mb: 512,
+            keep_min: 7,
+            prune_s3: false,
             schedule: None,
             retention_days: 30,
             targets: vec![],
@@ -331,6 +341,8 @@ mod tests {
         let config = BackupConfig {
             age_recipients: Vec::new(),
             bind_mount_max_mb: 512,
+            keep_min: 7,
+            prune_s3: false,
             schedule: Some("0 0 3 * * *".to_string()),
             retention_days: 7,
             targets: vec![BackupTarget::Local {

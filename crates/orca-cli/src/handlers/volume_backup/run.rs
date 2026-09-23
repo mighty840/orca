@@ -3,9 +3,7 @@
 
 use bollard::Docker;
 
-use super::helpers::{
-    create_backup_dir, list_orca_volumes, prune_old_backup_dirs, run_backup_container,
-};
+use super::helpers::{create_backup_dir, list_orca_volumes, run_backup_container};
 use super::{bind_archive, bind_mounts, volume_owner};
 use crate::handlers::backup_report::BackupReport;
 
@@ -13,11 +11,8 @@ use crate::handlers::backup_report::BackupReport;
 pub async fn backup_all_volumes(report: &mut BackupReport) {
     let backup_cfg = crate::handlers::backup::load_backup_config();
     attempt_backup(&backup_cfg, report).await;
-    // Prune runs unconditionally after the attempt — success or failure — so a
-    // transient Docker failure never skips cleanup. Older backups are preserved
-    // until they age past retention_days, so a failed run doesn't delete the
-    // most-recent good backup before a new one exists.
-    prune_old_backup_dirs(backup_cfg.retention_days);
+    // Retention runs once, after the whole run and only if it succeeded
+    // (#204); see `handlers::retention`.
 }
 
 async fn attempt_backup(backup_cfg: &orca_core::backup::BackupConfig, report: &mut BackupReport) {

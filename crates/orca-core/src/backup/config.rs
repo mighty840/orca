@@ -29,6 +29,22 @@ pub struct BackupConfig {
     /// every snapshot. Default 512.
     #[serde(default = "default_bind_mount_max_mb")]
     pub bind_mount_max_mb: u64,
+
+    /// Always keep the newest N copies of each artifact, whatever their age
+    /// (#204). A streak of failed nights longer than `retention_days` used to
+    /// delete every good backup. Default 7.
+    #[serde(default = "default_keep_min")]
+    pub keep_min: u32,
+
+    /// Apply `retention_days` / `keep_min` to S3 targets too. Off by default:
+    /// turning it on deletes old objects from the bucket on the next
+    /// successful run (#204). Alternatively, set a bucket lifecycle rule.
+    #[serde(default)]
+    pub prune_s3: bool,
+}
+
+fn default_keep_min() -> u32 {
+    7
 }
 
 fn default_bind_mount_max_mb() -> u64 {
