@@ -324,6 +324,15 @@ pub struct ClusterMeta {
     pub log_level: String,
     #[serde(default = "default_api_port")]
     pub api_port: u16,
+    /// Addresses the control-plane API listens on, each on `api_port`.
+    ///
+    /// Defaults to `["0.0.0.0"]`, every IPv4 interface, which exposes the API
+    /// (and the agent channel on it) to every network the host is on. On a
+    /// host with a private or mesh network, list loopback plus that address
+    /// instead, e.g. `["127.0.0.1", "100.80.5.14"]`. Keep `127.0.0.1`: the
+    /// `orca` CLI and TUI on the host connect there by default.
+    #[serde(default = "default_api_bind")]
+    pub api_bind: Vec<std::net::IpAddr>,
     #[serde(default = "default_grpc_port")]
     pub grpc_port: u16,
 }
@@ -336,9 +345,15 @@ impl Default for ClusterMeta {
             acme_email: None,
             log_level: default_log_level(),
             api_port: default_api_port(),
+            api_bind: default_api_bind(),
             grpc_port: default_grpc_port(),
         }
     }
+}
+
+/// Every IPv4 interface: the behavior before `api_bind` existed.
+fn default_api_bind() -> Vec<std::net::IpAddr> {
+    vec![std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED)]
 }
 
 fn default_cluster_name() -> String {
