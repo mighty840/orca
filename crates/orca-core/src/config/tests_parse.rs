@@ -198,9 +198,10 @@ age_recipients = [
 /// resolution erases them — the secrets-usage index depends on it (#137).
 #[test]
 fn load_captures_raw_secret_refs() {
-    let dir = std::env::temp_dir().join(format!("orca-refs-test-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("cluster.toml");
+    // `load` opens the default secrets store under $HOME/.orca, so this must
+    // be isolated like every other test that loads a config.
+    let home = super::test_home::TempHome::new();
+    let path = home.path().join("cluster.toml");
     std::fs::write(
         &path,
         r#"
@@ -222,7 +223,6 @@ role = "admin"
     let keys: Vec<&str> = config.secret_refs.iter().map(|r| r.key.as_str()).collect();
     assert!(keys.contains(&"ai_key"), "got {keys:?}");
     assert!(keys.contains(&"admin_token"), "got {keys:?}");
-    let _ = std::fs::remove_dir_all(&dir);
 }
 
 // --- api_bind ---------------------------------------------------------------
