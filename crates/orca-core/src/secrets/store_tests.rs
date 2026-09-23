@@ -117,14 +117,15 @@ fn test_xor_migration() {
     let key_path = dir.path().join("master.key");
 
     // Create master key
-    let key = load_or_create_key(&key_path).unwrap();
+    let key = create_key(&key_path).unwrap();
 
     // Write a legacy XOR-encrypted secrets file
     let plaintext = "my-legacy-secret";
     let xor_encrypted = xor_bytes(plaintext.as_bytes(), &key);
     let xor_hex = hex_encode(&xor_encrypted);
     let legacy_json = serde_json::json!({ "secrets": { "OLD_KEY": xor_hex } });
-    std::fs::write(&path, serde_json::to_string_pretty(&legacy_json).unwrap()).unwrap();
+    let original = serde_json::to_string_pretty(&legacy_json).unwrap();
+    std::fs::write(&path, &original).unwrap();
 
     // Open the store — should auto-migrate XOR → AES
     let store = SecretStore::open_with_key(&path, &key_path).unwrap();
@@ -138,6 +139,11 @@ fn test_xor_migration() {
         stored_val.contains(':'),
         "migrated value must be in AES nonce:ciphertext format"
     );
+
+    // The untouched original is kept: XOR has no integrity check, so a
+    // migration under the wrong key would otherwise be unrecoverable (#196).
+    let kept = dir.path().join("secrets.json.pre-aes-migration");
+    assert_eq!(std::fs::read_to_string(&kept).unwrap(), original);
 
     // Verify the migrated file can be opened again cleanly
     let store2 = SecretStore::open_with_key(&path, &key_path).unwrap();
