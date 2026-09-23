@@ -58,7 +58,8 @@ async fn e2e_restart_no_duplicate_containers() {
     // Phase 1: Deploy nginx via the first "server instance"
     let state1 = real_app_state(16881).await;
     let config = nginx_config();
-    let (deployed, errors) = orca_control::reconciler::reconcile(&state1, &[config.clone()]).await;
+    let (deployed, errors) =
+        orca_control::reconciler::reconcile(&state1, std::slice::from_ref(&config)).await;
     assert!(errors.is_empty(), "Deploy errors: {errors:?}");
     assert_eq!(deployed, vec!["e2e-restart"]);
     tokio::time::sleep(Duration::from_secs(2)).await;

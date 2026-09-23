@@ -22,8 +22,10 @@ use orca_core::ws_types::AgentMessage;
 
 fn make_state(token: &str) -> Arc<AppState> {
     let runtime = Arc::new(MockRuntime::new());
-    let mut cfg = ClusterConfig::default();
-    cfg.api_tokens = vec![token.into()];
+    let cfg = ClusterConfig {
+        api_tokens: vec![token.into()],
+        ..Default::default()
+    };
     Arc::new(AppState::new(
         cfg,
         runtime,

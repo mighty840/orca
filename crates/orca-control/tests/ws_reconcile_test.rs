@@ -14,8 +14,10 @@ fn test_state() -> Arc<orca_control::state::AppState> {
     let container_runtime = Arc::new(orca_core::testing::MockRuntime::new());
     let route_table = Arc::new(RwLock::new(HashMap::new()));
     let wasm_triggers = Arc::new(RwLock::new(Vec::new()));
-    let mut cluster_config = ClusterConfig::default();
-    cluster_config.api_tokens = vec!["test-token-123".to_string()];
+    let cluster_config = ClusterConfig {
+        api_tokens: vec!["test-token-123".to_string()],
+        ..Default::default()
+    };
 
     let state = orca_control::state::AppState::new(
         cluster_config,

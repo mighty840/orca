@@ -248,7 +248,8 @@ async fn unchanged_remote_spec_is_not_redispatched() {
         services.insert("svc".into(), svc);
     }
 
-    let (deployed, errors) = orca_control::reconciler::reconcile(&state, &[cfg.clone()]).await;
+    let (deployed, errors) =
+        orca_control::reconciler::reconcile(&state, std::slice::from_ref(&cfg)).await;
     assert!(errors.is_empty(), "unexpected errors: {errors:?}");
     assert!(
         deployed.contains(&"svc".to_string()),
