@@ -44,6 +44,26 @@ impl AcmeManager {
         }
     }
 
+    /// Restrict key material left world-readable by earlier versions (#186).
+    ///
+    /// Call once at startup. Kept out of [`AcmeManager::new`] so constructing
+    /// a manager, which tests do freely, never touches the real `~/.orca`.
+    pub fn secure_key_material(&self) {
+        match provider::secure_existing_key_material(&self.cache_dir, &default_account_path()) {
+            Ok(0) => {}
+            Ok(n) => warn!(
+                tightened = n,
+                cache = %self.cache_dir.display(),
+                "restricted TLS key material that earlier orca versions left \
+                 readable by other local users; consider rotating those keys"
+            ),
+            Err(e) => warn!(
+                cache = %self.cache_dir.display(),
+                "could not restrict TLS key material: {e}"
+            ),
+        }
+    }
+
     /// Create a manager with default cache directory (`~/.orca/certs/`).
     pub fn with_default_cache(email: impl Into<String>) -> Self {
         let cache_dir = default_orca_dir().join("certs");
@@ -212,6 +232,11 @@ pub(crate) fn default_orca_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".orca")
+}
+
+/// Where the ACME account credentials are cached.
+pub(crate) fn default_account_path() -> PathBuf {
+    default_orca_dir().join("acme-account.json")
 }
 
 #[cfg(test)]

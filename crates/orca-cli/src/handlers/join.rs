@@ -217,6 +217,7 @@ async fn spawn_local_proxy(
         .unwrap_or_else(|| ".".into())
         .join(".orca/certs");
     let acme = orca_proxy::acme::AcmeManager::new(acme_email, cache);
+    acme.secure_key_material();
 
     // Collect initial domains (may be empty on a fresh node).
     let initial_domains: Vec<String> = runtime
