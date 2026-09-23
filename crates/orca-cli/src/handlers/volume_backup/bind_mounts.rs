@@ -1,5 +1,5 @@
-//! Detection and reporting of host bind mounts that the volume backup does
-//! not capture (issue #83).
+//! Detection of host bind mounts on orca containers (#83). What happens to
+//! them in the backup is decided in `bind_archive` (#185).
 //!
 //! `orca backup all` tars named Docker volumes, but host bind mounts declared
 //! via `mounts = ["/host/path:/container/path"]` point at paths on the host
@@ -9,8 +9,6 @@
 //! "nothing to do" and exited clean). We inspect the running orca service
 //! containers — Docker is the source of truth for what is actually mounted —
 //! and surface every bind mount as a warning.
-
-use std::collections::BTreeMap;
 
 use bollard::Docker;
 use bollard::container::ListContainersOptions;
@@ -73,69 +71,9 @@ fn service_from_names(names: Option<&[String]>) -> Option<String> {
     Some(name.strip_prefix("orca-").unwrap_or(name).to_string())
 }
 
-/// Emit a warning for each service with unbacked bind mounts. Prints to stdout
-/// (seen by a manual `orca backup all`) and via `tracing::warn!` (captured by
-/// scheduled and agent-dispatched runs). No-op when there are no bind mounts.
-pub(crate) async fn warn_unbacked_bind_mounts(docker: &Docker) {
-    report_unbacked_bind_mounts(list_unbacked_bind_mounts(docker).await);
-}
-
-/// Pure formatting/reporting half of [`warn_unbacked_bind_mounts`], split out
-/// so it is unit-testable without a live Docker daemon. The summary line is
-/// printed last so it becomes the dashboard's last-backup message for
-/// scheduled/agent runs (which relay the subprocess's final stdout line).
-fn report_unbacked_bind_mounts(mounts: Vec<UnbackedMount>) {
-    if mounts.is_empty() {
-        return;
-    }
-    let grouped = group_by_service(&mounts);
-    let svc_count = grouped.len();
-    let mount_count = mounts.len();
-
-    println!(
-        "WARNING: {mount_count} host bind mount(s) on {svc_count} service(s) are NOT backed up \
-         (only named volumes are captured):"
-    );
-    for (svc, paths) in &grouped {
-        for p in paths {
-            println!("  {svc}: {p}");
-        }
-        tracing::warn!(
-            service = %svc,
-            mounts = %paths.join(", "),
-            "service has host bind mounts excluded from backup"
-        );
-    }
-    println!(
-        "Backup summary: {mount_count} unbacked bind mount(s) on {svc_count} service(s) — \
-         data behind these host paths is NOT in the backup."
-    );
-}
-
-/// Group bind mounts by service into `host -> container` display strings,
-/// ordered (BTreeMap) for stable output.
-fn group_by_service(mounts: &[UnbackedMount]) -> BTreeMap<String, Vec<String>> {
-    let mut grouped: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for m in mounts {
-        grouped
-            .entry(m.service.clone())
-            .or_default()
-            .push(format!("{} -> {}", m.host_path, m.container_path));
-    }
-    grouped
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn mount(service: &str, host: &str, ctr: &str) -> UnbackedMount {
-        UnbackedMount {
-            service: service.into(),
-            host_path: host.into(),
-            container_path: ctr.into(),
-        }
-    }
 
     #[test]
     fn service_from_names_strips_prefix_and_slash() {
@@ -164,25 +102,5 @@ mod tests {
     fn service_from_names_handles_missing() {
         assert_eq!(service_from_names(None), None);
         assert_eq!(service_from_names(Some(&[])), None);
-    }
-
-    #[test]
-    fn group_by_service_groups_and_orders() {
-        let mounts = vec![
-            mount("freqtrade", "/home/u/data", "/freqtrade/user_data"),
-            mount("freqtrade", "/home/u/logs", "/freqtrade/logs"),
-            mount("api", "/etc/api", "/etc/api"),
-        ];
-        let grouped = group_by_service(&mounts);
-        let keys: Vec<_> = grouped.keys().cloned().collect();
-        assert_eq!(keys, vec!["api".to_string(), "freqtrade".to_string()]);
-        assert_eq!(grouped["freqtrade"].len(), 2);
-        assert_eq!(grouped["api"], vec!["/etc/api -> /etc/api".to_string()]);
-    }
-
-    #[test]
-    fn report_empty_is_noop() {
-        // The no-bind-mounts path must not panic or print.
-        report_unbacked_bind_mounts(Vec::new());
     }
 }

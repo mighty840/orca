@@ -183,6 +183,7 @@ mod tests {
 
         let config = BackupConfig {
             age_recipients: Vec::new(),
+            bind_mount_max_mb: 512,
             schedule: Some("0 0 2 * * *".to_string()),
             retention_days: 7,
             targets: vec![BackupTarget::Local {
@@ -204,6 +205,7 @@ mod tests {
     fn test_invalid_schedule_returns_none() {
         let config = BackupConfig {
             age_recipients: Vec::new(),
+            bind_mount_max_mb: 512,
             schedule: Some("not a cron".to_string()),
             retention_days: 30,
             targets: vec![],
@@ -217,6 +219,7 @@ mod tests {
     fn test_no_schedule_returns_none() {
         let config = BackupConfig {
             age_recipients: Vec::new(),
+            bind_mount_max_mb: 512,
             schedule: None,
             retention_days: 30,
             targets: vec![],
@@ -267,6 +270,7 @@ mod tests {
 
         let config = BackupConfig {
             age_recipients: Vec::new(),
+            bind_mount_max_mb: 512,
             schedule: Some("0 0 2 * * *".to_string()),
             retention_days: 7,
             targets: vec![],
@@ -292,6 +296,7 @@ mod tests {
         let state = make_test_state();
         let config = BackupConfig {
             age_recipients: Vec::new(),
+            bind_mount_max_mb: 512,
             schedule: None,
             retention_days: 30,
             targets: vec![],
@@ -309,6 +314,7 @@ mod tests {
 
         let config = BackupConfig {
             age_recipients: Vec::new(),
+            bind_mount_max_mb: 512,
             schedule: Some("0 0 3 * * *".to_string()),
             retention_days: 7,
             targets: vec![BackupTarget::Local {

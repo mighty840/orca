@@ -30,6 +30,7 @@ fn home_with_state() -> tempfile::TempDir {
 fn manager(dest: &Path, recipients: Vec<String>) -> BackupManager {
     BackupManager::new(BackupConfig {
         age_recipients: recipients,
+        bind_mount_max_mb: 512,
         schedule: None,
         retention_days: 30,
         targets: vec![BackupTarget::Local {

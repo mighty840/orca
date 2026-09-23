@@ -219,6 +219,7 @@ mod tests {
         let target_dir = tmp.path().join("backups");
         let config = BackupConfig {
             age_recipients: Vec::new(),
+            bind_mount_max_mb: 512,
             schedule: None,
             retention_days: 7,
             targets: vec![BackupTarget::Local {

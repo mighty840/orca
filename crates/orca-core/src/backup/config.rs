@@ -23,6 +23,16 @@ pub struct BackupConfig {
     /// the clear.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub age_recipients: Vec<String>,
+
+    /// Host bind-mount sources larger than this (MiB) are reported but not
+    /// archived (#185), so a mount of a big data directory can't balloon
+    /// every snapshot. Default 512.
+    #[serde(default = "default_bind_mount_max_mb")]
+    pub bind_mount_max_mb: u64,
+}
+
+fn default_bind_mount_max_mb() -> u64 {
+    512
 }
 
 fn default_retention_days() -> u32 {

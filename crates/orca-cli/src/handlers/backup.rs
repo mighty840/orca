@@ -284,6 +284,7 @@ fn restore_basic(config: &BackupConfig) {
 fn default_backup_config() -> BackupConfig {
     BackupConfig {
         age_recipients: Vec::new(),
+        bind_mount_max_mb: 512,
         schedule: None,
         retention_days: 30,
         targets: vec![BackupTarget::Local {
@@ -340,6 +341,7 @@ mod tests {
         let _guard = ENV_MUTEX.lock().unwrap();
         let cfg = BackupConfig {
             age_recipients: Vec::new(),
+            bind_mount_max_mb: 512,
             schedule: Some("0 0 2 * * *".to_string()),
             retention_days: 14,
             targets: vec![BackupTarget::S3 {

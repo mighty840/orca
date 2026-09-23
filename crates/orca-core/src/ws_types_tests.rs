@@ -248,6 +248,7 @@ fn backup_request_service_hooks_default_empty() {
     let msg = MasterMessage::BackupRequest {
         config: Box::new(BackupConfig {
             age_recipients: Vec::new(),
+            bind_mount_max_mb: 512,
             schedule: None,
             retention_days: 30,
             targets: vec![],
