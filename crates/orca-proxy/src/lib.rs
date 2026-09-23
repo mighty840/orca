@@ -27,6 +27,7 @@ use std::sync::atomic::AtomicUsize;
 
 use hyper::Request;
 use hyper::body::Incoming;
+use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
@@ -460,9 +461,14 @@ pub(crate) async fn serve_loop_with_fallback(
                     Err(e) => debug!("TLS handshake failed from {peer}: {e}"),
                 }
             } else {
+                // The plain listener stays HTTP/1-only: browsers never speak
+                // cleartext h2 (h2c), and this port only serves redirects,
+                // ACME challenges and plain-HTTP routes, so accepting h2c
+                // would add parser surface for no client.
                 let io = TokioIo::new(stream);
-                if let Err(e) = auto::Builder::new(TokioExecutor::new())
-                    .serve_connection_with_upgrades(io, service)
+                if let Err(e) = http1::Builder::new()
+                    .serve_connection(io, service)
+                    .with_upgrades()
                     .await
                 {
                     debug!("Proxy connection error from {peer}: {e}");
