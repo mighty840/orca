@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.1] - 2026-09-23
+
+First v0.3.0 release candidate: authentication and secret-handling fixes from
+the pre-go-live audit, plus the WebSocket handshake fix that broke Jitsi.
+
+### Upgrade notes
+
+- **Upgrade the master before any agent.** An rc.1 agent sends its token in an
+  `Authorization` header, which older masters do not read, so an rc.1 agent on
+  an older master cannot register (and serves no traffic until it does). An
+  rc.1 master still accepts the old query-string token, with a deprecation
+  warning.
+- **The agent channel is admin-only.** Agents must join with the cluster token
+  or another admin token; a `[[token]]` with a narrower role is refused.
+- **Unauthenticated routes are only `/api/v1/health` and
+  `/api/v1/webhooks/github`.** `/metrics` now needs a token with the `status`
+  permission, and any route missing from the RBAC table is admin-only.
+- **Webhooks without a secret are rejected.** Registering one returns 400, and
+  pushes to a stored secretless webhook fail closed.
+
+### Added
+
+- **`[cluster] api_bind`** sets the API's listen addresses (default
+  `["0.0.0.0"]`), so the API can be limited to a private interface.
+- **`orca join --token` reads `ORCA_TOKEN`**, and the agent's installed
+  systemd unit loads the token from `~/.orca/agent.env` (mode 0600) via
+  `EnvironmentFile=` instead of putting it in `ExecStart`.
+
+### Fixed
+
+- **WebSocket upgrades relay the backend's handshake.** The proxy's 101 now
+  carries the backend's `Sec-WebSocket-Protocol` and `-Extensions`; without
+  the selected subprotocol, browsers abort the handshake (Jitsi's `xmpp`
+  signalling dropped every call). Upgrades also get `X-Forwarded-*` headers
+  and honour `strip_prefix`. (#191)
+- **Security: webhook pushes fail closed** without a valid signature, and a
+  short SHA no longer panics the handler before authentication. (#195)
+- **Security: the agent channel is admin-only**, token checks are
+  constant-time, and heartbeats are attributed to the authenticated session's
+  node instead of a node id the agent claims. (#201)
+- **Security: the agent token moved out of the WebSocket URL** into an
+  `Authorization` header, so it no longer lands in access logs. (#182)
+- **Security: route-level RBAC with deny-by-default**, and `/metrics` behind
+  authentication. (#202, #203)
+- **Security: TLS private keys and the ACME account key are written
+  owner-only** (0600, atomically), and existing key files are tightened on
+  start. (#186)
+- **Security: object-storage credentials stay off rclone's command line**,
+  and the agent's cached backup config is written owner-only. (#205)
+- **Crashed-container log tails are cut on a character boundary**, instead of
+  panicking the agent on multi-byte UTF-8. (#180)
+
 ## [0.2.13-rc.1] - 2026-08-19
 
 Contributor release: six PRs from @hauju plus a network-split diagnostic,
