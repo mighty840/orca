@@ -137,6 +137,9 @@ async fn run_loop(
     }
 }
 
+// The error type is tungstenite's; boxing it here would just be unboxed by
+// every `?` caller.
+#[allow(clippy::result_large_err)]
 async fn send(
     ws: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
     msg: &AgentMessage,
