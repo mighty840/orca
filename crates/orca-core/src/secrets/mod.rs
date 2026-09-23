@@ -1,3 +1,4 @@
+mod crypto;
 mod git_sync;
 mod refs;
 mod sops_store;

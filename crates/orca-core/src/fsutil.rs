@@ -43,6 +43,41 @@ pub fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
     written
 }
 
+/// Create `path` with `contents`, mode 0600, only if it does not exist yet.
+/// Returns `Ok(false)` if it already existed and was left untouched.
+///
+/// All-or-nothing: the contents are written and fsynced to a temporary, which
+/// is then hard-linked into place. Linking fails if `path` exists, so two
+/// concurrent creators can't both win, and a reader never sees a partially
+/// written file (a plain `create_new` + write can be read while still empty).
+pub fn create_private_new(path: &Path, contents: &[u8]) -> io::Result<bool> {
+    let dir = match path.parent() {
+        Some(dir) if !dir.as_os_str().is_empty() => dir,
+        _ => Path::new("."),
+    };
+    std::fs::create_dir_all(dir)?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
+    let tmp = dir.join(format!(
+        ".{}.{}.tmp",
+        name.to_string_lossy(),
+        unique_suffix()
+    ));
+    let linked = (|| {
+        let mut file = open_private_new(&tmp)?;
+        file.write_all(contents)?;
+        file.sync_all()?;
+        std::fs::hard_link(&tmp, path)
+    })();
+    let _ = std::fs::remove_file(&tmp);
+    match linked {
+        Ok(()) => Ok(true),
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(false),
+        Err(e) => Err(e),
+    }
+}
+
 /// Create `dir` (and parents) and restrict it to its owner (0700).
 pub fn create_private_dir(dir: &Path) -> io::Result<()> {
     std::fs::create_dir_all(dir)?;

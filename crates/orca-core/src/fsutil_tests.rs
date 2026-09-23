@@ -80,3 +80,25 @@ fn a_private_dir_is_owner_only() {
     create_private_dir(&certs).unwrap();
     assert_eq!(mode(&certs), 0o700);
 }
+
+#[test]
+fn create_private_new_creates_once_and_never_overwrites() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("master.key");
+    assert!(create_private_new(&path, b"first").unwrap());
+    assert!(!create_private_new(&path, b"second").unwrap());
+    assert_eq!(std::fs::read(&path).unwrap(), b"first");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+    // No temporaries left behind.
+    let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+        .collect();
+    assert!(leftovers.is_empty());
+}
