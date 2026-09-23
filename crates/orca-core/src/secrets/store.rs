@@ -35,7 +35,7 @@ pub struct SecretStore {
     path: PathBuf,
     #[serde(skip)]
     master_key: Vec<u8>,
-    secrets: HashMap<String, String>,
+    pub(super) secrets: HashMap<String, String>,
     /// When set, this store reads/writes the SOPS/age-encrypted file
     /// (#109) instead of the legacy AES file. The in-memory model and the
     /// public API are identical either way.
@@ -194,36 +194,6 @@ impl SecretStore {
         keys
     }
 
-    /// Replace `${secrets.KEY}` patterns in env-var values with actual secret values.
-    pub fn resolve_env(&self, env: &HashMap<String, String>) -> HashMap<String, String> {
-        self.resolve_env_scoped(env, None)
-    }
-
-    /// Like [`Self::resolve_env`], but with project-first resolution (#68):
-    /// for a service in project `p`, `${secrets.KEY}` resolves `p.KEY`
-    /// before falling back to the bare `KEY`. Explicit cross-project refs
-    /// (`${secrets.other.KEY}`) keep working — the prefixed form is looked
-    /// up as written after the project-qualified attempt misses.
-    pub fn resolve_env_scoped(
-        &self,
-        env: &HashMap<String, String>,
-        project: Option<&str>,
-    ) -> HashMap<String, String> {
-        env.iter()
-            .map(|(k, v)| (k.clone(), self.resolve_value(v, project)))
-            .collect()
-    }
-
-    /// Look a reference key up project-first, then bare.
-    fn lookup_scoped(&self, key: &str, project: Option<&str>) -> Option<&String> {
-        if let Some(p) = project
-            && let Some(v) = self.secrets.get(&format!("{p}.{key}"))
-        {
-            return Some(v);
-        }
-        self.secrets.get(key)
-    }
-
     /// Persist secrets to disk, owner-only and atomically (temp file +
     /// rename), so a crash mid-write can't leave a truncated store (#183).
     fn save(&self) -> Result<()> {
@@ -238,31 +208,6 @@ impl SecretStore {
         let data = serde_json::to_string_pretty(&on_disk).context("failed to serialize secrets")?;
         crate::fsutil::write_private(&self.path, data.as_bytes())
             .context("failed to write secrets file")
-    }
-
-    /// Resolve `${secrets.KEY}` patterns in a single string value.
-    fn resolve_value(&self, value: &str, project: Option<&str>) -> String {
-        let mut result = value.to_string();
-        let mut search_from = 0;
-        while let Some(start) = result[search_from..].find("${secrets.") {
-            let abs_start = search_from + start;
-            let after_prefix = abs_start + "${secrets.".len();
-            let Some(end) = result[after_prefix..].find('}') else {
-                break;
-            };
-            let key = result[after_prefix..after_prefix + end].to_string();
-            if let Some(secret_value) = self.lookup_scoped(&key, project) {
-                result = format!(
-                    "{}{}{}",
-                    &result[..abs_start],
-                    secret_value,
-                    &result[after_prefix + end + 1..]
-                );
-            } else {
-                search_from = after_prefix + end + 1;
-            }
-        }
-        result
     }
 }
 

@@ -1,6 +1,7 @@
 mod crypto;
 mod git_sync;
 mod refs;
+mod resolve;
 mod sops_store;
 #[cfg(test)]
 #[path = "sops_store_tests.rs"]

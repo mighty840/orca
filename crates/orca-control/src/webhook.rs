@@ -11,7 +11,6 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::{delete, post};
 use axum::{Json, Router};
-use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 
 use crate::operations::AgentOfflineError;
@@ -42,55 +41,8 @@ fn default_branch() -> String {
     "main".to_string()
 }
 
-/// Shared webhook config store, stored in [`AppState`] extension.
-pub type WebhookStore = Arc<RwLock<Vec<WebhookConfig>>>;
-
-/// Path to the on-disk webhook config file (under `~/.orca`).
-///
-/// Honors `ORCA_WEBHOOKS_PATH` as an override for tests.
-fn webhooks_path() -> std::path::PathBuf {
-    if let Ok(p) = std::env::var("ORCA_WEBHOOKS_PATH") {
-        return std::path::PathBuf::from(p);
-    }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    std::path::PathBuf::from(home).join(".orca/webhooks.json")
-}
-
-/// Load persisted webhooks from disk, returning an empty list on first run.
-pub fn new_store() -> WebhookStore {
-    let configs: Vec<WebhookConfig> = std::fs::read_to_string(webhooks_path())
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default();
-    for wh in configs.iter().filter(|w| w.effective_secret().is_none()) {
-        error!(
-            repo = %wh.repo,
-            branch = %wh.branch,
-            service = %wh.service_name,
-            "Webhook has no secret and will reject every push. \
-             Re-register it with `orca webhooks add`."
-        );
-    }
-    Arc::new(RwLock::new(configs))
-}
-
-/// Persist the current webhook list to disk. Errors are logged, not returned,
-/// so they don't fail the request that triggered the change.
-async fn persist(store: &WebhookStore) {
-    let snapshot = store.read().await.clone();
-    let path = webhooks_path();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    match serde_json::to_string_pretty(&snapshot) {
-        Ok(json) => {
-            if let Err(e) = std::fs::write(&path, json) {
-                error!("Failed to persist webhooks to {}: {e}", path.display());
-            }
-        }
-        Err(e) => error!("Failed to serialize webhooks: {e}"),
-    }
-}
+use crate::webhook_store::persist;
+pub use crate::webhook_store::{WebhookStore, new_store};
 
 /// Subset of GitHub push webhook payload we care about.
 #[derive(Debug, serde::Deserialize)]

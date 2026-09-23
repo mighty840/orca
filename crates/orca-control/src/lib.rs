@@ -33,6 +33,7 @@ pub mod watchdog;
 pub mod webhook;
 mod webhook_auth;
 pub mod webhook_invocations;
+mod webhook_store;
 pub mod ws_handler;
 
 use std::sync::Arc;

@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 
+use anyhow::Context;
+
 use tracing::info;
 
 use orca_core::config::ServiceConfig;
@@ -10,14 +12,21 @@ use orca_core::types::{DeployKind, HealthState, WorkloadSpec, WorkloadStatus};
 /// Resolve `${secrets.KEY}` patterns in env vars using the configured
 /// secrets store. Project-scoped keys (`<project>.KEY`, #68) win over
 /// bare global keys for services that belong to a project.
+///
+/// Fails the deploy (#183) when the store can't be opened or a referenced
+/// secret doesn't exist. Before, both cases passed the literal `${secrets.X}`
+/// to the container and reported success. Env without references never
+/// touches the store.
 fn resolve_secrets(
     env: &HashMap<String, String>,
     project: Option<&str>,
-) -> HashMap<String, String> {
-    match orca_core::secrets::open_configured() {
-        Ok(store) => store.resolve_env_scoped(env, project),
-        Err(_) => env.clone(),
+) -> anyhow::Result<HashMap<String, String>> {
+    if !env.values().any(|v| v.contains("${secrets.")) {
+        return Ok(env.clone());
     }
+    let store = orca_core::secrets::open_configured()
+        .context("cannot resolve ${secrets.…} references: the secrets store failed to open")?;
+    store.resolve_env_checked(env, project)
 }
 
 /// Derive the Docker network name for a workload spec.
@@ -190,7 +199,8 @@ pub(crate) fn service_config_to_spec(config: &ServiceConfig) -> anyhow::Result<W
         health: config.health.clone(),
         readiness: config.readiness.clone(),
         liveness: config.liveness.clone(),
-        env: resolve_secrets(&config.env, config.project.as_deref()),
+        env: resolve_secrets(&config.env, config.project.as_deref())
+            .with_context(|| format!("service {}", config.name))?,
         resources: config.resources.clone(),
         volume: config.volume.clone(),
         deploy: config.deploy.clone(),

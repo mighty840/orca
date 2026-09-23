@@ -94,17 +94,26 @@ fn config_to_spec_with_build_config() {
     assert!(spec.build.is_some());
 }
 
-/// Env vars pass through to spec (secret resolution happens client-side in load_dir).
+/// Plain env vars pass through to the spec unchanged.
 #[test]
-fn config_to_spec_passes_env_through() {
+fn config_to_spec_passes_plain_env_through() {
     let mut config = minimal_config(Some("nginx:latest".into()), None);
     config.env.insert("KEY".into(), "value".into());
-    config.env.insert("SECRET".into(), "${secrets.FOO}".into());
-
     let spec = service_config_to_spec(&config).unwrap();
     assert_eq!(spec.env["KEY"], "value");
-    // Without a secrets.json in cwd, patterns pass through unchanged
-    assert_eq!(spec.env["SECRET"], "${secrets.FOO}");
+}
+
+/// #183: an unresolvable `${secrets.X}` fails the conversion (and so the
+/// deploy) instead of reaching the container as a literal string.
+#[test]
+fn config_to_spec_refuses_an_unresolvable_secret_reference() {
+    let mut config = minimal_config(Some("nginx:latest".into()), None);
+    config
+        .env
+        .insert("SECRET".into(), "${secrets.ORCA_TEST_NEVER_SET_183}".into());
+    let err = format!("{:#}", service_config_to_spec(&config).unwrap_err());
+    assert!(err.contains("service test-svc"), "{err}");
+    assert!(err.contains("ORCA_TEST_NEVER_SET_183"), "{err}");
 }
 
 #[test]
