@@ -97,7 +97,10 @@ async fn collect_service_hooks(state: &AppState) -> std::collections::HashMap<St
 /// targets (including resolved S3 credentials) as the scheduler.
 pub(crate) async fn run_master_backup(state: &Arc<AppState>, config: &BackupConfig) {
     info!("Starting master backup");
-    let (success, message) = invoke_subprocess(config).await;
+    // The master's databases need their pre-hooks too (#198): this call used
+    // to pass none, so only agents could ever run one.
+    let hooks = collect_service_hooks(state).await;
+    let (success, message) = invoke_subprocess(config, &hooks).await;
     let result = orca_core::api_types::LastBackupResult {
         success,
         message,
@@ -106,7 +109,11 @@ pub(crate) async fn run_master_backup(state: &Arc<AppState>, config: &BackupConf
     *state.master_last_backup_result.write().await = Some(result);
 }
 
-async fn invoke_subprocess(config: &BackupConfig) -> (bool, String) {
+async fn invoke_subprocess(
+    config: &BackupConfig,
+    hooks: &std::collections::HashMap<String, String>,
+) -> (bool, String) {
+    let hooks_json = serde_json::to_string(hooks).unwrap_or_default();
     let config_json = match serde_json::to_string(config) {
         Ok(j) => j,
         Err(e) => {
@@ -126,6 +133,7 @@ async fn invoke_subprocess(config: &BackupConfig) -> (bool, String) {
     match tokio::process::Command::new(&exe)
         .args(["backup", "all"])
         .env("ORCA_BACKUP_CONFIG_JSON", &config_json)
+        .env("ORCA_SERVICE_HOOKS_JSON", &hooks_json)
         .output()
         .await
     {
