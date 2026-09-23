@@ -28,13 +28,27 @@ async fn read_log_tail(runtime: &dyn Runtime, handle: &WorkloadHandle) -> Option
     if trimmed.is_empty() {
         return None;
     }
-    // Keep the most recent bytes if oversized, so the heartbeat stays small.
-    let out = if trimmed.len() > LOG_TAIL_LIMIT {
-        format!("…{}", &trimmed[trimmed.len() - LOG_TAIL_LIMIT..])
-    } else {
-        trimmed.to_string()
-    };
-    Some(out)
+    Some(bounded_tail(trimmed, LOG_TAIL_LIMIT))
+}
+
+/// Keep the most recent `limit` bytes of `text`, so the heartbeat stays small,
+/// prefixed with `…` when anything was cut.
+///
+/// The cut moves forward to the next character boundary. Slicing a `&str` at
+/// a raw byte offset (`&text[len - limit..]`) panics whenever that offset
+/// falls inside a multi-byte character, which any crashed container whose
+/// log holds an umlaut, an arrow or a box-drawing glyph near the cut would
+/// trigger (#180). The panic killed the heartbeat task, so the master dropped
+/// the node, and on the `StatusPing` path it took down `orca join` itself.
+fn bounded_tail(text: &str, limit: usize) -> String {
+    if text.len() <= limit {
+        return text.to_string();
+    }
+    let mut start = text.len() - limit;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    format!("…{}", &text[start..])
 }
 
 impl AgentClient {
@@ -132,3 +146,7 @@ impl AgentClient {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "reporting_tests.rs"]
+mod tests;

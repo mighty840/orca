@@ -1,10 +1,15 @@
 //! WebSocket handler for agent↔master streaming communication.
 //!
-//! Agents connect to `GET /api/v1/ws/agent?token=<cluster_token>&node_id=<id>`.
+//! Agents connect to `GET /api/v1/ws/agent?node_id=<id>&address=<addr>` with an
+//! `Authorization: Bearer <cluster_token>` header. Agents older than v0.3 send
+//! the token as a `token` query parameter instead, which is still accepted
+//! with a deprecation warning so the master can be upgraded first (#182).
 //! After the upgrade, messages flow bidirectionally using [`AgentMessage`] and
 //! [`MasterMessage`] JSON frames.
 
+mod auth;
 mod heartbeat;
+mod messages;
 mod placeholders;
 mod reconcile;
 
@@ -12,24 +17,29 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket};
 use axum::extract::{ConnectInfo, Query, State, WebSocketUpgrade};
+use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
-use orca_core::ws_types::{AgentMessage, MasterMessage};
+use orca_core::ws_types::MasterMessage;
 
 use crate::state::AppState;
 
-use heartbeat::handle_ws_heartbeat;
+use auth::{Refusal, authorize_agent};
+use messages::handle_agent_message;
 use placeholders::{remove_remote_placeholders, upsert_remote_placeholders};
 use reconcile::{drain_pending_commands, send_reconcile};
 
 /// Query params for the WS upgrade request.
 #[derive(Deserialize)]
 pub struct WsQuery {
-    token: String,
+    /// Deprecated (#182): pre-v0.3 agents send the token here, which puts it
+    /// in URLs and logs. Accepted only when no `Authorization` header is sent.
+    #[serde(default)]
+    token: Option<String>,
     node_id: u64,
     /// Agent's address (e.g. "10.0.0.5:6881") for node registration.
     #[serde(default)]
@@ -68,17 +78,45 @@ pub async fn ws_agent_handler(
     State(state): State<Arc<AppState>>,
     ConnectInfo(peer): ConnectInfo<std::net::SocketAddr>,
     Query(query): Query<WsQuery>,
+    headers: HeaderMap,
 ) -> impl IntoResponse {
-    // Authenticate: check token against cluster tokens
-    let valid = state.api_tokens.iter().any(|t| t == &query.token)
-        || state
-            .cluster_config
-            .token
-            .iter()
-            .any(|t| t.value == query.token);
+    // Prefer the header. Fall back to the query string only when there is no
+    // header at all — never from a rejected header to the query.
+    let token = match crate::auth::bearer_token(&headers) {
+        Some(token) => token.to_owned(),
+        None => {
+            if query.token.is_some() {
+                warn!(
+                    node_id = query.node_id,
+                    peer = %peer.ip(),
+                    "agent sent its token in the URL query string, which is deprecated \
+                     (#182): upgrade the agent so the token travels in a header"
+                );
+            }
+            query.token.clone().unwrap_or_default()
+        }
+    };
 
-    if !valid {
-        return (axum::http::StatusCode::UNAUTHORIZED, "invalid token").into_response();
+    // Opening the agent channel is admin-only (#201): the master sends this
+    // node resolved secrets for every service pinned to it.
+    match authorize_agent(&state, &token) {
+        Ok(_) => {}
+        Err(Refusal::Unauthorized) => {
+            return (axum::http::StatusCode::UNAUTHORIZED, "invalid token").into_response();
+        }
+        Err(Refusal::Forbidden(role)) => {
+            warn!(
+                node_id = query.node_id,
+                peer = %peer.ip(),
+                ?role,
+                "refusing agent channel: token role may not open it (admin only)"
+            );
+            return (
+                axum::http::StatusCode::FORBIDDEN,
+                "token role may not open the agent channel",
+            )
+                .into_response();
+        }
     }
 
     let node_id = query.node_id;
@@ -113,15 +151,38 @@ async fn handle_agent_ws(
     let session = crate::state::AgentSession::new(tx.clone());
     let session_id = session.session_id;
     let shutdown = session.shutdown.clone();
+    // Read before taking the ws_agents lock so the two never nest.
+    let previous_peer = state
+        .registered_nodes
+        .read()
+        .await
+        .get(&node_id)
+        .and_then(|n| n.peer_ip.clone());
+    let new_peer = peer_ip.map(|ip| ip.to_string());
     {
         let mut senders = state.ws_agents.write().await;
         if let Some(old) = senders.insert(node_id, session) {
-            info!(
-                node_id,
-                old_session = old.session_id,
-                new_session = session_id,
-                "agent reconnected — superseding previous control session"
-            );
+            if previous_peer.is_some() && previous_peer != new_peer {
+                // A live session for this node was replaced from somewhere
+                // else. Expected once after deliberately moving an agent;
+                // otherwise it means someone holding an admin token is posing
+                // as this node (#201).
+                warn!(
+                    node_id,
+                    previous_peer = previous_peer.as_deref().unwrap_or("unknown"),
+                    new_peer = new_peer.as_deref().unwrap_or("unknown"),
+                    old_session = old.session_id,
+                    new_session = session_id,
+                    "live agent session taken over from a different address"
+                );
+            } else {
+                info!(
+                    node_id,
+                    old_session = old.session_id,
+                    new_session = session_id,
+                    "agent reconnected — superseding previous control session"
+                );
+            }
             old.shutdown.notify_waiters();
         }
     }
@@ -260,178 +321,6 @@ async fn handle_agent_ws(
         remove_remote_placeholders(&state, node_id).await;
     }
     info!("Agent {node_id} WebSocket disconnected (session {session_id})");
-}
-
-/// Process a single message from the agent.
-async fn handle_agent_message(
-    state: &AppState,
-    node_id: u64,
-    text: &str,
-    _tx: &mpsc::Sender<MasterMessage>,
-) -> anyhow::Result<()> {
-    let msg: AgentMessage = serde_json::from_str(text)?;
-
-    match msg {
-        AgentMessage::Heartbeat {
-            node_id: reported_id,
-            workloads,
-            stats,
-        } => {
-            handle_ws_heartbeat(state, reported_id, &workloads, &stats).await;
-        }
-        AgentMessage::DomainDiscovered {
-            service_name,
-            domain,
-            host_port,
-        } => {
-            info!(
-                "Node {node_id} discovered domain {domain} for {service_name} (port {host_port})"
-            );
-            // Update the service's domain tracking on the master so the
-            // TUI and status API reflect the domain(s) correctly. Fold the
-            // newly-discovered domain into the existing set, normalizing to
-            // the single `domain` field for one and `domains` for many (the
-            // two are mutually exclusive — see ServiceConfig::validate).
-            let mut services = state.services.write().await;
-            if let Some(svc) = services.get_mut(&service_name) {
-                let mut all = svc.config.all_domains();
-                // Only fold discovered domains into services with NO
-                // declared domains (adopted/unmanaged workloads). Mutating
-                // a declared service's domain set makes `spec_matches`
-                // diverge from the on-disk config, so the declarative loop
-                // saw a permanent "change" and redeployed it every pass —
-                // the 60s-cadence churn behind #120.
-                if !all.is_empty() {
-                    return Ok(());
-                }
-                if !all.contains(&domain) {
-                    all.push(domain);
-                    if all.len() == 1 {
-                        svc.config.domain = all.pop();
-                        svc.config.domains = Vec::new();
-                    } else {
-                        svc.config.domain = None;
-                        svc.config.domains = all;
-                    }
-                }
-            }
-        }
-        AgentMessage::DeployReceived { service_name } => {
-            info!("Node {node_id}: agent acknowledged deploy of {service_name}, work started");
-            if let Some(tx) = state
-                .pending_deploy_acks
-                .write()
-                .await
-                .remove(&service_name)
-            {
-                let _ = tx.send(());
-            }
-        }
-        AgentMessage::DeployResult {
-            service_name,
-            success,
-            error,
-        } => {
-            if success {
-                info!("Node {node_id}: deploy of {service_name} succeeded");
-                let mut services = state.services.write().await;
-                if let Some(svc) = services.get_mut(&service_name) {
-                    let placeholder_id = format!("remote-{node_id}");
-                    if let Some(inst) = svc
-                        .instances
-                        .iter_mut()
-                        .find(|i| i.handle.runtime_id == placeholder_id)
-                    {
-                        inst.status = orca_core::types::WorkloadStatus::Running;
-                    }
-                }
-            } else {
-                error!(
-                    "Node {node_id}: deploy of {service_name} failed: {}",
-                    error.as_deref().unwrap_or("unknown")
-                );
-            }
-            let result = if success {
-                Ok(())
-            } else {
-                Err(error.unwrap_or_else(|| "deploy failed".to_string()))
-            };
-            if let Some(tx) = state.pending_deploys.write().await.remove(&service_name) {
-                let _ = tx.send(result);
-            }
-        }
-        AgentMessage::LogChunk {
-            request_id,
-            service_name: _,
-            data,
-            done,
-        } => {
-            // Forward to any pending log stream listener.
-            let listeners = state.log_listeners.read().await;
-            if let Some(listener_tx) = listeners.get(&request_id) {
-                let _ = listener_tx.send((data, done)).await;
-            }
-        }
-        AgentMessage::BackupResult {
-            node_id,
-            success,
-            message,
-        } => {
-            if success {
-                info!("Node {node_id}: backup complete — {message}");
-            } else {
-                error!("Node {node_id}: backup failed — {message}");
-            }
-            // Cache for the cluster-backups dashboard so it can surface the
-            // last-known failure without rescanning logs.
-            state.last_backup_results.write().await.insert(
-                node_id,
-                crate::state::LastBackupResult {
-                    success,
-                    message,
-                    recorded_at: chrono::Utc::now(),
-                },
-            );
-        }
-        AgentMessage::BackupStatusReport { request_id, data } => {
-            if let Some(tx) = state.backup_listeners.read().await.get(&request_id) {
-                let _ = tx.send(data).await;
-            }
-        }
-        AgentMessage::NetworkStatusReport { request_id, data } => {
-            if let Some(tx) = state.network_listeners.read().await.get(&request_id) {
-                let _ = tx.send(data).await;
-            }
-        }
-        AgentMessage::AdoptionReport { request_id, data } => {
-            if let Some(tx) = state.adoption_listeners.read().await.get(&request_id) {
-                let _ = tx.send(data).await;
-            }
-        }
-        AgentMessage::ExecOutput { session_id, data } => {
-            use base64::Engine as _;
-            let bytes = match base64::engine::general_purpose::STANDARD.decode(&data) {
-                Ok(b) => b,
-                Err(e) => {
-                    tracing::warn!("exec: bad base64 output for session {session_id}: {e}");
-                    return Ok(());
-                }
-            };
-            let sessions = state.exec_sessions.read().await;
-            if let Some(tx) = sessions.get(&session_id) {
-                let _ = tx.send(bytes).await;
-            }
-        }
-        AgentMessage::ExecDone {
-            session_id,
-            exit_code,
-        } => {
-            info!("Node {node_id}: exec session {session_id} done (exit {exit_code})");
-            state.exec_sessions.write().await.remove(&session_id);
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

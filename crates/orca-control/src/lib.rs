@@ -1,12 +1,12 @@
 pub mod adoption;
 pub mod alerts;
 pub mod api;
+mod api_listen;
 pub mod auth;
 pub mod backup_scheduler;
 pub(crate) mod canary;
 pub mod certs;
 pub mod cleanup_scheduler;
-pub mod cluster_api;
 pub(crate) mod cluster_handlers;
 pub mod cluster_state;
 pub mod declarative;
@@ -31,6 +31,7 @@ pub mod store;
 pub mod topo_sort;
 pub mod watchdog;
 pub mod webhook;
+mod webhook_auth;
 pub mod webhook_invocations;
 pub mod ws_handler;
 
@@ -172,18 +173,29 @@ pub async fn run_server_with_acme(
 
     let app = api::router(state.clone());
 
-    let addr = format!("0.0.0.0:{}", cluster_config.cluster.api_port);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    info!("API server listening on {addr}");
+    let bind = &cluster_config.cluster.api_bind;
+    let addrs = api_listen::listen_addrs(bind, cluster_config.cluster.api_port)
+        .map_err(anyhow::Error::msg)?;
+    if !api_listen::reachable_from_local_cli(bind) {
+        tracing::warn!(
+            "cluster.api_bind does not include 127.0.0.1: the `orca` CLI and TUI on this host \
+             connect there by default and will not reach the API. Add \"127.0.0.1\" to \
+             api_bind, or pass --api."
+        );
+    }
+    let mut listeners = Vec::with_capacity(addrs.len());
+    for addr in &addrs {
+        let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| {
+            anyhow::anyhow!(
+                "cannot listen on {addr} (cluster.api_bind): {e}. If this is a VPN or mesh \
+                 address, its interface must be up before orca starts."
+            )
+        })?;
+        info!("API server listening on {addr}");
+        listeners.push(listener);
+    }
 
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-    )
-    .with_graceful_shutdown(shutdown_signal())
-    .await?;
-
-    Ok(())
+    api_listen::serve_all(app, listeners, shutdown_signal()).await
 }
 
 /// Check if Docker containers already exist for a persisted service.

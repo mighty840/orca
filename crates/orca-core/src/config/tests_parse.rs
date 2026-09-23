@@ -198,9 +198,10 @@ age_recipients = [
 /// resolution erases them — the secrets-usage index depends on it (#137).
 #[test]
 fn load_captures_raw_secret_refs() {
-    let dir = std::env::temp_dir().join(format!("orca-refs-test-{}", std::process::id()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let path = dir.join("cluster.toml");
+    // `load` opens the default secrets store under $HOME/.orca, so this must
+    // be isolated like every other test that loads a config.
+    let home = super::test_home::TempHome::new();
+    let path = home.path().join("cluster.toml");
     std::fs::write(
         &path,
         r#"
@@ -222,5 +223,57 @@ role = "admin"
     let keys: Vec<&str> = config.secret_refs.iter().map(|r| r.key.as_str()).collect();
     assert!(keys.contains(&"ai_key"), "got {keys:?}");
     assert!(keys.contains(&"admin_token"), "got {keys:?}");
-    let _ = std::fs::remove_dir_all(&dir);
+}
+
+// --- api_bind ---------------------------------------------------------------
+
+#[test]
+fn api_bind_defaults_to_every_ipv4_interface() {
+    // Absent from cluster.toml: behave exactly as before the field existed.
+    let config: ClusterConfig = toml::from_str("[cluster]\nname = \"t\"\n").unwrap();
+    assert_eq!(
+        config.cluster.api_bind,
+        vec!["0.0.0.0".parse::<std::net::IpAddr>().unwrap()]
+    );
+}
+
+#[test]
+fn api_bind_default_matches_between_serde_and_default() {
+    // ClusterMeta has a hand-written Default. If it drifts from the serde
+    // default, configs built in code would bind somewhere else.
+    let parsed: ClusterConfig = toml::from_str("[cluster]\nname = \"t\"\n").unwrap();
+    assert_eq!(parsed.cluster.api_bind, ClusterMeta::default().api_bind);
+}
+
+#[test]
+fn api_bind_accepts_loopback_plus_a_mesh_address() {
+    let toml = r#"
+[cluster]
+name = "t"
+api_bind = ["127.0.0.1", "100.80.5.14", "::1"]
+"#;
+    let config: ClusterConfig = toml::from_str(toml).unwrap();
+    let got: Vec<String> = config
+        .cluster
+        .api_bind
+        .iter()
+        .map(|ip| ip.to_string())
+        .collect();
+    assert_eq!(got, ["127.0.0.1", "100.80.5.14", "::1"]);
+}
+
+#[test]
+fn api_bind_rejects_something_that_is_not_an_ip_address() {
+    // A hostname or a typo fails at load, not later as a confusing bind error.
+    for bad in [
+        r#"["orca.example.com"]"#,
+        r#"["100.80.5"]"#,
+        r#"["127.0.0.1:6880"]"#,
+    ] {
+        let toml = format!("[cluster]\nname = \"t\"\napi_bind = {bad}\n");
+        assert!(
+            toml::from_str::<ClusterConfig>(&toml).is_err(),
+            "should reject {bad}"
+        );
+    }
 }

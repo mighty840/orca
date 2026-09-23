@@ -7,19 +7,6 @@ fn branch_from_ref_extracts_name() {
     assert_eq!(branch_from_ref("refs/tags/v1.0"), None);
 }
 
-#[test]
-fn validate_signature_works() {
-    let secret = "mysecret";
-    let body = b"hello world";
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
-    mac.update(body);
-    let result = mac.finalize().into_bytes();
-    let sig = format!("sha256={}", hex::encode(result));
-    assert!(validate_signature(secret, body, &sig));
-    assert!(!validate_signature(secret, body, "sha256=badbeef"));
-    assert!(!validate_signature(secret, body, "invalid"));
-}
-
 #[tokio::test]
 async fn webhook_store_remove_by_service_name() {
     let store: WebhookStore = std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new()));
@@ -129,9 +116,4 @@ fn push_payload_works_without_head_commit() {
     });
     let payload: PushPayload = serde_json::from_value(json).unwrap();
     assert!(payload.head_commit.is_none());
-}
-
-#[test]
-fn validate_signature_rejects_bad_hex() {
-    assert!(!validate_signature("secret", b"body", "sha256=zzzz"));
 }

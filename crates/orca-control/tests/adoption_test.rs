@@ -19,8 +19,10 @@ use orca_core::types::WorkloadStatus;
 use orca_core::ws_types::{AdoptionReportData, AgentMessage, ManagedContainer, MasterMessage};
 
 fn test_state() -> Arc<orca_control::state::AppState> {
-    let mut cfg = ClusterConfig::default();
-    cfg.api_tokens = vec!["tok".to_string()];
+    let cfg = ClusterConfig {
+        api_tokens: vec!["tok".to_string()],
+        ..Default::default()
+    };
     Arc::new(orca_control::state::AppState::new(
         cfg,
         Arc::new(MockRuntime::new()),

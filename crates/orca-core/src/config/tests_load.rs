@@ -45,6 +45,9 @@ port = 3000
 
 #[test]
 fn load_dir_resolves_per_service_secrets() {
+    // SecretStore::open always keys off $HOME/.orca/master.key, wherever the
+    // secrets file lives, so this must be isolated like the config loaders.
+    let _home = super::test_home::TempHome::new();
     let dir = tempfile::tempdir().unwrap();
     let svc_dir = dir.path().join("myapp");
     std::fs::create_dir_all(&svc_dir).unwrap();

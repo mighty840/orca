@@ -1,7 +1,8 @@
 //! S3 backup storage via rclone subprocess.
 //!
 //! Uses `rclone` for S3-compatible providers (AWS, Hetzner, Minio, R2, B2, …).
-//! Credentials are passed as CLI flags so no rclone config file is required.
+//! No rclone config file is required: the region and endpoint go on the command
+//! line, and credentials through the child's environment (see [`apply_s3_flags`]).
 
 use std::path::Path;
 use std::process::Command;
@@ -22,7 +23,17 @@ fn s3_path(bucket: &str, prefix: &str, name: &str) -> String {
     }
 }
 
-/// Append S3 connection flags to a rclone command.
+/// Configure a rclone command for an S3 target.
+///
+/// Region and endpoint are not secret and go on the command line. The access
+/// key and secret key go in the child's environment as
+/// `RCLONE_S3_ACCESS_KEY_ID` / `RCLONE_S3_SECRET_ACCESS_KEY`, which rclone
+/// reads exactly like the matching flags. As flags they sat in
+/// `/proc/<pid>/cmdline`, readable by every local user for the whole upload
+/// (#205); a process's environment is readable only by its owner and root.
+///
+/// Never add `-vv` to these commands: at debug level rclone logs every value
+/// it takes from the environment, secret key included.
 fn apply_s3_flags(
     cmd: &mut Command,
     region: &str,
@@ -35,10 +46,10 @@ fn apply_s3_flags(
         cmd.arg("--s3-endpoint").arg(ep);
     }
     if let Some(key) = access_key {
-        cmd.arg("--s3-access-key-id").arg(key);
+        cmd.env("RCLONE_S3_ACCESS_KEY_ID", key);
     }
     if let Some(secret) = secret_key {
-        cmd.arg("--s3-secret-access-key").arg(secret);
+        cmd.env("RCLONE_S3_SECRET_ACCESS_KEY", secret);
     }
 }
 
@@ -288,5 +299,69 @@ mod tests {
             "file.db",
         );
         assert!(result.is_err(), "upload of a missing file must return Err");
+    }
+
+    // --- #205: credentials never on the command line ------------------------
+
+    fn configured(access: Option<&str>, secret: Option<&str>) -> Command {
+        let mut cmd = Command::new("rclone");
+        apply_s3_flags(
+            &mut cmd,
+            "nbg1",
+            &Some("https://nbg1.your-objectstorage.com".into()),
+            &access.map(String::from),
+            &secret.map(String::from),
+        );
+        cmd
+    }
+
+    fn env_of(cmd: &Command, key: &str) -> Option<String> {
+        cmd.get_envs()
+            .find(|(k, _)| *k == key)
+            .and_then(|(_, v)| v.map(|v| v.to_string_lossy().into_owned()))
+    }
+
+    #[test]
+    fn credentials_are_not_in_the_arguments() {
+        let cmd = configured(Some("AKID-PROBE"), Some("SECRET-PROBE"));
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(!args.iter().any(|a| a.contains("AKID-PROBE")), "{args:?}");
+        assert!(!args.iter().any(|a| a.contains("SECRET-PROBE")), "{args:?}");
+        assert!(!args.iter().any(|a| a.contains("access-key")), "{args:?}");
+    }
+
+    #[test]
+    fn credentials_go_in_rclones_environment_variables() {
+        let cmd = configured(Some("AKID-PROBE"), Some("SECRET-PROBE"));
+        assert_eq!(
+            env_of(&cmd, "RCLONE_S3_ACCESS_KEY_ID").as_deref(),
+            Some("AKID-PROBE")
+        );
+        assert_eq!(
+            env_of(&cmd, "RCLONE_S3_SECRET_ACCESS_KEY").as_deref(),
+            Some("SECRET-PROBE")
+        );
+    }
+
+    #[test]
+    fn region_and_endpoint_stay_on_the_command_line() {
+        let cmd = configured(None, None);
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            args,
+            [
+                "--s3-region",
+                "nbg1",
+                "--s3-endpoint",
+                "https://nbg1.your-objectstorage.com"
+            ]
+        );
+        assert_eq!(env_of(&cmd, "RCLONE_S3_ACCESS_KEY_ID"), None);
     }
 }

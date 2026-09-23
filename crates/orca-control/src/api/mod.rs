@@ -12,14 +12,16 @@ mod handlers;
 
 /// Build the axum router for the API.
 pub fn router(state: Arc<AppState>) -> Router {
-    // Unauthenticated routes (metrics, WS agent endpoint).
-    // WS does its own token auth via query param.
+    // Outside the bearer-token middleware: the agent WebSocket authenticates
+    // itself and requires an admin token (#201).
     let public = Router::new()
-        .route("/metrics", get(crate::metrics::metrics_handler))
         .route("/api/v1/ws/agent", get(crate::ws_handler::ws_agent_handler))
         .with_state(state.clone());
 
     let authed = Router::new()
+        // Behind auth (#203): it lists every service and project, which is
+        // reconnaissance for guessing webhook repos. Scrape with a viewer token.
+        .route("/metrics", get(crate::metrics::metrics_handler))
         .route("/api/v1/health", get(handlers::health))
         .route("/api/v1/deploy", post(handlers::deploy))
         .route("/api/v1/status", get(handlers::status))

@@ -12,6 +12,7 @@
 mod adoption;
 mod backup;
 mod backup_status;
+pub mod connect;
 mod deploy;
 mod logs;
 pub mod network_status;
@@ -53,13 +54,27 @@ pub async fn run_ws_loop(
     agent: Arc<AgentClient>,
     domain_tx: mpsc::Sender<(String, String, u16)>,
 ) {
-    let ws_url = build_ws_url(leader_url, node_id, token, local_address);
+    // The URL carries no credential (#182), so logging it is safe.
+    let ws_url = connect::build_ws_url(leader_url, node_id, local_address);
+    if let Some(host) = connect::plaintext_exposure(&ws_url) {
+        warn!(
+            master = %host,
+            "agent channel is unencrypted ws:// to an address that may be public: the cluster \
+             token and resolved secrets for this node's services cross it in cleartext. Join \
+             via a wss:// URL or a private/mesh address such as the master's NetBird IP."
+        );
+    }
     let mut backoff = Duration::from_secs(2);
     let max_backoff = Duration::from_secs(30);
 
     loop {
         info!("Connecting to master WebSocket: {ws_url}");
-        match tokio_tungstenite::connect_async(&ws_url).await {
+        // Built per attempt: each upgrade needs a fresh Sec-WebSocket-Key.
+        let attempt = match connect::build_ws_request(&ws_url, token) {
+            Ok(request) => tokio_tungstenite::connect_async(request).await,
+            Err(e) => Err(e),
+        };
+        match attempt {
             Ok((ws_stream, _)) => {
                 info!("WebSocket connected to master");
                 backoff = Duration::from_secs(2); // reset on success
@@ -69,6 +84,20 @@ pub async fn run_ws_loop(
                 {
                     warn!("WebSocket session ended: {e}");
                 }
+            }
+            Err(tungstenite::Error::Http(resp)) if matches!(resp.status().as_u16(), 400 | 401) => {
+                warn!(
+                    status = resp.status().as_u16(),
+                    "master refused the agent channel, retrying in {backoff:?}. If the master \
+                     runs an older orca, upgrade it first: this agent sends its token in the \
+                     Authorization header, which older masters do not read."
+                );
+            }
+            Err(tungstenite::Error::Http(resp)) if resp.status().as_u16() == 403 => {
+                warn!(
+                    "master refused the agent channel (403), retrying in {backoff:?}: this \
+                     token's role may not open it. Join with the cluster token or an admin token."
+                );
             }
             Err(e) => {
                 warn!("WebSocket connect failed: {e}, retrying in {backoff:?}");
@@ -370,37 +399,5 @@ async fn build_heartbeat(
             net_tx: sample.net_tx,
             domains: vec![],
         },
-    }
-}
-
-/// Convert HTTP leader URL to WS URL.
-fn build_ws_url(leader_url: &str, node_id: u64, token: &str, address: &str) -> String {
-    let base = leader_url
-        .replace("https://", "wss://")
-        .replace("http://", "ws://");
-    let encoded_addr = address.replace(':', "%3A");
-    format!("{base}/api/v1/ws/agent?token={token}&node_id={node_id}&address={encoded_addr}")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn build_ws_url_http() {
-        let url = build_ws_url("http://46.225.100.82:6880", 123, "abc", "10.0.0.5:6881");
-        assert_eq!(
-            url,
-            "ws://46.225.100.82:6880/api/v1/ws/agent?token=abc&node_id=123&address=10.0.0.5%3A6881"
-        );
-    }
-
-    #[test]
-    fn build_ws_url_https() {
-        let url = build_ws_url("https://orca.example.com", 42, "tok", "192.168.1.5:6881");
-        assert_eq!(
-            url,
-            "wss://orca.example.com/api/v1/ws/agent?token=tok&node_id=42&address=192.168.1.5%3A6881"
-        );
     }
 }

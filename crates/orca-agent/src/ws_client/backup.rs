@@ -92,11 +92,15 @@ fn cache_backup_config(json: &str) {
     let Some(home) = dirs_next::home_dir() else {
         return;
     };
-    let dir = home.join(".orca");
-    let path = dir.join("backup_config.json");
-    if let Err(e) = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&path, json)) {
+    if let Err(e) = cache_backup_config_at(&home.join(".orca/backup_config.json"), json) {
         tracing::warn!("Failed to cache backup config: {e}");
     }
+}
+
+/// Write the cached backup config owner-only (#205): it carries the
+/// object-storage access key and secret key for every S3 target.
+fn cache_backup_config_at(path: &std::path::Path, json: &str) -> std::io::Result<()> {
+    orca_core::fsutil::write_private(path, json.as_bytes())
 }
 
 #[cfg(test)]
@@ -146,5 +150,20 @@ mod tests {
             }
             _ => panic!("unexpected variant"),
         }
+    }
+
+    #[test]
+    fn the_cached_config_is_owner_only() {
+        // It holds S3 credentials; it used to be written with default mode.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".orca/backup_config.json");
+        super::cache_backup_config_at(&path, r#"{"secret_key":"s"}"#).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            r#"{"secret_key":"s"}"#
+        );
     }
 }

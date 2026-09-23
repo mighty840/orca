@@ -4,7 +4,7 @@
 //! and certificate download — all in pure Rust, no certbot needed.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use instant_acme::{
@@ -14,7 +14,9 @@ use instant_acme::{
 use tokio::sync::RwLock;
 use tracing::{debug, info};
 
-use super::default_orca_dir;
+use orca_core::fsutil;
+
+use super::default_account_path;
 
 /// Pure-Rust ACME provider backed by `instant-acme`.
 #[derive(Clone)]
@@ -148,31 +150,40 @@ impl AcmeProvider {
             )
             .await?;
 
-        // Cache the account credentials
-        if let Some(parent) = account_path.parent() {
-            tokio::fs::create_dir_all(parent).await?;
-        }
+        // Cache the account credentials. They are the account's private key:
+        // whoever holds them can issue and revoke certificates for our domains.
         let json = serde_json::to_string_pretty(&credentials)?;
-        tokio::fs::write(&account_path, json).await?;
+        let path = account_path.clone();
+        tokio::task::spawn_blocking(move || fsutil::write_private(&path, json.as_bytes()))
+            .await??;
         info!("ACME account cached at {}", account_path.display());
 
         Ok(account)
     }
 
     /// Save provisioned cert and key to the cache directory.
+    ///
+    /// Both files are written owner-only and atomically (#186): the key is a
+    /// private key, and a torn write of either would fail the next handshake.
     async fn save_cert(&self, domain: &str, cert_pem: &[u8], key_pem: &[u8]) -> anyhow::Result<()> {
-        tokio::fs::create_dir_all(&self.cache_dir).await?;
+        let dir = self.cache_dir.clone();
         let cert_path = self.cache_dir.join(format!("{domain}.cert.pem"));
         let key_path = self.cache_dir.join(format!("{domain}.key.pem"));
-        tokio::fs::write(&cert_path, cert_pem).await?;
-        tokio::fs::write(&key_path, key_pem).await?;
-        debug!(domain, "Saved cert to {}", cert_path.display());
+        let (cert, key) = (cert_pem.to_vec(), key_pem.to_vec());
+        let saved_cert = cert_path.clone();
+        tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+            fsutil::create_private_dir(&dir)?;
+            fsutil::write_private(&key_path, &key)?;
+            fsutil::write_private(&cert_path, &cert)
+        })
+        .await??;
+        debug!(domain, "Saved cert to {}", saved_cert.display());
         Ok(())
     }
 
     /// Path to the cached ACME account credentials.
     fn account_cache_path(&self) -> PathBuf {
-        default_orca_dir().join("acme-account.json")
+        default_account_path()
     }
 
     /// Ensure a valid cert exists for the domain — load from cache or provision.
@@ -227,3 +238,39 @@ impl AcmeProvider {
         Ok(tokio_rustls::TlsAcceptor::from(Arc::new(config)))
     }
 }
+
+/// Restrict key material written by earlier versions, which used default
+/// permissions (#186): the cache directory to 0700, every `*.key.pem` in it
+/// and the ACME account file to 0600. Certificates are public and left alone.
+///
+/// Missing paths are skipped. Returns how many paths were tightened.
+pub(crate) fn secure_existing_key_material(
+    cache_dir: &Path,
+    account: &Path,
+) -> std::io::Result<usize> {
+    let mut tightened = 0;
+    if account.exists() && fsutil::restrict(account, 0o600)? {
+        tightened += 1;
+    }
+    if !cache_dir.is_dir() {
+        return Ok(tightened);
+    }
+    if fsutil::restrict(cache_dir, 0o700)? {
+        tightened += 1;
+    }
+    for entry in std::fs::read_dir(cache_dir)? {
+        let path = entry?.path();
+        let is_key = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with(".key.pem"));
+        if is_key && path.is_file() && fsutil::restrict(&path, 0o600)? {
+            tightened += 1;
+        }
+    }
+    Ok(tightened)
+}
+
+#[cfg(test)]
+#[path = "provider_tests.rs"]
+mod tests;

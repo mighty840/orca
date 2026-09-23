@@ -25,8 +25,10 @@ fn test_state() -> Arc<orca_control::state::AppState> {
     let container_runtime = Arc::new(orca_core::testing::MockRuntime::new());
     let route_table = Arc::new(RwLock::new(HashMap::new()));
     let wasm_triggers = Arc::new(RwLock::new(Vec::new()));
-    let mut cluster_config = ClusterConfig::default();
-    cluster_config.api_tokens = vec!["test-token-123".to_string()];
+    let cluster_config = ClusterConfig {
+        api_tokens: vec!["test-token-123".to_string()],
+        ..Default::default()
+    };
 
     let state = orca_control::state::AppState::new(
         cluster_config,
@@ -402,8 +404,10 @@ async fn ws_cleanup_on_disconnect() {
 #[tokio::test]
 async fn half_dead_session_is_closed_by_idle_deadline() {
     let container_runtime = Arc::new(orca_core::testing::MockRuntime::new());
-    let mut cluster_config = ClusterConfig::default();
-    cluster_config.api_tokens = vec!["test-token-123".to_string()];
+    let mut cluster_config = ClusterConfig {
+        api_tokens: vec!["test-token-123".to_string()],
+        ..Default::default()
+    };
     cluster_config.deploy.ws_idle_timeout_secs = 1; // fast test
     let state = Arc::new(orca_control::state::AppState::new(
         cluster_config,

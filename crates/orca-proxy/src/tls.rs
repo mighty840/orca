@@ -91,6 +91,7 @@ pub fn create_tls_acceptor_for_domain(
                     .join(".orca/certs")
             });
             let manager = AcmeManager::new(email.clone(), cache);
+            manager.secure_key_material();
 
             let Some(domain) = domain else {
                 // No domain specified — ACME will auto-provision when domains

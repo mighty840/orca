@@ -183,3 +183,7 @@ mod tests_load;
 #[cfg(test)]
 #[path = "tests_secrets.rs"]
 mod tests_secrets;
+
+#[cfg(test)]
+#[path = "test_home.rs"]
+mod test_home;

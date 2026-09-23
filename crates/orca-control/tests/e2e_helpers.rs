@@ -1,4 +1,10 @@
 //! Shared helpers for E2E tests.
+//!
+//! Each integration test file is its own crate, so a binary that pulls this
+//! module in via `mod e2e_helpers` uses only the subset of helpers it needs
+//! and the rest read as dead code. Allowed at module level rather than with
+//! per-item attributes, which drift out of date as helpers are added.
+#![allow(dead_code)]
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -67,7 +73,6 @@ impl TestClient {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn get(&self, path: &str) -> reqwest::Response {
         self.client
             .get(format!("{}{path}", self.base))

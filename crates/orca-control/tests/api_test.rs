@@ -122,8 +122,9 @@ async fn logs_nonexistent_service_returns_not_found() {
 }
 
 #[tokio::test]
-async fn metrics_returns_200_text_plain_no_auth() {
-    // Use tokens to prove /metrics is unauthenticated.
+async fn metrics_returns_200_text_plain_with_a_token() {
+    // /metrics sits behind auth since #203; rbac_test covers the 401 without
+    // a token. This checks the scrape itself.
     let config = orca_core::config::ClusterConfig {
         api_tokens: vec!["secret".into()],
         ..Default::default()
@@ -138,8 +139,10 @@ async fn metrics_returns_200_text_plain_no_auth() {
     ));
     let app = router(state);
 
-    // No Authorization header — should still succeed.
-    let req = Request::get("/metrics").body(Body::empty()).unwrap();
+    let req = Request::get("/metrics")
+        .header("authorization", "Bearer secret")
+        .body(Body::empty())
+        .unwrap();
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 

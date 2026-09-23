@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use http_body_util::BodyExt;
 use tokio::sync::RwLock;
 use tower::ServiceExt;
 
@@ -149,12 +148,22 @@ async fn health_skips_auth_with_rbac() {
 }
 
 #[tokio::test]
-async fn metrics_skips_auth_with_rbac() {
+async fn metrics_requires_a_token() {
+    // #203: /metrics lists every service and project, so it is no longer open.
     let state = state_with_tokens(vec![admin_token()]);
     let app = router(state);
     let req = Request::get("/metrics").body(Body::empty()).unwrap();
     let resp = app.oneshot(req).await.unwrap();
-    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn viewer_can_scrape_metrics() {
+    let state = state_with_tokens(vec![viewer_token()]);
+    assert_eq!(
+        req(&state, "GET", "/metrics", "view-tok").await,
+        StatusCode::OK
+    );
 }
 
 #[tokio::test]
@@ -169,4 +178,107 @@ async fn role_can_method() {
     assert!(!Role::Viewer.can("stop"));
     assert!(Role::Viewer.can("status"));
     assert!(Role::Viewer.can("logs"));
+}
+
+// --- #202: route-level policy through the real router -----------------------
+
+fn all_roles() -> Arc<AppState> {
+    state_with_tokens(vec![admin_token(), deployer_token(), viewer_token()])
+}
+
+#[tokio::test]
+async fn reported_routes_are_forbidden_to_viewer_and_deployer() {
+    // Before #202 each of these fell through to viewer level.
+    let state = all_roles();
+    for (method, path) in [
+        ("GET", "/api/v1/services/web/exec"),
+        ("POST", "/api/v1/webhooks"),
+        ("GET", "/api/v1/secrets/usage"),
+    ] {
+        for token in ["view-tok", "deploy-tok"] {
+            assert_eq!(
+                req(&state, method, path, token).await,
+                StatusCode::FORBIDDEN,
+                "{token}: {method} {path}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn admin_passes_the_policy_on_the_reported_routes() {
+    let state = all_roles();
+    for (method, path) in [
+        ("GET", "/api/v1/services/web/exec"),
+        ("POST", "/api/v1/webhooks"),
+        ("GET", "/api/v1/secrets/usage"),
+    ] {
+        let status = req(&state, method, path, "admin-tok").await;
+        assert_ne!(status, StatusCode::FORBIDDEN, "{method} {path}");
+        assert_ne!(status, StatusCode::UNAUTHORIZED, "{method} {path}");
+    }
+}
+
+#[tokio::test]
+async fn viewer_reaches_a_parameterised_read_route() {
+    // Proves the middleware sees axum's matched template at runtime: a raw
+    // path like /api/v1/services/web/logs must hit the {name}/logs entry.
+    let state = all_roles();
+    let status = req(&state, "GET", "/api/v1/services/web/logs", "view-tok").await;
+    assert_ne!(status, StatusCode::FORBIDDEN);
+    assert_ne!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn deployer_reaches_a_parameterised_write_route() {
+    let state = all_roles();
+    let status = req(&state, "POST", "/api/v1/services/web/scale", "deploy-tok").await;
+    assert_ne!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn a_service_named_like_an_action_is_classified_by_route() {
+    // The old substring matcher read /services/scale/redeploy as a scale.
+    // By template it is a redeploy: deployer-level either way, but viewer
+    // must still be refused and the route must still resolve.
+    let state = all_roles();
+    let path = "/api/v1/services/scale/redeploy";
+    assert_eq!(
+        req(&state, "POST", path, "view-tok").await,
+        StatusCode::FORBIDDEN
+    );
+    assert_ne!(
+        req(&state, "POST", path, "deploy-tok").await,
+        StatusCode::FORBIDDEN
+    );
+}
+
+#[tokio::test]
+async fn node_membership_is_admin_only() {
+    // A registered node can be scheduled workloads; `Role` lists drain as an
+    // admin action. Previously both mapped to deployer.
+    let state = all_roles();
+    for path in ["/api/v1/cluster/register", "/api/v1/cluster/nodes/1/drain"] {
+        assert_eq!(
+            req(&state, "POST", path, "deploy-tok").await,
+            StatusCode::FORBIDDEN,
+            "{path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn an_unknown_path_is_admin_only_then_not_found() {
+    // No matched route means no policy entry: viewer is refused before the
+    // fallback, admin falls through to a 404.
+    let state = all_roles();
+    let path = "/api/v1/does-not-exist";
+    assert_eq!(
+        req(&state, "GET", path, "view-tok").await,
+        StatusCode::FORBIDDEN
+    );
+    assert_eq!(
+        req(&state, "GET", path, "admin-tok").await,
+        StatusCode::NOT_FOUND
+    );
 }

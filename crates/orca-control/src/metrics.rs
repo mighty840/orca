@@ -1,7 +1,9 @@
 //! Prometheus metrics endpoint.
 //!
 //! Serves `/metrics` in Prometheus text exposition format.
-//! This endpoint is unauthenticated so Prometheus can scrape it.
+//! It sits behind the API's bearer-token auth and needs at least a viewer
+//! token (#203): it lists every service and project. Prometheus scrapes it
+//! with `authorization: { credentials: <viewer token> }`.
 
 use std::fmt::Write;
 use std::sync::Arc;
