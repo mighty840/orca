@@ -87,15 +87,32 @@ pub enum BackupAction {
     All,
     /// Backup config files only (secrets.json, cluster.toml, cluster.db)
     Basic,
+    /// List backups on every target (S3 recursively)
     List,
+    /// Restore one config backup whose name or S3 key contains ID
     Restore {
         id: String,
+        /// age identity file (from `age-keygen`) for `.age` backups
+        #[arg(long)]
+        identity: Option<std::path::PathBuf>,
     },
-    /// Restore config files (secrets.json, cluster.toml) from latest backup
-    RestoreBasic,
-    /// Restore a Docker volume from the latest backup
+    /// Restore the newest backup of every config file (master.key first) from
+    /// any target, local or S3, into ~/.orca (and ~/orca/cluster.toml).
+    /// Existing files are moved aside, not overwritten.
+    RestoreBasic {
+        /// age identity file (from `age-keygen`) for `.age` backups
+        #[arg(long)]
+        identity: Option<std::path::PathBuf>,
+        /// Restore even though an orca server answers on port 6880
+        #[arg(long)]
+        force: bool,
+    },
+    /// Restore a Docker volume from the latest local backup, or from S3
     RestoreVolume {
         volume_name: String,
+        /// S3 key of the volume tarball, e.g. agents/<host>/<date>/<volume>.tar.gz
+        #[arg(long)]
+        from_s3: Option<String>,
     },
 }
 
