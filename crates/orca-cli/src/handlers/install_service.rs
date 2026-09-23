@@ -37,7 +37,11 @@ Requires=docker.service
 Type=simple
 User={user}
 WorkingDirectory={workdir}
-ExecStart={exe} join {leader} --token {token}
+# The cluster token is read from this file (ORCA_TOKEN=..., mode 0600), not
+# given on the command line: a unit file is world-readable and ExecStart
+# appears in every local user's process list.
+EnvironmentFile={env_file}
+ExecStart={exe} join {leader}
 Restart=on-failure
 RestartSec=5
 AmbientCapabilities=CAP_NET_BIND_SERVICE
@@ -63,22 +67,15 @@ pub fn handle_install_service(leader: Option<String>, token: Option<String>) -> 
 
     let is_agent = leader.is_some();
 
-    let unit = if let (Some(leader), Some(token)) = (&leader, &token) {
-        AGENT_TEMPLATE
-            .replace("{user}", &user)
-            .replace("{workdir}", &workdir)
-            .replace("{exe}", &exe)
-            .replace("{leader}", leader)
-            .replace("{token}", token)
-    } else if let Some(leader) = &leader {
-        // --leader provided without --token: read from file
-        let token = read_token_file(&user)?;
-        AGENT_TEMPLATE
-            .replace("{user}", &user)
-            .replace("{workdir}", &workdir)
-            .replace("{exe}", &exe)
-            .replace("{leader}", leader)
-            .replace("{token}", &token)
+    let unit = if let Some(leader) = &leader {
+        // --token, or the token `orca join` already saved on this node.
+        let token = match &token {
+            Some(token) => token.clone(),
+            None => read_token_file(&user)?,
+        };
+        let env_file = agent_env_path(&user);
+        write_agent_env(std::path::Path::new(&env_file), &token)?;
+        render_agent_unit(&user, &workdir, &exe, leader, &env_file)
     } else {
         SERVER_TEMPLATE
             .replace("{user}", &user)
@@ -121,10 +118,68 @@ pub fn handle_install_service(leader: Option<String>, token: Option<String>) -> 
     println!("  Binary: {exe}");
     if let Some(leader) = &leader {
         println!("  Leader: {leader}");
+        println!("  Token: {} (mode 0600)", agent_env_path(&user));
     }
     println!();
     println!("Start now with:  sudo systemctl start {service_name}");
     println!("View logs with:  journalctl -u {service_name} -f");
+    Ok(())
+}
+
+/// Where an agent's cluster token lives for systemd.
+fn agent_env_path(user: &str) -> String {
+    if user == "root" {
+        "/root/.orca/agent.env".to_string()
+    } else {
+        format!("/home/{user}/.orca/agent.env")
+    }
+}
+
+/// The agent unit file. It carries no credential.
+fn render_agent_unit(user: &str, workdir: &str, exe: &str, leader: &str, env_file: &str) -> String {
+    AGENT_TEMPLATE
+        .replace("{user}", user)
+        .replace("{workdir}", workdir)
+        .replace("{exe}", exe)
+        .replace("{leader}", leader)
+        .replace("{env_file}", env_file)
+}
+
+/// Write `ORCA_TOKEN=<token>` to `path`, readable by its owner only.
+///
+/// The mode is set on the open handle before any token byte is written, so
+/// a pre-existing file with looser permissions never holds the new token
+/// while still readable by others. systemd reads the file as root before
+/// dropping to the unit's `User=`, so owner-only is enough.
+fn write_agent_env(path: &std::path::Path, token: &str) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    // EnvironmentFile parses KEY=VALUE per line; keep the value unambiguous.
+    if token.is_empty()
+        || token
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || matches!(c, '"' | '\'' | '\\'))
+    {
+        anyhow::bail!(
+            "the cluster token contains characters a systemd EnvironmentFile cannot hold \
+             unquoted (whitespace, control characters or quotes)"
+        );
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).with_context(|| format!("cannot create {}", dir.display()))?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)
+        .with_context(|| format!("cannot write {}", path.display()))?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("cannot restrict {}", path.display()))?;
+    writeln!(file, "ORCA_TOKEN={token}")
+        .with_context(|| format!("cannot write {}", path.display()))?;
     Ok(())
 }
 
@@ -185,20 +240,72 @@ mod tests {
     }
 
     #[test]
-    fn agent_template_renders_correctly() {
-        let unit = AGENT_TEMPLATE
-            .replace("{user}", "sharang")
-            .replace("{workdir}", "/home/sharang/orca")
-            .replace("{exe}", "/home/sharang/.local/bin/orca")
-            .replace("{leader}", "46.225.100.82:6880")
-            .replace("{token}", "abc123");
+    fn agent_unit_renders_without_the_token() {
+        let unit = render_agent_unit(
+            "sharang",
+            "/home/sharang/orca",
+            "/home/sharang/.local/bin/orca",
+            "http://100.80.5.14:6880",
+            "/home/sharang/.orca/agent.env",
+        );
         assert!(unit.contains("User=sharang"));
-        assert!(unit.contains(
-            "ExecStart=/home/sharang/.local/bin/orca join 46.225.100.82:6880 --token abc123"
-        ));
+        assert!(unit.contains("EnvironmentFile=/home/sharang/.orca/agent.env"));
+        assert!(
+            unit.contains("ExecStart=/home/sharang/.local/bin/orca join http://100.80.5.14:6880\n")
+        );
+        assert!(!unit.contains("--token"), "a unit file is world-readable");
         assert!(unit.contains("AmbientCapabilities=CAP_NET_BIND_SERVICE"));
         assert!(unit.contains("SyslogIdentifier=orca-agent"));
         assert!(!unit.contains('{'));
+    }
+
+    #[test]
+    fn agent_env_path_follows_the_user_home() {
+        assert_eq!(agent_env_path("root"), "/root/.orca/agent.env");
+        assert_eq!(agent_env_path("sharang"), "/home/sharang/.orca/agent.env");
+    }
+
+    #[test]
+    fn agent_env_file_is_owner_only_and_holds_the_token() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(".orca/agent.env");
+
+        write_agent_env(&path, "3e6f00d").unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "ORCA_TOKEN=3e6f00d\n"
+        );
+    }
+
+    #[test]
+    fn agent_env_file_tightens_a_preexisting_loose_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent.env");
+        std::fs::write(&path, "stale").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        write_agent_env(&path, "newtoken").unwrap();
+
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "ORCA_TOKEN=newtoken\n"
+        );
+    }
+
+    #[test]
+    fn agent_env_file_rejects_tokens_systemd_would_misparse() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent.env");
+        for bad in ["", "two words", "line\nbreak", "quo\"te", "back\\slash"] {
+            assert!(write_agent_env(&path, bad).is_err(), "{bad:?}");
+        }
     }
 
     #[test]

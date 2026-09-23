@@ -192,3 +192,48 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use clap::{CommandFactory, Parser};
+
+    use super::{Cli, Command};
+
+    fn join_token_arg() -> clap::Arg {
+        Cli::command()
+            .find_subcommand("join")
+            .expect("join subcommand")
+            .get_arguments()
+            .find(|arg| arg.get_id() == "token")
+            .expect("--token argument")
+            .clone()
+    }
+
+    #[test]
+    fn join_token_can_come_from_the_environment() {
+        // So a unit file can keep the cluster token out of ExecStart, where
+        // every local user can read it in the process list.
+        assert_eq!(
+            join_token_arg().get_env(),
+            Some(std::ffi::OsStr::new("ORCA_TOKEN"))
+        );
+    }
+
+    #[test]
+    fn join_token_value_is_hidden_from_help() {
+        assert!(join_token_arg().is_hide_env_values_set());
+    }
+
+    #[test]
+    fn join_still_accepts_an_explicit_token_flag() {
+        let cli = Cli::try_parse_from(["orca", "join", "--token", "t0k", "http://10.0.0.1:6880"])
+            .expect("parses");
+        match cli.command {
+            Command::Join { token, address, .. } => {
+                assert_eq!(token, "t0k");
+                assert_eq!(address, "http://10.0.0.1:6880");
+            }
+            _ => panic!("expected join"),
+        }
+    }
+}
