@@ -49,6 +49,10 @@ impl StateMachine {
         }
     }
 
+    // `openraft::StorageError<u64>` is 224 bytes. The trait methods this feeds
+    // are exempt from `result_large_err` (their signature is openraft's); this
+    // helper mirrors them, and boxing here would be unboxed again on return.
+    #[allow(clippy::result_large_err)]
     async fn build_snapshot_impl(&self) -> Result<Snapshot<C>, StorageError<u64>> {
         let snap = self.store.snapshot().map_err(|e| sm_read_err(&e))?;
         let data = serde_json::to_vec(&snap).map_err(|e| sm_read_err(&e))?;
