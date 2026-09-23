@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use axum::extract::{Request, State};
+use axum::extract::{MatchedPath, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
@@ -14,30 +14,82 @@ use crate::state::AppState;
 /// Paths that skip bearer token authentication.
 const SKIP_AUTH_PATHS: &[&str] = &["/api/v1/health", "/api/v1/webhooks/github"];
 
-/// Map an API path + method to a required action for RBAC.
-fn required_action(path: &str, method: &str) -> &'static str {
-    match (method, path) {
-        ("POST", "/api/v1/deploy") => "deploy",
-        ("DELETE", p) if p.starts_with("/api/v1/services/") => "stop",
-        ("DELETE", p) if p.starts_with("/api/v1/projects/") => "stop",
-        ("POST", "/api/v1/stop") => "stop",
-        ("POST", p) if p.contains("/scale") => "scale",
-        ("POST", p) if p.contains("/rollback") => "rollback",
-        ("POST", p) if p.contains("/redeploy") => "deploy",
-        ("POST", p) if p.contains("/drain") => "deploy",
-        ("POST", p) if p.contains("/undrain") => "deploy",
-        ("POST", p) if p.contains("/register") => "deploy",
-        ("POST", p) if p.contains("/heartbeat") => "deploy",
-        ("GET", p) if p.contains("/logs") => "logs",
-        ("GET", "/api/v1/status") => "status",
-        ("GET", "/api/v1/cluster/info") => "cluster_info",
-        // Secrets are admin-only — they read and write encrypted material
-        // and viewer/deployer roles must not see the key list either.
-        ("GET", "/api/v1/secrets") => "secrets",
-        ("POST", p) if p.starts_with("/api/v1/secrets/") => "secrets",
-        ("DELETE", p) if p.starts_with("/api/v1/secrets/") => "secrets",
-        _ => "status", // default to viewer-level for unknown GETs
-    }
+/// The action no role but Admin holds.
+///
+/// [`Role::can`] grants Admin every action and the other roles only the
+/// actions they list, so this needs no special case there.
+const ADMIN_ONLY: &str = "admin";
+
+/// What each mounted route requires, keyed by method and route template
+/// (axum's [`MatchedPath`], e.g. `/api/v1/services/{name}/scale`).
+///
+/// This table is the single source of truth. A route missing from it is
+/// admin-only, so forgetting to classify a new route fails closed rather than
+/// silently granting viewer access (#202). `every_mounted_route_is_classified`
+/// checks it against the router source.
+const ROUTE_POLICY: &[(&str, &str, &str)] = &[
+    // --- read-only: viewer and up ---------------------------------------
+    ("GET", "/metrics", "status"),
+    ("GET", "/api/v1/status", "status"),
+    ("GET", "/api/v1/services/{name}/logs", "logs"),
+    ("GET", "/api/v1/cluster/info", "cluster_info"),
+    ("GET", "/api/v1/cluster/backups", "status"),
+    ("GET", "/api/v1/cluster/networks", "status"),
+    ("GET", "/api/v1/alerts", "status"),
+    ("GET", "/api/v1/alerts/{id}", "status"),
+    ("GET", "/api/v1/webhooks", "status"),
+    ("GET", "/api/v1/webhooks/{id}/invocations", "status"),
+    // Read-only, though each question spends LLM tokens.
+    ("POST", "/api/v1/ask", "status"),
+    // --- workload changes: deployer and up ------------------------------
+    ("POST", "/api/v1/deploy", "deploy"),
+    ("POST", "/api/v1/services/{name}/redeploy", "deploy"),
+    ("POST", "/api/v1/services/{name}/promote", "deploy"),
+    ("POST", "/api/v1/services/{name}/start", "deploy"),
+    ("POST", "/api/v1/services/{name}/scale", "scale"),
+    ("POST", "/api/v1/services/{name}/rollback", "rollback"),
+    ("DELETE", "/api/v1/services/{name}", "stop"),
+    ("DELETE", "/api/v1/projects/{project}", "stop"),
+    ("POST", "/api/v1/stop", "stop"),
+    // --- admin only -------------------------------------------------------
+    // Runs an arbitrary command inside any container.
+    ("GET", "/api/v1/services/{name}/exec", ADMIN_ONLY),
+    // Secret values, and the inventory of which keys exist and who uses them.
+    ("GET", "/api/v1/secrets", "secrets"),
+    ("GET", "/api/v1/secrets/usage", "secrets"),
+    ("POST", "/api/v1/secrets/{key}", "secrets"),
+    ("DELETE", "/api/v1/secrets/{key}", "secrets"),
+    // A registration decides what an unauthenticated push may redeploy.
+    ("POST", "/api/v1/webhooks", ADMIN_ONLY),
+    ("DELETE", "/api/v1/webhooks/{id}", ADMIN_ONLY),
+    // Cluster membership: a registered node can be scheduled workloads.
+    // `Role` documents drain as an admin action.
+    ("POST", "/api/v1/cluster/register", ADMIN_ONLY),
+    ("POST", "/api/v1/cluster/heartbeat", ADMIN_ONLY),
+    ("POST", "/api/v1/cluster/nodes/{node_id}/drain", ADMIN_ONLY),
+    (
+        "POST",
+        "/api/v1/cluster/nodes/{node_id}/undrain",
+        ADMIN_ONLY,
+    ),
+    ("POST", "/api/v1/cluster/backups/trigger", ADMIN_ONLY),
+    ("POST", "/api/v1/alerts/{id}/reply", ADMIN_ONLY),
+    ("POST", "/api/v1/alerts/{id}/dismiss", ADMIN_ONLY),
+    ("POST", "/api/v1/alerts/{id}/resolve", ADMIN_ONLY),
+];
+
+/// The action a request needs, from its method and matched route template.
+///
+/// `template` is `None` when no route matched (the fallback), which is also
+/// admin-only: an unknown path must not be a way around the table.
+fn required_action(method: &str, template: Option<&str>) -> &'static str {
+    template
+        .and_then(|t| {
+            ROUTE_POLICY
+                .iter()
+                .find(|(m, p, _)| *m == method && *p == t)
+        })
+        .map_or(ADMIN_ONLY, |(_, _, action)| action)
 }
 
 /// Compare a presented token with a configured one without an early exit on
@@ -113,15 +165,18 @@ pub async fn auth_middleware(
         return (StatusCode::UNAUTHORIZED, "invalid bearer token").into_response();
     };
 
-    let method = request.method().as_str().to_string();
-    let action = required_action(&path, &method);
+    let template = request
+        .extensions()
+        .get::<MatchedPath>()
+        .map(|m| m.as_str().to_owned());
+    let action = required_action(request.method().as_str(), template.as_deref());
     if role.can(action) {
         return next.run(request).await;
     }
     (
         StatusCode::FORBIDDEN,
         format!(
-            "role '{}' cannot perform '{}' (requires admin or deployer)",
+            "role '{}' may not perform '{}' on this route",
             serde_json::to_string(&role).unwrap_or_default(),
             action
         ),
@@ -130,56 +185,5 @@ pub async fn auth_middleware(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn deploy_requires_deploy_action() {
-        assert_eq!(required_action("/api/v1/deploy", "POST"), "deploy");
-    }
-
-    #[test]
-    fn redeploy_requires_deploy_action() {
-        assert_eq!(
-            required_action("/api/v1/services/nginx/redeploy", "POST"),
-            "deploy"
-        );
-    }
-
-    #[test]
-    fn rollback_requires_rollback_action() {
-        assert_eq!(
-            required_action("/api/v1/services/nginx/rollback", "POST"),
-            "rollback"
-        );
-    }
-
-    #[test]
-    fn scale_requires_scale_action() {
-        assert_eq!(
-            required_action("/api/v1/services/nginx/scale", "POST"),
-            "scale"
-        );
-    }
-
-    #[test]
-    fn stop_service_requires_stop_action() {
-        assert_eq!(required_action("/api/v1/services/nginx", "DELETE"), "stop");
-    }
-
-    #[test]
-    fn status_requires_status_action() {
-        assert_eq!(required_action("/api/v1/status", "GET"), "status");
-    }
-
-    #[test]
-    fn secrets_requires_secrets_action() {
-        assert_eq!(required_action("/api/v1/secrets", "GET"), "secrets");
-        assert_eq!(required_action("/api/v1/secrets/MY_KEY", "POST"), "secrets");
-    }
-
-    #[test]
-    fn unknown_path_defaults_to_status() {
-        assert_eq!(required_action("/unknown/path", "GET"), "status");
-    }
-}
+#[path = "auth_tests.rs"]
+mod tests;
