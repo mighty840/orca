@@ -65,7 +65,7 @@ async fn dispatch_agent_backups(state: &AppState, config: &BackupConfig) {
     for (node_id, tx) in agents.iter() {
         if let Err(e) = tx
             .send(MasterMessage::BackupRequest {
-                config: config.clone(),
+                config: Box::new(config.clone()),
                 service_hooks: service_hooks.clone(),
             })
             .await
@@ -182,6 +182,7 @@ mod tests {
         use orca_core::backup::BackupTarget;
 
         let config = BackupConfig {
+            age_recipients: Vec::new(),
             schedule: Some("0 0 2 * * *".to_string()),
             retention_days: 7,
             targets: vec![BackupTarget::Local {
@@ -202,6 +203,7 @@ mod tests {
     #[test]
     fn test_invalid_schedule_returns_none() {
         let config = BackupConfig {
+            age_recipients: Vec::new(),
             schedule: Some("not a cron".to_string()),
             retention_days: 30,
             targets: vec![],
@@ -214,6 +216,7 @@ mod tests {
     #[test]
     fn test_no_schedule_returns_none() {
         let config = BackupConfig {
+            age_recipients: Vec::new(),
             schedule: None,
             retention_days: 30,
             targets: vec![],
@@ -263,6 +266,7 @@ mod tests {
         }
 
         let config = BackupConfig {
+            age_recipients: Vec::new(),
             schedule: Some("0 0 2 * * *".to_string()),
             retention_days: 7,
             targets: vec![],
@@ -287,6 +291,7 @@ mod tests {
     async fn dispatch_agent_backups_noop_when_no_agents() {
         let state = make_test_state();
         let config = BackupConfig {
+            age_recipients: Vec::new(),
             schedule: None,
             retention_days: 30,
             targets: vec![],
@@ -303,6 +308,7 @@ mod tests {
         use orca_core::backup::BackupTarget;
 
         let config = BackupConfig {
+            age_recipients: Vec::new(),
             schedule: Some("0 0 3 * * *".to_string()),
             retention_days: 7,
             targets: vec![BackupTarget::Local {

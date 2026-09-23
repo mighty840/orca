@@ -111,6 +111,7 @@ mod tests {
     fn backup_config_json_roundtrip() {
         use orca_core::backup::{BackupConfig, BackupTarget};
         let cfg = BackupConfig {
+            age_recipients: Vec::new(),
             schedule: Some("0 0 2 * * *".into()),
             retention_days: 14,
             targets: vec![BackupTarget::Local {

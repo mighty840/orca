@@ -90,7 +90,9 @@ pub enum MasterMessage {
         follow: bool,
     },
     BackupRequest {
-        config: BackupConfig,
+        /// Boxed to keep `MasterMessage` small; serde encodes it exactly
+        /// like the unboxed value, so the wire format is unchanged.
+        config: Box<BackupConfig>,
         /// service_name → pre_hook shell command, populated from ServiceConfig.backup.
         #[serde(default)]
         service_hooks: HashMap<String, String>,
