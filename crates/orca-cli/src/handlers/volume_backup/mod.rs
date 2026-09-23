@@ -3,6 +3,7 @@
 mod bind_archive;
 mod bind_mounts;
 mod helpers;
+mod volume_owner;
 
 use bollard::Docker;
 use helpers::{
@@ -44,31 +45,53 @@ async fn attempt_backup(backup_cfg: &orca_core::backup::BackupConfig) {
         println!("No orca volumes found.");
     } else {
         let hooks = load_service_hooks();
+        let owners = volume_owner::volume_owners(&docker).await;
 
         println!("Backing up {} volume(s) to {}", volumes.len(), backup_dir);
         let mut count = 0u32;
+        let mut hooks_run = 0u32;
+        let mut hook_failed: Vec<String> = Vec::new();
 
         for vol in &volumes {
             print!("  {vol} ... ");
-            // Volume name is "orca-{service_name}" — derive service name for hook lookup.
-            let service_name = vol.strip_prefix("orca-").unwrap_or(vol.as_str());
-            if let Some(hook) = hooks.get(service_name) {
+            // The owning service comes from the container that mounts the
+            // volume (#198): volumes are `orca-<service>-data`, so stripping
+            // only `orca-` never matched a hook key.
+            let service_name = volume_owner::service_for(vol, &owners);
+            if let Some(hook) = hooks.get(&service_name) {
                 let container = format!("orca-{service_name}");
-                if let Err(e) = run_pre_hook(&docker, &container, hook).await {
-                    println!("FAILED (pre-hook): {e}");
-                    continue;
+                match run_pre_hook(&docker, &container, hook).await {
+                    Ok(()) => hooks_run += 1,
+                    Err(e) => {
+                        // No fresh dump. Still take the raw copy (better than
+                        // nothing), but the volume counts as failed.
+                        print!("pre-hook FAILED ({e:#}), raw copy only ... ");
+                        hook_failed.push(vol.clone());
+                    }
                 }
             }
             match run_backup_container(&docker, vol, &backup_dir).await {
                 Ok(()) => {
                     println!("done");
-                    count += 1;
+                    if !hook_failed.contains(vol) {
+                        count += 1;
+                    }
                 }
                 Err(e) => println!("FAILED: {e}"),
             }
         }
 
-        println!("Volume backup complete: {count}/{} volumes.", volumes.len());
+        println!(
+            "Volume backup complete: {count}/{} volumes, {hooks_run} pre-hook(s) run.",
+            volumes.len()
+        );
+        if !hook_failed.is_empty() {
+            println!(
+                "WARNING: pre-hook failed for {}: those tarballs are raw copies of live \
+                 data, not a reliable database backup.",
+                hook_failed.join(", ")
+            );
+        }
 
         upload_volumes_to_s3(backup_cfg, &volumes, &backup_dir);
     }
@@ -183,14 +206,28 @@ async fn run_pre_hook(docker: &Docker, container: &str, hook: &str) -> anyhow::R
         )
         .await?;
 
+    let mut text = String::new();
     if let StartExecResults::Attached { mut output, .. } = docker.start_exec(&exec.id, None).await?
     {
-        while output.next().await.is_some() {}
+        while let Some(Ok(chunk)) = output.next().await {
+            text.push_str(&chunk.to_string());
+        }
     }
 
     let inspect = docker.inspect_exec(&exec.id).await?;
     let code = inspect.exit_code.unwrap_or(-1);
-    anyhow::ensure!(code == 0, "pre-hook exited with code {code}");
+    // Keep the tail of the hook's output: "exit code 1" alone says nothing
+    // about a wrong password or a missing binary.
+    let tail: String = text
+        .trim()
+        .chars()
+        .rev()
+        .take(300)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    anyhow::ensure!(code == 0, "pre-hook exited with code {code}: {tail}");
     Ok(())
 }
 
