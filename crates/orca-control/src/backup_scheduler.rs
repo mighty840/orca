@@ -101,6 +101,9 @@ pub(crate) async fn run_master_backup(state: &Arc<AppState>, config: &BackupConf
     // to pass none, so only agents could ever run one.
     let hooks = collect_service_hooks(state).await;
     let (success, message) = invoke_subprocess(config, &hooks).await;
+    if !success {
+        crate::alerts::alert_backup_failure(state, "master", &message).await;
+    }
     let result = orca_core::api_types::LastBackupResult {
         success,
         message,
@@ -139,9 +142,8 @@ async fn invoke_subprocess(
     {
         Ok(out) if out.status.success() => {
             // The subprocess intermixes tracing (with ANSI colors) and plain
-            // `println!` summaries on stdout. The last non-empty line is
-            // always the human-readable summary (e.g. "Backup complete: 2
-            // file(s)."); take that and we don't have to scrub colors.
+            // `println!` output on stdout. The last non-empty line is always
+            // the run's summary (#197: "Backup OK: volumes 31/31 …").
             let stdout = String::from_utf8_lossy(&out.stdout);
             let msg = last_non_empty_line(&stdout)
                 .unwrap_or("backup complete")
@@ -150,8 +152,14 @@ async fn invoke_subprocess(
             (true, msg)
         }
         Ok(out) => {
+            // Since #197 a failed run still prints its summary ("Backup
+            // FAILED (n): …") as the last stdout line; stderr is the fallback
+            // for a run that died before summarizing.
+            let stdout = String::from_utf8_lossy(&out.stdout);
             let stderr = String::from_utf8_lossy(&out.stderr);
-            let msg = last_non_empty_line(&stderr)
+            let msg = last_non_empty_line(&stdout)
+                .filter(|l| l.starts_with("Backup FAILED"))
+                .or_else(|| last_non_empty_line(&stderr))
                 .unwrap_or("backup failed (no error message)")
                 .to_string();
             error!("Master backup failed: {msg}");

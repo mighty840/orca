@@ -185,10 +185,10 @@ pub(crate) fn report(out: &Outcome) {
     for name in &out.failed {
         eprintln!("ERROR: backup of {name} failed (see log above)");
     }
+    // No "Backup complete" line here: the run's summary (#197) is printed
+    // last by the caller and covers volumes too.
     if out.stored.is_empty() {
-        println!("No files found to backup.");
-    } else {
-        println!("Backup complete: {} file(s).", out.stored.len());
+        println!("No config files found to back up.");
     }
 }
 

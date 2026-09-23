@@ -33,6 +33,38 @@ impl<B: LlmBackend> ConversationEngine<B> {
         }
     }
 
+    /// Open an alert with a fixed message and no LLM call, for failures
+    /// orca detects deterministically (a failed backup, #197). Delivery must
+    /// not depend on the model endpoint being up: that's the #181 failure mode.
+    pub async fn open_system_alert(
+        &mut self,
+        service: &str,
+        severity: AlertSeverity,
+        message: &str,
+    ) -> &AlertConversation {
+        let conversation = AlertConversation {
+            id: Uuid::now_v7(),
+            service: service.to_string(),
+            severity,
+            state: AlertState::Investigating,
+            started_at: Utc::now(),
+            resolved_at: None,
+            messages: vec![AlertMessage {
+                timestamp: Utc::now(),
+                sender: AlertSender::System,
+                content: message.to_string(),
+                suggested_command: None,
+            }],
+        };
+        let id = conversation.id;
+        self.conversations.push(conversation);
+        self.dispatch_for(id, AlertEvent::Opened).await;
+        self.conversations
+            .iter()
+            .find(|c| c.id == id)
+            .expect("just pushed")
+    }
+
     /// Start a new alert conversation. The AI opens with its initial diagnosis.
     pub async fn open_alert(
         &mut self,
