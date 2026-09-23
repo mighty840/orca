@@ -6,6 +6,8 @@ use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use orca_core::config::Role;
+use subtle::ConstantTimeEq;
 
 use crate::state::AppState;
 
@@ -36,6 +38,36 @@ fn required_action(path: &str, method: &str) -> &'static str {
         ("DELETE", p) if p.starts_with("/api/v1/secrets/") => "secrets",
         _ => "status", // default to viewer-level for unknown GETs
     }
+}
+
+/// Compare a presented token with a configured one without an early exit on
+/// the first differing byte.
+///
+/// Length is not hidden (lengths are compared first), which is acceptable:
+/// a token's length is not secret, only its contents are.
+fn ct_eq(presented: &str, configured: &str) -> bool {
+    presented.as_bytes().ct_eq(configured.as_bytes()).into()
+}
+
+/// The role a presented token grants, or `None` if it grants nothing.
+///
+/// Legacy `api_tokens` grant admin; `[[token]]` entries grant their named
+/// role. Shared by the HTTP middleware and the agent WebSocket so both answer
+/// "who is this?" identically. An empty token never authenticates, even if an
+/// empty string was configured by mistake.
+pub(crate) fn resolve_token(state: &AppState, token: &str) -> Option<Role> {
+    if token.is_empty() {
+        return None;
+    }
+    if state.api_tokens.iter().any(|t| ct_eq(token, t)) {
+        return Some(Role::Admin);
+    }
+    state
+        .cluster_config
+        .token
+        .iter()
+        .find(|t| ct_eq(token, &t.value))
+        .map(|t| t.role)
 }
 
 /// Axum middleware that validates bearer tokens and checks RBAC roles.
@@ -72,30 +104,24 @@ pub async fn auth_middleware(
         _ => return (StatusCode::UNAUTHORIZED, "missing bearer token").into_response(),
     };
 
-    // Check legacy tokens first (all treated as admin)
-    if legacy_tokens.iter().any(|t| t == token) {
+    let Some(role) = resolve_token(&state, token) else {
+        return (StatusCode::UNAUTHORIZED, "invalid bearer token").into_response();
+    };
+
+    let method = request.method().as_str().to_string();
+    let action = required_action(&path, &method);
+    if role.can(action) {
         return next.run(request).await;
     }
-
-    // Check named tokens with RBAC
-    let method = request.method().as_str().to_string();
-    if let Some(api_token) = named_tokens.iter().find(|t| t.value == token) {
-        let action = required_action(&path, &method);
-        if api_token.role.can(action) {
-            return next.run(request).await;
-        }
-        return (
-            StatusCode::FORBIDDEN,
-            format!(
-                "role '{}' cannot perform '{}' (requires admin or deployer)",
-                serde_json::to_string(&api_token.role).unwrap_or_default(),
-                action
-            ),
-        )
-            .into_response();
-    }
-
-    (StatusCode::UNAUTHORIZED, "invalid bearer token").into_response()
+    (
+        StatusCode::FORBIDDEN,
+        format!(
+            "role '{}' cannot perform '{}' (requires admin or deployer)",
+            serde_json::to_string(&role).unwrap_or_default(),
+            action
+        ),
+    )
+        .into_response()
 }
 
 #[cfg(test)]
