@@ -1,9 +1,9 @@
 //! Docker volume backup and restore using bollard.
 
+mod bind_archive;
 mod bind_mounts;
 mod helpers;
 
-use bind_mounts::warn_unbacked_bind_mounts;
 use bollard::Docker;
 use helpers::{
     create_backup_dir, find_latest_backup_dir, list_orca_volumes, prune_old_backup_dirs,
@@ -73,11 +73,46 @@ async fn attempt_backup(backup_cfg: &orca_core::backup::BackupConfig) {
         upload_volumes_to_s3(backup_cfg, &volumes, &backup_dir);
     }
 
-    // Warn about host bind mounts, which the volume backup above does not
-    // capture (#83). Run this even when there are no named volumes — a service
-    // can have bind mounts and no volume, exactly the case that previously
-    // exited silently with "No orca volumes found."
-    warn_unbacked_bind_mounts(&docker).await;
+    // Host bind mounts (#185; #83 only warned). Run this even when there are
+    // no named volumes: a service can have bind mounts and no volume.
+    backup_bind_mounts(&docker, backup_cfg, &backup_dir).await;
+}
+
+/// Archive bind-mount sources into this snapshot and upload them. The
+/// summary is printed last, so it becomes the run's reported message.
+async fn backup_bind_mounts(
+    docker: &Docker,
+    cfg: &orca_core::backup::BackupConfig,
+    backup_dir: &str,
+) {
+    let mounts = bind_mounts::list_unbacked_bind_mounts(docker).await;
+    if mounts.is_empty() {
+        return;
+    }
+    let max_bytes = cfg.bind_mount_max_mb.saturating_mul(1024 * 1024);
+    match bind_archive::archive(&mounts, std::path::Path::new(backup_dir), max_bytes) {
+        Ok((entries, archive)) => {
+            for e in entries.iter().filter(|e| e.decision.is_gap()) {
+                println!(
+                    "WARNING: NOT backed up: {} ({:?}), mounted by {}",
+                    e.host_path,
+                    e.decision,
+                    e.mounted_by.join(", ")
+                );
+            }
+            if let Some(path) = archive {
+                match bind_archive::store(cfg, &path, &node_hostname()) {
+                    Ok(stored) => println!("Bind mounts archived to {}", stored.display()),
+                    Err(e) => println!("WARNING: storing the bind-mount archive failed: {e:#}"),
+                }
+            }
+            println!("{}", bind_archive::summary(&entries));
+        }
+        Err(e) => println!(
+            "WARNING: bind-mount archive failed ({e:#}): {} bind mount(s) NOT backed up",
+            mounts.len()
+        ),
+    }
 }
 
 /// Upload each volume tarball from a completed local backup to all S3 targets.
@@ -248,6 +283,7 @@ mod tests {
         use orca_core::backup::{BackupConfig, BackupTarget};
         let config = BackupConfig {
             age_recipients: Vec::new(),
+            bind_mount_max_mb: 512,
             schedule: None,
             retention_days: 7,
             targets: vec![BackupTarget::Local {
@@ -267,6 +303,7 @@ mod tests {
         use orca_core::backup::{BackupConfig, BackupTarget};
         let config = BackupConfig {
             age_recipients: Vec::new(),
+            bind_mount_max_mb: 512,
             schedule: None,
             retention_days: 7,
             targets: vec![BackupTarget::S3 {
