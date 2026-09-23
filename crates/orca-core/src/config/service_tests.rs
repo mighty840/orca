@@ -174,6 +174,24 @@ fn spec_matches_detects_restart_policy_change() {
 }
 
 #[test]
+fn spec_matches_detects_resource_limit_change() {
+    // A CPU/memory bump (e.g. Nextcloud's DB from 1 to 2 CPUs) was ignored:
+    // the reconciler saw "same spec" and never applied it.
+    let a = base_config();
+    let mut b = base_config();
+    b.resources = Some(crate::types::ResourceLimits {
+        memory: Some("1Gi".into()),
+        cpu: Some(2.0),
+        gpu: None,
+    });
+    assert!(!a.spec_matches(&b));
+    let mut c = b.clone();
+    assert!(b.spec_matches(&c));
+    c.resources.as_mut().unwrap().cpu = Some(1.0);
+    assert!(!b.spec_matches(&c));
+}
+
+#[test]
 fn validate_allows_network_equal_to_name() {
     // #89: the collision is legal (prod runs several such services,
     // including agent-pinned ones) — the breadcrumb is a load-time

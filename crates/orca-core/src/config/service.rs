@@ -252,6 +252,9 @@ impl ServiceConfig {
             && self.restart_policy == other.restart_policy
             && self.internal == other.internal
             && self.health == other.health
+            // Resource limits are container settings: a changed CPU or memory
+            // cap must recreate the container like any other spec change.
+            && self.resources == other.resources
     }
 }
 
