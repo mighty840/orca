@@ -2991,6 +2991,7 @@ dependencies = [
  "dirs-next",
  "futures-util",
  "orca-core",
+ "proptest",
  "reqwest",
  "serde",
  "serde_json",
