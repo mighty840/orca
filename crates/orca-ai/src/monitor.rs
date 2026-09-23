@@ -1,14 +1,15 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::sync::RwLock;
 use tracing::{info, warn};
 
-use crate::backend::LlmBackend;
+use crate::backend::{LLM_TIMEOUT, LlmBackend};
+use crate::channels::AlertEvent;
 use crate::context::ClusterContext;
 use crate::conversation::ConversationEngine;
-use orca_core::types::AlertSeverity;
+use crate::monitor_plan::plan_alerts;
 
 /// The AI monitor runs as a background task. It periodically checks cluster health,
 /// detects anomalies, and opens/updates conversational alerts.
@@ -29,6 +30,8 @@ pub struct AiMonitor<B: LlmBackend> {
     /// it recovers, so the grace clock restarts per outage. Interior-mutable so
     /// the monitor loop keeps a `&self` API.
     down_since: Mutex<HashMap<String, Instant>>,
+    /// Deadline for one diagnosis; the alert goes out without it after this.
+    llm_timeout: Duration,
 }
 
 impl<B: LlmBackend> AiMonitor<B> {
@@ -42,7 +45,14 @@ impl<B: LlmBackend> AiMonitor<B> {
             analysis_interval: Duration::from_secs(analysis_interval_secs),
             down_grace: Duration::from_secs(alert_grace_secs),
             down_since: Mutex::new(HashMap::new()),
+            llm_timeout: LLM_TIMEOUT,
         }
+    }
+
+    /// Override the diagnosis deadline (tests use a short one).
+    pub fn with_llm_timeout(mut self, timeout: Duration) -> Self {
+        self.llm_timeout = timeout;
+        self
     }
 
     /// Start the monitoring loop. Call this from the control plane as a background task.
@@ -68,214 +78,82 @@ impl<B: LlmBackend> AiMonitor<B> {
         }
     }
 
+    /// One monitoring pass (#181). The engine lock is only held for brief,
+    /// I/O-free steps (plan, record). The model call and alert delivery run
+    /// without it, so `orca alerts` and the TUI never wait on a slow model.
+    /// Every alert is handled independently: one failure never skips the rest.
     async fn analyze_cycle(&self, ctx: &ClusterContext) -> anyhow::Result<()> {
         let now = Instant::now();
-        let mut engine = self.engine.write().await;
 
-        // Check each service for anomalies
-        for svc in &ctx.services {
-            // Service down — but debounce transient deploy/rollout blips. A
-            // webhook deploy briefly drops replicas to 0; we only page once the
-            // outage has outlasted `down_grace`, so a normal rollout never opens
-            // (and then auto-remediates) an alert.
-            if svc.replicas_running == 0 && svc.replicas_desired > 0 {
-                let down_for = {
-                    let mut down_since = self.down_since.lock().expect("down_since lock poisoned");
-                    let since = down_since.entry(svc.name.clone()).or_insert(now);
-                    now.saturating_duration_since(*since)
+        // 1. Plan under a short read lock.
+        let (requests, resolved, backend, dispatcher) = {
+            let engine = self.engine.read().await;
+            let active: HashSet<String> = engine
+                .active_conversations()
+                .iter()
+                .map(|c| c.service.clone())
+                .collect();
+            let requests = {
+                let mut down_since = self.down_since.lock().expect("down_since lock poisoned");
+                plan_alerts(ctx, now, self.down_grace, &mut down_since, &active)
+            };
+            let resolved: Vec<_> = engine
+                .active_conversations()
+                .iter()
+                .filter(|conv| {
+                    ctx.services.iter().any(|svc| {
+                        svc.name == conv.service
+                            && svc.replicas_running == svc.replicas_desired
+                            && svc.error_count_1h == 0
+                            && svc.restart_count_24h < 3
+                    })
+                })
+                .map(|c| c.id)
+                .collect();
+            (requests, resolved, engine.backend(), engine.dispatcher())
+        };
+
+        for req in requests {
+            info!(
+                "Opening alert conversation for {}: {:?}",
+                req.service, req.severity
+            );
+            // 2. Ask the model, with no lock held and a hard deadline.
+            let prompt = ConversationEngine::<B>::open_prompt(&req.service, &req.trigger, ctx);
+            let diagnosis =
+                match tokio::time::timeout(self.llm_timeout, backend.chat(&prompt)).await {
+                    Ok(Ok(r)) => Ok(r.content),
+                    Ok(Err(e)) => Err(format!("{e:#}")),
+                    Err(_) => Err(format!("no answer within {:?}", self.llm_timeout)),
                 };
-
-                if down_for < self.down_grace {
-                    info!(
-                        "Service '{}' has 0/{} replicas but only down {}s (< {}s grace) — deferring alert (likely a deploy)",
-                        svc.name,
-                        svc.replicas_desired,
-                        down_for.as_secs(),
-                        self.down_grace.as_secs()
-                    );
-                } else {
-                    let already_tracking = engine
-                        .active_conversations()
-                        .iter()
-                        .any(|c| c.service == svc.name);
-
-                    if !already_tracking {
-                        info!(
-                            "Opening alert conversation for {}: no running replicas for {}s",
-                            svc.name,
-                            down_for.as_secs()
-                        );
-                        engine
-                            .open_alert(
-                                &svc.name,
-                                AlertSeverity::Critical,
-                                &format!(
-                                    "Service '{}' has 0/{} replicas running. Restarts in 24h: {}. Recent errors: {}",
-                                    svc.name, svc.replicas_desired, svc.restart_count_24h, svc.error_count_1h
-                                ),
-                                ctx,
-                            )
-                            .await?;
-                    }
-                }
-            } else {
-                // Recovered or scaled up — reset the grace clock so the next
-                // outage measures from its own start, not a stale timestamp.
-                self.down_since
-                    .lock()
-                    .expect("down_since lock poisoned")
-                    .remove(&svc.name);
+            if let Err(reason) = &diagnosis {
+                warn!(
+                    "AI diagnosis for {} unavailable, alerting without it: {reason}",
+                    req.service
+                );
             }
-
-            // High restart count (crash-looping)
-            if svc.restart_count_24h > 10 && svc.replicas_running > 0 {
-                let already_tracking = engine
-                    .active_conversations()
-                    .iter()
-                    .any(|c| c.service == svc.name);
-
-                if !already_tracking {
-                    info!("Opening alert conversation for {}: crash-looping", svc.name);
-                    engine
-                        .open_alert(
-                            &svc.name,
-                            AlertSeverity::Warning,
-                            &format!(
-                                "Service '{}' has restarted {} times in the last 24 hours. \
-                                 Currently {}/{} replicas are running.",
-                                svc.name,
-                                svc.restart_count_24h,
-                                svc.replicas_running,
-                                svc.replicas_desired
-                            ),
-                            ctx,
-                        )
-                        .await?;
-                }
-            }
-
-            // High error rate
-            if svc.error_count_1h > 100 {
-                let already_tracking = engine
-                    .active_conversations()
-                    .iter()
-                    .any(|c| c.service == svc.name);
-
-                if !already_tracking {
-                    info!(
-                        "Opening alert conversation for {}: high error rate",
-                        svc.name
-                    );
-                    engine
-                        .open_alert(
-                            &svc.name,
-                            AlertSeverity::Warning,
-                            &format!(
-                                "Service '{}' has {} errors in the last hour. Recent log lines:\n{}",
-                                svc.name,
-                                svc.error_count_1h,
-                                svc.recent_logs.iter().take(5).cloned().collect::<Vec<_>>().join("\n")
-                            ),
-                            ctx,
-                        )
-                        .await?;
-                }
+            // 3. Record under a brief write lock; 4. deliver without it.
+            let snapshot = self.engine.write().await.record_open(
+                &req.service,
+                req.severity,
+                &req.trigger,
+                diagnosis,
+            );
+            if let Some(conv) = snapshot {
+                dispatcher.dispatch(&conv, AlertEvent::Opened).await;
             }
         }
 
-        // Drop grace timers for services no longer in the cluster (pruned while
-        // down) so the map can't grow unbounded.
-        {
-            let live: std::collections::HashSet<&str> =
-                ctx.services.iter().map(|s| s.name.as_str()).collect();
-            self.down_since
-                .lock()
-                .expect("down_since lock poisoned")
-                .retain(|name, _| live.contains(name.as_str()));
-        }
-
-        // Check nodes for GPU issues
-        for node in &ctx.nodes {
-            for gpu in &node.gpu_summary {
-                if let Some(temp) = gpu.temperature
-                    && temp > 90.0
-                {
-                    let alert_name = format!("node-{}-gpu-{}", node.id, gpu.index);
-                    let already_tracking = engine
-                        .active_conversations()
-                        .iter()
-                        .any(|c| c.service == alert_name);
-
-                    if !already_tracking {
-                        info!("Opening alert conversation for GPU thermal: {alert_name}");
-                        engine
-                            .open_alert(
-                                &alert_name,
-                                AlertSeverity::Warning,
-                                &format!(
-                                    "GPU {} on node {} ({}) temperature is {:.0}C (>90C threshold). \
-                                     Utilization: {:.0}%, VRAM: {}/{}MB",
-                                    gpu.index, node.id, gpu.model, temp,
-                                    gpu.utilization, gpu.vram_used_mb, gpu.vram_total_mb
-                                ),
-                                ctx,
-                            )
-                            .await?;
-                    }
-                }
-
-                // GPU VRAM nearly full
-                if gpu.vram_total_mb > 0 {
-                    let usage_pct = (gpu.vram_used_mb as f64 / gpu.vram_total_mb as f64) * 100.0;
-                    if usage_pct > 95.0 {
-                        let alert_name = format!("node-{}-gpu-{}-vram", node.id, gpu.index);
-                        let already_tracking = engine
-                            .active_conversations()
-                            .iter()
-                            .any(|c| c.service == alert_name);
-
-                        if !already_tracking {
-                            engine
-                                .open_alert(
-                                    &alert_name,
-                                    AlertSeverity::Warning,
-                                    &format!(
-                                        "GPU {} on node {} VRAM is {:.0}% full ({}/{}MB). \
-                                         Workloads may OOM.",
-                                        gpu.index,
-                                        node.id,
-                                        usage_pct,
-                                        gpu.vram_used_mb,
-                                        gpu.vram_total_mb
-                                    ),
-                                    ctx,
-                                )
-                                .await?;
-                        }
-                    }
-                }
+        for id in resolved {
+            let snapshot = self
+                .engine
+                .write()
+                .await
+                .record_remediated(id, "Issue self-resolved — metrics returned to normal");
+            if let Some(conv) = snapshot {
+                dispatcher.dispatch(&conv, AlertEvent::Remediated).await;
             }
         }
-
-        // Update existing conversations with fresh context
-        let active_ids: Vec<_> = engine.active_conversations().iter().map(|c| c.id).collect();
-
-        for id in active_ids {
-            // Check if the issue self-resolved
-            if let Some(conv) = engine.get_conversation(id) {
-                let svc_name = conv.service.clone();
-                if let Some(svc) = ctx.services.iter().find(|s| s.name == svc_name)
-                    && svc.replicas_running == svc.replicas_desired
-                    && svc.error_count_1h == 0
-                    && svc.restart_count_24h < 3
-                {
-                    engine
-                        .mark_remediated(id, "Issue self-resolved — metrics returned to normal")
-                        .await;
-                }
-            }
-        }
-
         Ok(())
     }
 }
@@ -382,3 +260,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "monitor_resilience_tests.rs"]
+mod resilience_tests;
