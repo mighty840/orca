@@ -275,7 +275,7 @@ async fn handle_master_message(
             info!("WS: backup request received");
             let tx = out_tx.clone();
             tokio::spawn(async move {
-                run_agent_backup(node_id, config, service_hooks, tx).await;
+                run_agent_backup(node_id, *config, service_hooks, tx).await;
             });
         }
         MasterMessage::BackupStatusRequest { request_id } => {

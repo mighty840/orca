@@ -14,6 +14,15 @@ pub struct BackupConfig {
     /// Where to store backups.
     #[serde(default)]
     pub targets: Vec<BackupTarget>,
+
+    /// age public keys (`age1…`). When set, every config artifact
+    /// (`cluster.toml`, `secrets.json`, `master.key`, `webhooks.json`, TLS
+    /// certificates, …) is encrypted to them before it is stored or uploaded
+    /// (#117, #199). Keep the matching private key out of band. When empty,
+    /// artifacts that hold key material are left out rather than stored in
+    /// the clear.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub age_recipients: Vec<String>,
 }
 
 fn default_retention_days() -> u32 {

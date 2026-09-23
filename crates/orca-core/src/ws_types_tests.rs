@@ -246,11 +246,12 @@ fn backup_status_report_roundtrip() {
 #[test]
 fn backup_request_service_hooks_default_empty() {
     let msg = MasterMessage::BackupRequest {
-        config: BackupConfig {
+        config: Box::new(BackupConfig {
+            age_recipients: Vec::new(),
             schedule: None,
             retention_days: 30,
             targets: vec![],
-        },
+        }),
         service_hooks: HashMap::new(),
     };
     let json = serde_json::to_string(&msg).unwrap();

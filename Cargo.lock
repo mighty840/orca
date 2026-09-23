@@ -2680,6 +2680,7 @@ dependencies = [
 name = "mallorca"
 version = "0.3.0-rc.1"
 dependencies = [
+ "age",
  "anyhow",
  "base64 0.22.1",
  "bollard",

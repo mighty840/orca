@@ -82,55 +82,8 @@ fn handle_basic(mgr: &BackupManager) {
     let date = chrono::Utc::now().format("%Y-%m-%d");
     let prefix = format!("master/{date}");
     let home = dirs_next::home_dir();
-
-    // Each entry: (backup name, candidate paths in priority order)
-    let mut candidates: Vec<(&str, Vec<std::path::PathBuf>)> = Vec::new();
-
-    // cluster.db lives exclusively at ~/.orca/cluster.db
-    if let Some(ref h) = home {
-        candidates.push(("cluster-db", vec![h.join(".orca/cluster.db")]));
-    }
-
-    // secrets.json: ~/.orca/secrets.json, then ./secrets.json
-    {
-        let mut paths = Vec::new();
-        if let Some(ref h) = home {
-            paths.push(h.join(".orca/secrets.json"));
-        }
-        paths.push(std::path::PathBuf::from("secrets.json"));
-        candidates.push(("secrets", paths));
-    }
-
-    // cluster.toml: ~/orca/cluster.toml, ~/.orca/cluster.toml, ./cluster.toml
-    {
-        let mut paths = Vec::new();
-        if let Some(ref h) = home {
-            paths.push(h.join("orca/cluster.toml"));
-            paths.push(h.join(".orca/cluster.toml"));
-        }
-        paths.push(std::path::PathBuf::from("cluster.toml"));
-        candidates.push(("cluster", paths));
-    }
-
-    let mut count = 0u32;
-    for (name, paths) in &candidates {
-        let found = paths.iter().find(|p| p.exists());
-        match found {
-            Some(path) => match mgr.backup_file(name, path, &prefix) {
-                Ok(()) => {
-                    println!("Backed up: {}", path.display());
-                    count += 1;
-                }
-                Err(e) => tracing::error!("Failed to backup {name}: {e}"),
-            },
-            None => tracing::debug!("Skipping {name}: not found in any candidate path"),
-        }
-    }
-    if count == 0 {
-        println!("No files found to backup.");
-    } else {
-        println!("Backup complete: {count} file(s).");
-    }
+    let outcome = super::backup_files::run(mgr, home.as_deref(), &prefix);
+    super::backup_files::report(&outcome);
 }
 
 fn handle_list(mgr: &BackupManager, backup_cfg: &BackupConfig) {
@@ -283,9 +236,11 @@ fn restore_basic(config: &BackupConfig) {
             let mut matches: Vec<_> = entries
                 .flatten()
                 .filter(|e| {
+                    // `<name>_`, not just `<name>`: "cluster" must not match
+                    // "cluster-db_…" and restore the database as cluster.toml.
                     e.file_name()
                         .to_str()
-                        .map(|n| n.starts_with(prefix) && n.contains('_'))
+                        .map(|n| n.starts_with(&format!("{prefix}_")))
                         .unwrap_or(false)
                 })
                 .collect();
@@ -296,6 +251,21 @@ fn restore_basic(config: &BackupConfig) {
             println!("No backup found for {dest}");
             continue;
         };
+        // Encrypted artifacts (#199) need the age identity, which restore
+        // doesn't handle yet (#200). Never copy ciphertext over the live file.
+        if entry
+            .file_name()
+            .to_string_lossy()
+            .ends_with(orca_core::backup::encrypt::AGE_SUFFIX)
+        {
+            eprintln!(
+                "{} is age-encrypted; decrypt it yourself: \
+                 age -d -i <your-age-key.txt> {} > {dest}",
+                entry.file_name().to_string_lossy(),
+                entry.path().display()
+            );
+            continue;
+        }
         match std::fs::copy(entry.path(), dest) {
             Ok(_) => {
                 println!("Restored {} -> {dest}", entry.file_name().to_string_lossy());
@@ -313,6 +283,7 @@ fn restore_basic(config: &BackupConfig) {
 
 fn default_backup_config() -> BackupConfig {
     BackupConfig {
+        age_recipients: Vec::new(),
         schedule: None,
         retention_days: 30,
         targets: vec![BackupTarget::Local {
@@ -368,6 +339,7 @@ mod tests {
         use orca_core::backup::BackupTarget;
         let _guard = ENV_MUTEX.lock().unwrap();
         let cfg = BackupConfig {
+            age_recipients: Vec::new(),
             schedule: Some("0 0 2 * * *".to_string()),
             retention_days: 14,
             targets: vec![BackupTarget::S3 {

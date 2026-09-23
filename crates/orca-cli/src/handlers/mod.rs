@@ -1,5 +1,6 @@
 pub mod ai_ops;
 pub mod backup;
+pub(crate) mod backup_files;
 pub mod build;
 pub mod cleanup;
 pub mod daemon;

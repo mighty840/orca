@@ -247,6 +247,7 @@ mod tests {
     fn upload_volumes_to_s3_noop_with_local_only_config() {
         use orca_core::backup::{BackupConfig, BackupTarget};
         let config = BackupConfig {
+            age_recipients: Vec::new(),
             schedule: None,
             retention_days: 7,
             targets: vec![BackupTarget::Local {
@@ -265,6 +266,7 @@ mod tests {
     fn upload_volumes_to_s3_skips_missing_tarballs() {
         use orca_core::backup::{BackupConfig, BackupTarget};
         let config = BackupConfig {
+            age_recipients: Vec::new(),
             schedule: None,
             retention_days: 7,
             targets: vec![BackupTarget::S3 {

@@ -244,7 +244,7 @@ async fn dispatch_to_agents(
         if let Some(tx) = agents.get(id) {
             let ok = tx
                 .send(MasterMessage::BackupRequest {
-                    config: config.clone(),
+                    config: Box::new(config.clone()),
                     service_hooks: service_hooks.clone(),
                 })
                 .await

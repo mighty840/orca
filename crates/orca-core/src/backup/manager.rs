@@ -97,7 +97,22 @@ impl BackupManager {
     pub fn backup_file(&self, name: &str, path: &Path, s3_prefix: &str) -> Result<()> {
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("bak");
-        let local_name = format!("{name}_{timestamp}.{ext}");
+        // With recipients configured, store an age-encrypted copy instead of
+        // the file itself (#117, #199). A failure here fails the artifact:
+        // never fall back to storing it in the clear.
+        let encrypted = if self.encrypts() {
+            Some(
+                super::encrypt::encrypt_to_temp(path, &self.config.age_recipients)
+                    .with_context(|| format!("encrypt {name} for backup"))?,
+            )
+        } else {
+            None
+        };
+        let (path, suffix) = match &encrypted {
+            Some(tmp) => (tmp.path(), super::encrypt::AGE_SUFFIX),
+            None => (path, ""),
+        };
+        let local_name = format!("{name}_{timestamp}.{ext}{suffix}");
         let s3_name = if s3_prefix.is_empty() {
             local_name.clone()
         } else {
@@ -118,6 +133,11 @@ impl BackupManager {
             anyhow::bail!("all backup targets failed for {name}");
         }
         Ok(())
+    }
+
+    /// Whether artifacts are age-encrypted before they are stored.
+    pub fn encrypts(&self) -> bool {
+        !self.config.age_recipients.is_empty()
     }
 
     fn store(&self, data_path: &Path, target: &BackupTarget, name: &str) -> Result<String> {
@@ -198,6 +218,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let target_dir = tmp.path().join("backups");
         let config = BackupConfig {
+            age_recipients: Vec::new(),
             schedule: None,
             retention_days: 7,
             targets: vec![BackupTarget::Local {
