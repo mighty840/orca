@@ -19,6 +19,10 @@ Hotfix for rc.2.
   with `, `, which garbled session cookies. Nextcloud's OIDC login looped on
   "you don't have access" because the callback's state check failed. The
   proxy now joins all cookie fields into one `Cookie` header with `; `.
+- **HTTP/2 requests with more than 16 KiB of headers were refused with 431.**
+  hyper's HTTP/2 default header-list limit is far below what the HTTP/1.1
+  path accepts, so large SSO cookie jars (Keycloak plus the app's own
+  cookies) failed only over HTTP/2. The limit is now 64 KiB.
 
 ## [0.3.0-rc.2] - 2026-09-24
 
