@@ -122,3 +122,34 @@ async fn h1_cookies_are_joined_the_same_way() {
     let seen = cookies_seen_by_backend(false).await;
     assert_eq!(seen, "oc_sessionPassphrase=abc; nc_session_id=xyz");
 }
+
+#[tokio::test]
+async fn h2_large_cookie_jars_are_not_rejected() {
+    // Keycloak session cookies run to several KB each; together with an app's
+    // own cookies a browser can send well over 16 KB of headers. The HTTP/2
+    // listener must accept that (the HTTP/1.1 path always did).
+    let backend = spawn_cookie_echo().await;
+    let port = spawn_tls_proxy(backend).await;
+    let big = |name: &str| format!("{name}={}", "x".repeat(8_000));
+    let resp = reqwest::Client::builder()
+        .no_proxy()
+        .danger_accept_invalid_certs(true)
+        .build()
+        .unwrap()
+        .get(format!("https://localhost:{port}/"))
+        .header("cookie", big("KEYCLOAK_IDENTITY"))
+        .header("cookie", big("KEYCLOAK_SESSION"))
+        .header("cookie", big("nc_session_id"))
+        .send()
+        .await
+        .expect("request with ~24 KB of cookies must not be refused");
+    assert_eq!(resp.version(), reqwest::Version::HTTP_2);
+    assert_eq!(resp.status(), 200);
+    let expected = [
+        big("KEYCLOAK_IDENTITY"),
+        big("KEYCLOAK_SESSION"),
+        big("nc_session_id"),
+    ]
+    .join("; ");
+    assert!(resp.text().await.unwrap() == expected, "cookie jar garbled");
+}

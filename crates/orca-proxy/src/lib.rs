@@ -39,6 +39,10 @@ use acme::AcmeManager;
 use handler::{handle_acme_challenge, handle_request};
 use rate_limit::RateLimiter;
 
+/// Largest HTTP/2 header list the TLS listener accepts. Matches what the
+/// HTTP/1.1 path tolerates in practice, so large SSO cookie jars work on both.
+const H2_MAX_HEADER_LIST: u32 = 64 * 1024;
+
 /// A backend target for container routing.
 #[derive(Debug, Clone)]
 pub struct RouteTarget {
@@ -451,10 +455,12 @@ pub(crate) async fn serve_loop_with_fallback(
                         // upgrades stay on h1: extended CONNECT (RFC 8441)
                         // is not enabled, so browsers open a separate
                         // HTTP/1.1 connection for them, as before.
-                        if let Err(e) = auto::Builder::new(TokioExecutor::new())
-                            .serve_connection_with_upgrades(io, service)
-                            .await
-                        {
+                        // hyper's h2 default caps the header list at 16 KiB and
+                        // answers 431 above it; SSO cookie jars (Keycloak plus
+                        // the app's own) exceed that where h1 never refused.
+                        let mut builder = auto::Builder::new(TokioExecutor::new());
+                        builder.http2().max_header_list_size(H2_MAX_HEADER_LIST);
+                        if let Err(e) = builder.serve_connection_with_upgrades(io, service).await {
                             debug!("TLS proxy error from {peer}: {e}");
                         }
                     }
