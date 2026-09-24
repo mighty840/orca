@@ -120,6 +120,7 @@ fn build_forward_request(
 
     let mut forward_req = client.request(method.clone(), &uri);
     let mut incoming_xff: Option<String> = None;
+    let mut cookies: Vec<&str> = Vec::new();
     let mut saw_proto = false;
     let mut saw_fhost = false;
     for (key, value) in headers {
@@ -140,6 +141,17 @@ fn build_forward_request(
             // buffered path and, worse, pairs a stale Content-Length with a
             // chunked body on the streaming path (a framing conflict that
             // can truncate or stall large registry blob pushes).
+            continue;
+        }
+        if name == "cookie" {
+            // HTTP/2 splits cookies into separate `cookie` fields ("crumbs",
+            // RFC 9113 §8.2.3), and the backend speaks HTTP/1.1: forwarded one
+            // by one, Apache/PHP join them with ", " and garble the session
+            // cookie (Nextcloud's OIDC callback then 403s). Re-join with "; "
+            // into a single header below.
+            if let Ok(v) = value.to_str() {
+                cookies.push(v);
+            }
             continue;
         }
         if name == "x-forwarded-for" {
@@ -167,6 +179,9 @@ fn build_forward_request(
             saw_fhost = true;
         }
         forward_req = forward_req.header(key, value);
+    }
+    if !cookies.is_empty() {
+        forward_req = forward_req.header("Cookie", cookies.join("; "));
     }
     // Override the Host header to the original external host so backends that
     // build redirect URLs from Host (litellm /ui, keycloak OIDC) use the
