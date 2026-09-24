@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.3] - 2026-09-24
+
+Hotfix for rc.2.
+
+### Fixed
+
+- **Cookies over HTTP/2 reached HTTP/1.1 backends as separate `Cookie`
+  headers.** HTTP/2 clients send each cookie as its own field; the proxy
+  forwarded them one by one, and Apache/PHP (and other stacks) joined them
+  with `, `, which garbled session cookies. Nextcloud's OIDC login looped on
+  "you don't have access" because the callback's state check failed. The
+  proxy now joins all cookie fields into one `Cookie` header with `; `.
+
 ## [0.3.0-rc.2] - 2026-09-24
 
 Second v0.3.0 release candidate: backups that actually back up, fail loudly
