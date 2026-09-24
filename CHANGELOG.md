@@ -7,6 +7,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.2] - 2026-09-24
+
+Second v0.3.0 release candidate: backups that actually back up, fail loudly
+and restore, plus state handling, agent reconciliation and alerting fixes.
+Includes everything in rc.1.
+
+### Upgrade notes
+
+- **Upgrade the master before any agent**, as for rc.1. An rc.2 master
+  talks to an older agent fine (older agents ignore the new message fields).
+- **Set `[backup] age_recipients` before the first nightly run.** Key
+  material (`master.key`, `webhooks.json`, TLS certificates, the ACME
+  account, `backup_config.json`) is only backed up encrypted and is skipped
+  with a warning otherwise. The new bind-mount archive is stored unencrypted
+  without it and can contain keys. Generate a key with `age-keygen`, keep the
+  private key out of band, and add the `age1…` public key to cluster.toml.
+- **Deploys fail on unknown secrets.** A `${secrets.X}` that doesn't resolve,
+  or a secrets store that can't be opened, now fails the deploy naming the
+  service and the missing keys, instead of starting the container with the
+  literal string. Check your references before upgrading.
+- **Database pre-hooks run for the first time.** They were never found
+  before (see below), so the first nights create `orca-dump.*` files in the
+  database volumes and the volume tarballs grow accordingly. A hook that
+  fails is now reported.
+- **Backup failures are reported and alerted.** `orca backup` exits
+  non-zero, the recorded message is the run's real summary, and a failed
+  run raises a critical alert. Problems that were hidden before will show up
+  in the first few runs.
+- **Resource-limit changes take effect.** CPU and memory changes used to be
+  ignored; the next reconcile after upgrading applies any that were pending.
+- **S3 pruning is opt-in** (`[backup] prune_s3 = true`); nothing is deleted
+  from the bucket unless you enable it.
+
+### Added
+
+- **HTTP/2** on TLS listeners via ALPN; WebSockets stay on HTTP/1.1. The plain
+  listener stays HTTP/1-only. (#214, @hauju)
+- **Encrypted config backups:** `[backup] age_recipients`. (#199, part of #117)
+- **Bind-mount backups:** sources are archived into `bind-mounts.tar.gz`
+  with a manifest; system paths, files unchanged in git, oversized
+  (`bind_mount_max_mb`) and unreadable sources are reported, not archived.
+  (#185)
+- **Restore:**
+  - `restore-basic [--identity F] [--force]` restores the newest of every
+    config artifact from local or S3 targets, `master.key` first;
+  - `restore <id>`;
+  - `restore-volume <vol> --from-s3 <key>`.
+  
+  Existing files are moved aside. (#200)
+- **Retention settings:** `keep_min` (default 7) and opt-in `prune_s3`. (#204)
+
+### Fixed
+
+- **Agents apply spec changes they missed while disconnected** (a spec
+  fingerprint compared on rejoin). A deploy dropped during a brief agent
+  disconnect used to be lost silently. (#213)
+- **Resource-limit changes count as spec changes.** (#213)
+- **Secrets store:**
+  - a wrong, missing or truncated master key is an actionable error, not a
+    panic;
+  - a missing key next to existing secrets is refused instead of
+    regenerated;
+  - the key is created atomically;
+  - a legacy-format migration keeps the original file.
+  
+  (#196)
+- **Atomic, owner-only writes** of `secrets.json` and `webhooks.json`. An
+  unparseable webhook registry is moved aside instead of being overwritten
+  with an empty list. (#183)
+- **Pre-hooks never ran on any node:** the service was derived from the
+  volume name (`orca-<service>-data`), so no hook matched. The master also
+  never passed hooks. (#198)
+- **Backups couldn't fail:**
+  - failures now exit non-zero and summarize honestly;
+  - every target must store an artifact;
+  - a failed run alerts through a path that doesn't need the LLM.
+  
+  (#197)
+- **Restore from S3:**
+  - the listing is now recursive;
+  - downloads create their directories;
+  - restores go where the server reads its state.
+  
+  (#200)
+- **Retention:**
+  - a floor per artifact;
+  - no pruning after a failed run;
+  - local pruning only touches orca's own artifacts.
+  
+  (#204)
+- **Alerting without the LLM:**
+  - the model call has a 30s timeout;
+  - a missing diagnosis gives a degraded alert instead of none;
+  - the engine lock is no longer held across the model call or delivery;
+  - one failure no longer aborts the monitoring cycle.
+  
+  (#181)
+
 ## [0.3.0-rc.1] - 2026-09-23
 
 First v0.3.0 release candidate: authentication and secret-handling fixes from
