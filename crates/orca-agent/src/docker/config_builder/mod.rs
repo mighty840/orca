@@ -14,6 +14,24 @@ use helpers::{
     parse_extra_port, parse_resource_limits,
 };
 
+/// The database a container port belongs to, if it is a well-known one being
+/// published on every interface (#211). A public web or media port is often
+/// deliberate (git SSH, TURN, Jitsi); a public database port rarely is.
+fn public_database_port(host_ip: &str, container_port: &str) -> Option<&'static str> {
+    if host_ip != "0.0.0.0" {
+        return None;
+    }
+    match container_port {
+        "5432" => Some("PostgreSQL"),
+        "3306" => Some("MySQL/MariaDB"),
+        "27017" => Some("MongoDB"),
+        "6379" => Some("Redis"),
+        "9000" => Some("ClickHouse/MinIO"),
+        "6333" => Some("Qdrant"),
+        _ => None,
+    }
+}
+
 /// Build a Docker container [`Config`] from a workload spec.
 pub(crate) fn build_container_config(spec: &WorkloadSpec) -> Config<String> {
     let env: Vec<String> = spec.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
@@ -27,6 +45,14 @@ pub(crate) fn build_container_config(spec: &WorkloadSpec) -> Config<String> {
         let Some(parsed) = parse_extra_port(entry) else {
             continue;
         };
+        if let Some(db) = public_database_port(&parsed.host_ip, &parsed.container_port) {
+            tracing::warn!(
+                service = %spec.name,
+                "extra_ports `{entry}` publishes {db} on every interface, reachable from any \
+                 network this host is on (Docker bypasses ufw). If only this host needs it, \
+                 write `127.0.0.1:{entry}`"
+            );
+        }
         let key = format!("{}/{}", parsed.container_port, parsed.proto);
         exposed_ports.insert(key.clone(), HashMap::new());
         port_bindings.insert(
@@ -201,3 +227,7 @@ mod network_drift_tests {
         assert_eq!(drifted_service_network("orca-app", &[]), None);
     }
 }
+
+#[cfg(test)]
+#[path = "ports_tests.rs"]
+mod ports_tests;

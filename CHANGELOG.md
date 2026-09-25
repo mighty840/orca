@@ -32,6 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every backend's host port was published on all interfaces (#211).** A
+  service's `port` was bound to a random host port on `0.0.0.0`, although
+  only the node's own proxy and health checks use it, over `127.0.0.1`.
+  Every HTTP backend and every database with a `port` was reachable on every
+  network the host is on, and Docker's DNAT rules bypass ufw.
+  - Random host ports now bind to `127.0.0.1`. An explicit `host_port` stays
+    public (TURN on 3478 needs that).
+  - `extra_ports` keep their given address (`host:container` still means
+    `0.0.0.0`, for git SSH and Jitsi media). A well-known database port
+    published that way (5432, 3306, 27017, 6379, 9000, 6333) logs a warning
+    suggesting `127.0.0.1:`.
+  - A container picks up the new binding when it is next recreated; the
+    upgrade itself restarts nothing.
 - **Services pinned to the master itself were still treated as remote by the
   watchdog and the declarative prune (#176).** The watchdog never healed
   such a service: once its container crashed it stayed down and its route
