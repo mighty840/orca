@@ -72,13 +72,20 @@ pub(super) fn build_port_config(
     if let Some(port) = port {
         let key = format!("{port}/tcp");
         exposed_ports.insert(key.clone(), HashMap::new());
-        let hp = host_port
-            .map(|p| p.to_string())
-            .unwrap_or_else(|| "0".to_string());
+        // A random host port exists only for this node's proxy and health
+        // checks, which connect over 127.0.0.1, so publish it there. On
+        // 0.0.0.0 every backend and database was reachable on every network
+        // the host is on, and Docker's DNAT bypasses ufw (#211). An explicit
+        // `host_port` is a deliberate publication (TURN on 3478) and stays
+        // on all interfaces.
+        let (host_ip, hp) = match host_port {
+            Some(p) => ("0.0.0.0", p.to_string()),
+            None => ("127.0.0.1", "0".to_string()),
+        };
         port_bindings.insert(
             key,
             Some(vec![PortBinding {
-                host_ip: Some("0.0.0.0".to_string()),
+                host_ip: Some(host_ip.to_string()),
                 host_port: Some(hp),
             }]),
         );
