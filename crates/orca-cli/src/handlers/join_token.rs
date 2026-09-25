@@ -11,9 +11,30 @@ use std::path::Path;
 
 use anyhow::{Result, bail};
 
+/// Where the join token came from. On rotation (#210) the agent saves a new
+/// token to `~/.orca/cluster.token` itself only when it came from there.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum TokenSource {
+    Explicit,
+    File,
+}
+
+impl TokenSource {
+    /// The `ORCA_TOKEN_SOURCE` value `orca_agent::token::rotate` reads.
+    pub(crate) fn env_value(&self) -> &'static str {
+        match self {
+            Self::Explicit => "explicit",
+            Self::File => "file",
+        }
+    }
+}
+
 /// The token to join with: `explicit` (from `--token` or `ORCA_TOKEN`) if
 /// given, otherwise the token file at `file`. Never logs the value.
-pub(crate) fn resolve_token(explicit: Option<String>, file: &Path) -> Result<String> {
+pub(crate) fn resolve_token(
+    explicit: Option<String>,
+    file: &Path,
+) -> Result<(String, TokenSource)> {
     let from_file = std::fs::read_to_string(file)
         .ok()
         .map(|t| t.trim().to_string())
@@ -29,10 +50,10 @@ pub(crate) fn resolve_token(explicit: Option<String>, file: &Path) -> Result<Str
                  ORCA_TOKEN (or --token), not only this file",
                 file.display()
             );
-            Ok(t)
+            Ok((t, TokenSource::Explicit))
         }
-        (Some(t), _) => Ok(t),
-        (None, Some(f)) => Ok(f),
+        (Some(t), _) => Ok((t, TokenSource::Explicit)),
+        (None, Some(f)) => Ok((f, TokenSource::File)),
         (None, None) => bail!(
             "no cluster token: pass --token, set ORCA_TOKEN, or put the token in {}",
             file.display()
@@ -63,17 +84,17 @@ mod tests {
     fn the_file_is_used_when_no_flag_or_env_is_given() {
         let dir = file_with(Some("from-file\n"));
         let t = resolve_token(None, &dir.path().join("cluster.token")).unwrap();
-        assert_eq!(t, "from-file");
+        assert_eq!(t, ("from-file".into(), TokenSource::File));
     }
 
     #[test]
     fn an_explicit_token_wins() {
         let dir = file_with(Some("old"));
         let t = resolve_token(Some("new".into()), &dir.path().join("cluster.token")).unwrap();
-        assert_eq!(t, "new");
+        assert_eq!(t, ("new".into(), TokenSource::Explicit));
         let empty = file_with(None);
         let t = resolve_token(Some("new".into()), &empty.path().join("cluster.token")).unwrap();
-        assert_eq!(t, "new");
+        assert_eq!(t.0, "new");
     }
 
     #[test]

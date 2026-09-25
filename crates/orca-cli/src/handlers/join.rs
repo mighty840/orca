@@ -175,8 +175,6 @@ pub async fn handle_join(
         }
     });
 
-    // Read cluster token for WS auth
-    let token = std::env::var("ORCA_TOKEN").unwrap_or_default();
     let agent_arc = Arc::new(agent);
 
     tokio::select! {
@@ -184,7 +182,6 @@ pub async fn handle_join(
         _ = orca_agent::ws_client::run_ws_loop(
             &leader_url,
             node_id,
-            &token,
             &local_address,
             container_runtime.clone(),
             agent_arc.clone(),

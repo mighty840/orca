@@ -304,6 +304,27 @@ impl OrcaClient {
     }
 }
 
+impl OrcaClient {
+    /// A cluster-token rotation call (#210). A refusal (409) comes back as an
+    /// error carrying the master's explanation.
+    pub async fn token_rotation(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<serde_json::Value>,
+    ) -> anyhow::Result<serde_json::Value> {
+        let mut req = self.auth(self.client.request(method, self.url(path)));
+        if let Some(b) = body {
+            req = req.json(&b);
+        }
+        let resp = req.send().await?;
+        if resp.status() == reqwest::StatusCode::CONFLICT {
+            anyhow::bail!("{}", resp.text().await.unwrap_or_default());
+        }
+        Ok(resp.error_for_status()?.json().await?)
+    }
+}
+
 /// Translate 503 (`[ai]` unconfigured) and 404 (unknown id) into clean
 /// anyhow errors so the CLI can print one-line messages instead of raw
 /// HTTP status codes.

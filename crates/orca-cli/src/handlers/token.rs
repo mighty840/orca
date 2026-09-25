@@ -8,6 +8,8 @@ pub fn handle_token(action: TokenAction) {
         TokenAction::Show => show_token(),
         TokenAction::Create { name, role } => create_token(&name, &role),
         TokenAction::List => list_tokens(),
+        // Async, handled in main via `handlers::token_rotate`.
+        TokenAction::Rotate { .. } => unreachable!("dispatched by main"),
     }
 }
 

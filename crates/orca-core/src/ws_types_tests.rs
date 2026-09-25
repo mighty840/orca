@@ -261,3 +261,32 @@ fn backup_request_service_hooks_default_empty() {
     let back: MasterMessage = serde_json::from_str(&json).unwrap();
     assert!(matches!(back, MasterMessage::BackupRequest { .. }));
 }
+
+/// #210: the rotate message carries the token on the wire, but logging the
+/// message must never print it.
+#[test]
+fn rotate_token_round_trips_and_never_debug_prints_the_token() {
+    let msg = MasterMessage::RotateToken {
+        token: RedactedToken("s3cret-new-token".into()),
+    };
+    let json = serde_json::to_string(&msg).unwrap();
+    assert_eq!(
+        json,
+        r#"{"type":"rotate_token","token":"s3cret-new-token"}"#
+    );
+    match serde_json::from_str::<MasterMessage>(&json).unwrap() {
+        MasterMessage::RotateToken { token } => assert_eq!(token.0, "s3cret-new-token"),
+        other => panic!("{other:?}"),
+    }
+    assert!(!format!("{msg:?}").contains("s3cret"));
+
+    let ack: AgentMessage =
+        serde_json::from_str(r#"{"type":"token_rotated","persisted":false}"#).unwrap();
+    assert!(matches!(
+        ack,
+        AgentMessage::TokenRotated {
+            persisted: false,
+            detail: None
+        }
+    ));
+}

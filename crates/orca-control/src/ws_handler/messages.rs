@@ -203,6 +203,17 @@ pub(super) async fn handle_agent_message(
             info!("Node {node_id}: exec session {session_id} done (exit {exit_code})");
             state.exec_sessions.write().await.remove(&session_id);
         }
+        AgentMessage::TokenRotated { persisted, detail } => {
+            if persisted {
+                info!("Node {node_id}: on the new cluster token");
+            } else {
+                tracing::warn!(
+                    "Node {node_id}: on the new cluster token in memory only: {}",
+                    detail.as_deref().unwrap_or("")
+                );
+            }
+            crate::token_rotation::on_rotated(state, node_id, persisted, detail).await;
+        }
     }
 
     Ok(())

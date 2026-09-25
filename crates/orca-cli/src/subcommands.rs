@@ -145,6 +145,19 @@ pub enum TokenAction {
     },
     /// List all configured tokens
     List,
+    /// Rotate the cluster token without locking agents out (#210): start a
+    /// rotation, see which agents are on the new token, then finish it
+    Rotate {
+        /// Show where the running rotation stands
+        #[arg(long, conflicts_with = "finish")]
+        status: bool,
+        /// Retire the old token once every agent is on the new one
+        #[arg(long)]
+        finish: bool,
+        /// With --finish: retire it even if some agents are not
+        #[arg(long, requires = "finish")]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]

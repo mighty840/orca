@@ -99,7 +99,8 @@ impl AgentClient {
         let mut req = self
             .client
             .get(format!("{}/api/v1/cluster/info", self.leader_url));
-        if let Ok(token) = std::env::var("ORCA_TOKEN") {
+        let token = crate::token::current();
+        if !token.is_empty() {
             req = req.bearer_auth(token);
         }
         let resp = req.send().await.ok()?;
@@ -131,7 +132,9 @@ impl AgentClient {
             .post(format!("{}/api/v1/cluster/register", self.leader_url))
             .json(&body);
 
-        if let Ok(token) = std::env::var("ORCA_TOKEN") {
+        let token = crate::token::current();
+
+        if !token.is_empty() {
             req = req.bearer_auth(token);
         }
 
@@ -189,7 +192,9 @@ impl AgentClient {
             .post(format!("{}/api/v1/cluster/heartbeat", self.leader_url))
             .json(&req);
 
-        if let Ok(token) = std::env::var("ORCA_TOKEN") {
+        let token = crate::token::current();
+
+        if !token.is_empty() {
             hb_req = hb_req.bearer_auth(token);
         }
 
