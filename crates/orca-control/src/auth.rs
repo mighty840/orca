@@ -73,6 +73,10 @@ const ROUTE_POLICY: &[(&str, &str, &str)] = &[
         ADMIN_ONLY,
     ),
     ("POST", "/api/v1/cluster/backups/trigger", ADMIN_ONLY),
+    // Cluster token rotation (#210).
+    ("POST", "/api/v1/cluster/token/rotate", ADMIN_ONLY),
+    ("GET", "/api/v1/cluster/token/rotation", ADMIN_ONLY),
+    ("POST", "/api/v1/cluster/token/rotation/finish", ADMIN_ONLY),
     ("POST", "/api/v1/alerts/{id}/reply", ADMIN_ONLY),
     ("POST", "/api/v1/alerts/{id}/dismiss", ADMIN_ONLY),
     ("POST", "/api/v1/alerts/{id}/resolve", ADMIN_ONLY),
@@ -123,7 +127,13 @@ pub(crate) fn resolve_token(state: &AppState, token: &str) -> Option<Role> {
     if token.is_empty() {
         return None;
     }
-    if state.api_tokens.iter().any(|t| ct_eq(token, t)) {
+    if state
+        .api_tokens
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .any(|t| ct_eq(token, t))
+    {
         return Some(Role::Admin);
     }
     state
@@ -143,11 +153,15 @@ pub async fn auth_middleware(
     request: Request,
     next: Next,
 ) -> Response {
-    let legacy_tokens = &state.api_tokens;
+    let no_legacy = state
+        .api_tokens
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_empty();
     let named_tokens = &state.cluster_config.token;
 
     // If no tokens configured, allow everything (backward compatible)
-    if legacy_tokens.is_empty() && named_tokens.is_empty() {
+    if no_legacy && named_tokens.is_empty() {
         return next.run(request).await;
     }
 

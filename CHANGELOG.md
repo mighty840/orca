@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`orca token rotate`: rotate the cluster token without locking agents out
+  (#210).**
+  - `orca token rotate` writes a new token to `~/.orca/cluster.token` and
+    keeps accepting the old one, across a master restart too
+    (`cluster.token.previous`).
+  - It pushes the new token to every connected agent. The agent switches in
+    memory, without a restart, and saves it where its next start reads it:
+    `~/.orca/cluster.token`, or an `agent.env` that holds the old token.
+    Offline agents get it when they reconnect.
+  - `--status` shows each agent's progress.
+  - `--finish` retires the old token. It refuses while any agent, known to
+    the rotation or registered now, isn't on the new one for good, unless
+    you pass `--force`.
+  - An agent whose unit passes `--token` reports "in memory only" until the
+    unit is fixed. Remove `--token` and restart: the new token is already in
+    `~/.orca/cluster.token`.
+  - No path prints or logs a token; the WS message's `Debug` output is
+    redacted.
+  - Agents older than this release ignore the rotate message, so `--finish`
+    keeps refusing until they are upgraded.
+
 ### Fixed
 
 - **Services pinned to the master itself were still treated as remote by the

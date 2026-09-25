@@ -239,6 +239,10 @@ async fn handle_agent_ws(
     // can self-heal after a restart (fixes #21: stale remote state).
     send_reconcile(&state, node_id, &tx).await;
 
+    // Mid-rotation, an agent that hasn't confirmed the new token gets it now
+    // (it may have been offline when the rotation started, #210).
+    crate::token_rotation::on_connect(&state, node_id).await;
+
     // Spawn task to forward master→agent messages from the channel to the WS.
     // A send failure is proof the socket is dead — wake the read loop so the
     // session tears down now instead of waiting out the idle deadline.

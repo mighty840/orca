@@ -23,5 +23,6 @@ pub mod secrets;
 pub mod server;
 pub mod status;
 pub mod token;
+pub mod token_rotate;
 pub mod update;
 pub(crate) mod volume_backup;

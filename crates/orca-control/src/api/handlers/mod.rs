@@ -16,6 +16,7 @@ pub(crate) mod ask;
 pub(crate) mod exec;
 mod ops;
 pub(crate) mod secrets;
+pub(crate) mod token_rotation;
 
 pub(crate) use ops::{
     cluster_backups, cluster_networks, logs, promote, redeploy, rollback, scale, start_service,

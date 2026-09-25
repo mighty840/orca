@@ -37,8 +37,11 @@ pub struct AppState {
     pub registered_nodes: RwLock<HashMap<u64, RegisteredNode>>,
     /// Webhook configurations for push-triggered deploys.
     pub webhooks: WebhookStore,
-    /// API bearer tokens for authentication (empty = allow all).
-    pub api_tokens: Vec<String>,
+    /// API bearer tokens for authentication (empty = allow all). Behind a lock
+    /// because `orca token rotate` swaps the cluster token at runtime (#210).
+    pub api_tokens: std::sync::RwLock<Vec<String>>,
+    /// The cluster-token rotation in progress, if any (#210).
+    pub token_rotation: RwLock<Option<crate::token_rotation::Rotation>>,
     /// Pending commands for agent nodes, keyed by node_id.
     /// Uses serde_json::Value to avoid circular dependency on orca-agent types.
     pub pending_commands: RwLock<HashMap<u64, Vec<serde_json::Value>>>,
@@ -268,7 +271,8 @@ impl AppState {
             registered_nodes: RwLock::new(HashMap::new()),
             pending_commands: RwLock::new(HashMap::new()),
             webhooks: crate::webhook::new_store(),
-            api_tokens,
+            api_tokens: std::sync::RwLock::new(api_tokens),
+            token_rotation: RwLock::new(None),
             deploy_history: RwLock::new(crate::deploy_history::DeployHistory::new()),
             acme_manager: None,
             cert_resolver: None,

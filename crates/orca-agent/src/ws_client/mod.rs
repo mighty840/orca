@@ -48,7 +48,6 @@ use reconcile::reconcile_services;
 pub async fn run_ws_loop(
     leader_url: &str,
     node_id: u64,
-    token: &str,
     local_address: &str,
     runtime: Arc<dyn Runtime>,
     agent: Arc<AgentClient>,
@@ -70,7 +69,8 @@ pub async fn run_ws_loop(
     loop {
         info!("Connecting to master WebSocket: {ws_url}");
         // Built per attempt: each upgrade needs a fresh Sec-WebSocket-Key.
-        let attempt = match connect::build_ws_request(&ws_url, token) {
+        // The current token, so a rotated one is used from the next attempt.
+        let attempt = match connect::build_ws_request(&ws_url, &crate::token::current()) {
             Ok(request) => tokio_tungstenite::connect_async(request).await,
             Err(e) => Err(e),
         };
@@ -348,6 +348,25 @@ async fn handle_master_message(
                         net_tx: sample.net_tx,
                         domains: vec![],
                     },
+                })
+                .await;
+        }
+        MasterMessage::RotateToken { token } => {
+            // Switch in memory (the next request and reconnect use it) and
+            // save it where the next start reads it (#210). Never log it.
+            let rotated = crate::token::rotate(&token.0);
+            if rotated.persisted {
+                info!("WS: cluster token rotated and saved");
+            } else {
+                warn!(
+                    "WS: cluster token rotated in memory only: {}",
+                    rotated.detail.as_deref().unwrap_or("")
+                );
+            }
+            let _ = out_tx
+                .send(AgentMessage::TokenRotated {
+                    persisted: rotated.persisted,
+                    detail: rotated.detail,
                 })
                 .await;
         }

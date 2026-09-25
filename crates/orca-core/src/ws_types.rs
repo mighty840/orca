@@ -71,6 +71,14 @@ pub enum AgentMessage {
     ExecOutput { session_id: String, data: String },
     /// Exec session has ended.
     ExecDone { session_id: String, exit_code: i64 },
+    /// Reply to `MasterMessage::RotateToken` (#210): the agent now uses the
+    /// new token. `persisted` says whether its next start will too;
+    /// `detail` says where it was saved, or what the operator must change.
+    TokenRotated {
+        persisted: bool,
+        #[serde(default)]
+        detail: Option<String>,
+    },
 }
 
 /// Messages sent from master to agent.
@@ -149,6 +157,13 @@ pub enum MasterMessage {
     StatusPing,
     /// Signal the agent to run `docker system prune -f`.
     PruneSystem,
+    /// Switch to a new cluster token (#210), in memory right away and on disk
+    /// where the agent's next start will read it. Agents older than this
+    /// message log it as unknown and ignore it, so they never report back and
+    /// `orca token rotate --finish` keeps refusing until they are upgraded.
+    RotateToken {
+        token: RedactedToken,
+    },
 }
 
 /// Payload of `AgentMessage::BackupStatusReport` — split into its own type so
@@ -246,6 +261,18 @@ pub struct HostStats {
     pub net_tx: u64,
     #[serde(default)]
     pub domains: Vec<String>,
+}
+
+/// A token carried in a WS message. Serializes as the plain string, but its
+/// `Debug` output is redacted, so logging a message never prints it.
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RedactedToken(pub String);
+
+impl std::fmt::Debug for RedactedToken {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("[REDACTED]")
+    }
 }
 
 #[cfg(test)]

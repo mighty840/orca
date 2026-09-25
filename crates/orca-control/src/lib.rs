@@ -32,6 +32,7 @@ pub mod session;
 pub mod state;
 pub mod stats;
 pub mod store;
+pub mod token_rotation;
 pub mod topo_sort;
 pub mod watchdog;
 pub mod webhook;
@@ -112,6 +113,9 @@ pub async fn run_server_with_acme(
     }
 
     let state = Arc::new(app_state);
+
+    // An unfinished token rotation keeps the old token accepted (#210).
+    token_rotation::resume(&state, &token_rotation::token_dir()).await;
 
     // Restore persisted services, re-attaching to existing containers
     if let Some(store) = &state.store {

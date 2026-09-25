@@ -135,6 +135,14 @@ async fn main() -> anyhow::Result<()> {
         Command::Promote { service } => {
             handlers::ops::handle_promote(service, cli.api).await?;
         }
+        Command::Token {
+            action:
+                subcommands::TokenAction::Rotate {
+                    status,
+                    finish,
+                    force,
+                },
+        } => handlers::token_rotate::handle(status, finish, force, cli.api).await?,
         Command::Token { action } => handlers::token::handle_token(action),
         Command::Join {
             address,
@@ -147,10 +155,13 @@ async fn main() -> anyhow::Result<()> {
                 handlers::daemon::daemonize(&args)?;
                 return Ok(());
             }
-            let token =
+            let (token, source) =
                 handlers::join_token::resolve_token(token, &handlers::join_token::token_file())?;
             // SAFETY: single-threaded at this point, before tokio runtime starts work
-            unsafe { std::env::set_var("ORCA_TOKEN", &token) };
+            unsafe {
+                std::env::set_var("ORCA_TOKEN", &token);
+                std::env::set_var("ORCA_TOKEN_SOURCE", source.env_value());
+            }
             handlers::join::handle_join(
                 &address,
                 None,
