@@ -39,6 +39,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when the OOM killer takes Gitea. The watchdog now prunes `Completed`
   instances of services that should be running, and counts only live
   instances, so it replaces the container.
+- **The master started with empty state when its store was unusable
+  (#179).** If `~/.orca/cluster.db` couldn't be opened, which happened twice
+  on breakpilot ("Database already open. Cannot acquire lock"), or one row
+  in it didn't decode, the master logged a warning and ran with no services
+  and no stop-marks. It dropped every route, recreated every container,
+  started paused services, and wrote nothing back.
+  - It now refuses to start, and says so, when the store can't be opened or
+    its services or paused-service list can't be read.
+  - One undecodable row is skipped with a warning instead of failing the
+    whole load.
+  - The declarative loop skips a pass when it can't read the paused
+    services, instead of treating that as "nothing is paused".
 - **A failed deploy deleted the healthy container, reported success, and was
   never retried (#174).**
   - **The old container is kept on failure.** A replacement now keeps the

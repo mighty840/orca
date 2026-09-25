@@ -104,15 +104,9 @@ pub async fn run_server_with_acme(
     let store_path = dirs_next::home_dir()
         .unwrap_or_else(|| ".".into())
         .join(".orca/cluster.db");
-    match store::ClusterStore::open(&store_path) {
-        Ok(s) => {
-            info!("Persistent store opened at {}", store_path.display());
-            app_state = app_state.with_store(Arc::new(s));
-        }
-        Err(e) => {
-            tracing::warn!("Failed to open store at {}: {e}", store_path.display());
-        }
-    }
+    let store = store::open_or_refuse(&store_path)?;
+    info!("Persistent store opened at {}", store_path.display());
+    app_state = app_state.with_store(Arc::new(store));
 
     let state = Arc::new(app_state);
 
@@ -121,7 +115,11 @@ pub async fn run_server_with_acme(
 
     // Restore persisted services, re-attaching to existing containers
     if let Some(store) = &state.store {
-        let stopped = store.get_stopped().unwrap_or_default();
+        // A read error is not "nothing is paused": refuse to start rather
+        // than restart every paused service (#179).
+        let stopped = store
+            .get_stopped()
+            .map_err(|e| anyhow::anyhow!("cannot read the paused services from the store: {e}"))?;
         match store.get_all_services() {
             Ok(services) if !services.is_empty() => {
                 info!("Restoring {} persisted services", services.len());
@@ -145,7 +143,10 @@ pub async fn run_server_with_acme(
                 }
             }
             Ok(_) => {}
-            Err(e) => tracing::warn!("Failed to load persisted services: {e}"),
+            Err(e) => anyhow::bail!(
+                "cannot load the services from the store: {e}. Refusing to start with none, \
+                 which would recreate every container"
+            ),
         }
     }
 

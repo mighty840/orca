@@ -224,8 +224,18 @@ impl ClusterStore {
         let mut services = HashMap::new();
         for entry in table.iter()? {
             let (k, v) = entry?;
-            let config: ServiceConfig = serde_json::from_slice(v.value())?;
-            services.insert(k.value().to_string(), config);
+            // One undecodable row (e.g. written by a newer orca) must not
+            // fail the whole load: the master would then start with no
+            // services at all and recreate everything (#179).
+            match serde_json::from_slice::<ServiceConfig>(v.value()) {
+                Ok(config) => {
+                    services.insert(k.value().to_string(), config);
+                }
+                Err(e) => tracing::warn!(
+                    service = k.value(),
+                    "skipping a stored service config that cannot be decoded: {e}"
+                ),
+            }
         }
         Ok(services)
     }
