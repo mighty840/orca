@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.4] - 2026-09-25
+
+Fixes from running rc.2 and rc.3 in production: startup and placement
+state, config changes that were never applied, secret-backed tokens, paused
+services, and volume backup encryption.
+
 ### Fixed
 
 - **Volume backups ignored `age_recipients` (#231).** Config files, secrets
