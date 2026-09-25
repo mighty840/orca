@@ -5,6 +5,10 @@ use orca_core::config::ServiceConfig;
 
 use crate::state::AppState;
 
+/// How long a declared spec whose deploy failed is left alone (#174).
+pub(crate) const FAILED_DEPLOY_COOLDOWN: std::time::Duration =
+    std::time::Duration::from_secs(15 * 60);
+
 /// The services in `declared` that are new or whose declaration changed.
 ///
 /// The baseline is the last declared config, which the store persists on
@@ -30,6 +34,7 @@ pub(crate) async fn changed_services(
         .as_ref()
         .and_then(|s| s.get_all_services().ok())
         .unwrap_or_default();
+    let failed = state.failed_deploys.read().await;
     let services = state.services.read().await;
     declared
         .into_iter()
@@ -42,5 +47,31 @@ pub(crate) async fn changed_services(
                     || baseline.replicas != cfg.replicas
             }
         })
+        .filter(|cfg| !in_cooldown(&failed, cfg))
         .collect()
+}
+
+/// This exact spec failed to deploy recently (#174). A failed replace stops
+/// the old container and restores it; retrying the same spec every pass
+/// would repeat that. A changed spec, e.g. the fix, goes through at once, and
+/// `orca deploy` / `orca redeploy` bypass this.
+fn in_cooldown(
+    failed: &std::collections::HashMap<String, (ServiceConfig, std::time::Instant)>,
+    cfg: &ServiceConfig,
+) -> bool {
+    let Some((spec, at)) = failed.get(&cfg.name) else {
+        return false;
+    };
+    let same = spec.declared_matches(cfg) && spec.replicas == cfg.replicas;
+    let waiting = at.elapsed() < FAILED_DEPLOY_COOLDOWN;
+    if same && waiting {
+        tracing::debug!(
+            "skipping {}: this spec failed to deploy {}s ago; retrying after {} min or \
+             when the spec changes",
+            cfg.name,
+            at.elapsed().as_secs(),
+            FAILED_DEPLOY_COOLDOWN.as_secs() / 60
+        );
+    }
+    same && waiting
 }

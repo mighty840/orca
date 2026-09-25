@@ -32,6 +32,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A failed deploy deleted the healthy container, reported success, and was
+  never retried (#174).**
+  - **The old container is kept on failure.** A replacement now keeps the
+    old container stopped under `orca-<svc>.replaced` until the new one
+    runs. If the new one fails to create or start (a host port already
+    bound, a bad mount), it is removed and the old one comes back under its
+    name, same container id, running.
+  - **Failures are reported.** A deploy where replicas fail now returns an
+    error. `rolling_update` no longer stops the old instances after a
+    failure. `redeploy` re-registers the running old instances and the
+    previous config. `orca deploy` exits non-zero when any service failed.
+  - **A failed spec is no longer recorded as applied**, so it isn't treated
+    as deployed on the next pass.
+  - **Retries are paced.** The declarative loop and the infra webhook leave
+    a failed spec alone for 15 minutes rather than bouncing the old container
+    every pass. A changed spec (the fix) is applied immediately, and
+    `orca deploy` / `orca redeploy` always try.
 - **Every backend's host port was published on all interfaces (#211).** A
   service's `port` was bound to a random host port on `0.0.0.0`, although
   only the node's own proxy and health checks use it, over `127.0.0.1`.

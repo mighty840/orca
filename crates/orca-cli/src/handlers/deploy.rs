@@ -56,6 +56,11 @@ pub async fn handle_deploy(
                 resp.deployed.len(),
                 resp.errors.len()
             );
+            // A deploy with failed services must fail the command, so CI and
+            // scripts see it (#174).
+            if !resp.errors.is_empty() {
+                std::process::exit(1);
+            }
         }
         Err(e) => {
             tracing::error!("Deploy failed: {e}");

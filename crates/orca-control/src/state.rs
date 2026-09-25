@@ -44,6 +44,8 @@ pub struct AppState {
     pub token_rotation: RwLock<Option<crate::token_rotation::Rotation>>,
     /// Services being deployed or reconciled right now (#173); see `in_flight`.
     pub deploys_in_flight: std::sync::Mutex<HashMap<String, u32>>,
+    /// Declared configs whose deploy failed, and when (#174); see `config_diff`.
+    pub failed_deploys: RwLock<HashMap<String, (ServiceConfig, std::time::Instant)>>,
     /// Pending commands for agent nodes, keyed by node_id.
     /// Uses serde_json::Value to avoid circular dependency on orca-agent types.
     pub pending_commands: RwLock<HashMap<u64, Vec<serde_json::Value>>>,
@@ -276,6 +278,7 @@ impl AppState {
             api_tokens: std::sync::RwLock::new(api_tokens),
             token_rotation: RwLock::new(None),
             deploys_in_flight: std::sync::Mutex::new(HashMap::new()),
+            failed_deploys: RwLock::new(HashMap::new()),
             deploy_history: RwLock::new(crate::deploy_history::DeployHistory::new()),
             acme_manager: None,
             cert_resolver: None,

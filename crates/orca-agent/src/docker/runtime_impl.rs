@@ -30,62 +30,12 @@ impl AsAny for ContainerRuntime {
 pub(crate) const REPLACE_GRACE_SECS: i64 = 30;
 
 impl ContainerRuntime {
-    /// Stop a container named `name` with [`REPLACE_GRACE_SECS`] of SIGTERM
-    /// grace, then remove it. Missing or already-stopped containers are fine.
-    /// A remove that still fails is forced, with a warning, so a deploy never
-    /// wedges on it.
-    async fn stop_and_remove_existing(&self, name: &str) {
-        match self
-            .docker
-            .stop_container(
-                name,
-                Some(StopContainerOptions {
-                    t: REPLACE_GRACE_SECS,
-                }),
-            )
-            .await
-        {
-            Ok(()) => info!("Stopped {name} before replacing it"),
-            Err(e) if is_status(&e, &[304, 404]) => {}
-            Err(e) => tracing::warn!("could not stop {name} gracefully: {e}"),
-        }
-        let remove = |force| {
-            self.docker.remove_container(
-                name,
-                Some(RemoveContainerOptions {
-                    force,
-                    ..Default::default()
-                }),
-            )
-        };
-        match remove(false).await {
-            Ok(()) => {}
-            Err(e) if is_status(&e, &[404]) => {}
-            Err(e) => {
-                tracing::warn!("could not remove {name} ({e}); forcing it");
-                let _ = remove(true).await;
-            }
-        }
-    }
-}
-
-/// Whether a Docker API error carries one of `codes` (304 not modified:
-/// already stopped; 404: no such container).
-fn is_status(e: &bollard::errors::Error, codes: &[u16]) -> bool {
-    matches!(
-        e,
-        bollard::errors::Error::DockerResponseServerError { status_code, .. }
-            if codes.contains(status_code)
-    )
-}
-
-#[async_trait]
-impl Runtime for ContainerRuntime {
-    fn name(&self) -> &str {
-        "container"
-    }
-
-    async fn create(&self, spec: &WorkloadSpec) -> Result<WorkloadHandle> {
+    /// Pull the image and set up the network: everything before an existing
+    /// container is touched, so a failure here leaves it running.
+    pub(super) async fn prepare(
+        &self,
+        spec: &WorkloadSpec,
+    ) -> Result<(String, bollard::container::Config<String>, String)> {
         self.ensure_image(&spec.image, spec.pull_policy).await?;
 
         let container_name = format!("orca-{}", spec.name);
@@ -115,17 +65,23 @@ impl Runtime for ContainerRuntime {
         // Ensure the service network exists
         let _ = self.ensure_network(&network).await;
 
+        Ok((container_name, config, network))
+    }
+
+    /// Create the container under `container_name` and attach its networks.
+    pub(super) async fn create_named(
+        &self,
+        spec: &WorkloadSpec,
+        container_name: &str,
+        config: bollard::container::Config<String>,
+        network: &str,
+    ) -> Result<WorkloadHandle> {
+        let container_name = container_name.to_string();
+        let network = network.to_string();
         let opts = CreateContainerOptions {
             name: &container_name,
             platform: None,
         };
-
-        // Replace an existing container gracefully (#172). This used to be
-        // `docker rm -f`, a SIGKILL: every redeploy killed Postgres, MariaDB
-        // and ClickHouse mid-write, and the "graceful" stop afterwards found
-        // nothing. Done after the image pull and network setup, so a failed
-        // pull still leaves the old container running.
-        self.stop_and_remove_existing(&container_name).await;
 
         let response = self
             .docker
@@ -168,6 +124,80 @@ impl Runtime for ContainerRuntime {
             name: container_name,
             metadata: std::collections::HashMap::new(),
         })
+    }
+
+    /// Stop a container named `name` with [`REPLACE_GRACE_SECS`] of SIGTERM
+    /// grace, then remove it. Missing or already-stopped containers are fine.
+    /// A remove that still fails is forced, with a warning, so a deploy never
+    /// wedges on it.
+    async fn stop_and_remove_existing(&self, name: &str) {
+        match self
+            .docker
+            .stop_container(
+                name,
+                Some(StopContainerOptions {
+                    t: REPLACE_GRACE_SECS,
+                }),
+            )
+            .await
+        {
+            Ok(()) => info!("Stopped {name} before replacing it"),
+            Err(e) if is_status(&e, &[304, 404]) => {}
+            Err(e) => tracing::warn!("could not stop {name} gracefully: {e}"),
+        }
+        let remove = |force| {
+            self.docker.remove_container(
+                name,
+                Some(RemoveContainerOptions {
+                    force,
+                    ..Default::default()
+                }),
+            )
+        };
+        match remove(false).await {
+            Ok(()) => {}
+            Err(e) if is_status(&e, &[404]) => {}
+            Err(e) => {
+                tracing::warn!("could not remove {name} ({e}); forcing it");
+                let _ = remove(true).await;
+            }
+        }
+    }
+}
+
+/// Whether a Docker API error carries one of `codes` (304 not modified:
+/// already stopped; 404: no such container).
+pub(super) fn is_status(e: &bollard::errors::Error, codes: &[u16]) -> bool {
+    matches!(
+        e,
+        bollard::errors::Error::DockerResponseServerError { status_code, .. }
+            if codes.contains(status_code)
+    )
+}
+
+#[async_trait]
+impl Runtime for ContainerRuntime {
+    fn name(&self) -> &str {
+        "container"
+    }
+
+    async fn create(&self, spec: &WorkloadSpec) -> Result<WorkloadHandle> {
+        let (container_name, config, network) = self.prepare(spec).await?;
+        // Replace an existing container gracefully (#172). This used to be
+        // `docker rm -f`, a SIGKILL: every redeploy killed Postgres, MariaDB
+        // and ClickHouse mid-write, and the "graceful" stop afterwards found
+        // nothing. Done after the image pull and network setup, so a failed
+        // pull still leaves the old container running.
+        self.stop_and_remove_existing(&container_name).await;
+
+        self.create_named(spec, &container_name, config, &network)
+            .await
+    }
+
+    async fn create_and_start(&self, spec: &WorkloadSpec) -> Result<WorkloadHandle> {
+        // Sets an existing container aside and restores it if the
+        // replacement fails to create or start (#174).
+        self.replace(spec).await
     }
 
     async fn start(&self, handle: &WorkloadHandle) -> Result<()> {

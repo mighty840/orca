@@ -70,7 +70,7 @@ pub async fn redeploy(state: &AppState, service_name: &str) -> anyhow::Result<()
         tracing::debug!("redeploy: reloaded config from disk for {service_name}");
         fresh
     } else {
-        cached_config
+        cached_config.clone()
     };
 
     // Persist updated config in state immediately.
@@ -146,15 +146,22 @@ pub async fn redeploy(state: &AppState, service_name: &str) -> anyhow::Result<()
     let runtime = get_runtime(state, config.runtime)?;
 
     // Clear instance list so reconcile creates fresh replicas.
-    {
+    let old_instances = {
         let mut services = state.services.write().await;
-        if let Some(svc) = services.get_mut(service_name) {
-            svc.instances.clear();
-        }
-    }
+        services
+            .get_mut(service_name)
+            .map(|svc| std::mem::take(&mut svc.instances))
+            .unwrap_or_default()
+    };
 
     // Start new instances (reconcile will create the desired count).
-    reconcile_service(state, &config).await?;
+    if let Err(e) = reconcile_service(state, &config).await {
+        // The runtime put the old containers back (#174). Track them again
+        // and go back to the config they run, or the watchdog would see 0/N
+        // and try the failing spec again right away.
+        restore_after_failed_redeploy(state, runtime, &cached_config, old_instances).await;
+        return Err(e);
+    }
 
     // Gracefully stop old instances with a 30-second timeout.
     for handle in &old_handles {
@@ -164,6 +171,41 @@ pub async fn redeploy(state: &AppState, service_name: &str) -> anyhow::Result<()
 
     info!("Redeployed service: {service_name}");
     Ok(())
+}
+
+/// After a failed redeploy: re-register the old instances that are running
+/// again and restore the previous config and routes.
+async fn restore_after_failed_redeploy(
+    state: &AppState,
+    runtime: &dyn orca_core::runtime::Runtime,
+    previous: &orca_core::config::ServiceConfig,
+    old_instances: Vec<crate::state::InstanceState>,
+) {
+    let mut running = Vec::new();
+    for inst in old_instances {
+        if matches!(
+            runtime.status(&inst.handle).await,
+            Ok(orca_core::types::WorkloadStatus::Running)
+        ) {
+            running.push(inst);
+        }
+    }
+    {
+        let mut services = state.services.write().await;
+        if let Some(svc) = services.get_mut(&previous.name) {
+            svc.config = previous.clone();
+            for inst in running {
+                if !svc
+                    .instances
+                    .iter()
+                    .any(|i| i.handle.runtime_id == inst.handle.runtime_id)
+                {
+                    svc.instances.push(inst);
+                }
+            }
+        }
+    }
+    crate::routes::update_container_routes(state, previous).await;
 }
 
 #[cfg(test)]

@@ -46,3 +46,49 @@ async fn replacing_a_container_lets_the_old_one_shut_down_cleanly() {
         "the old container was killed without running its SIGTERM handler"
     );
 }
+
+fn docker_inspect(name: &str, format: &str) -> Option<String> {
+    let out = std::process::Command::new("docker")
+        .args(["inspect", "-f", format, name])
+        .output()
+        .ok()?;
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+/// #174: a replacement that can't start (here: its host port is taken) must
+/// leave the old container running, with the same id, not delete it.
+#[tokio::test]
+#[ignore = "needs Docker"]
+async fn a_replacement_that_fails_to_start_restores_the_old_container() {
+    let runtime = ContainerRuntime::new().expect("Docker required");
+    let name = format!("failed-replace-{}", std::process::id());
+    let container = format!("orca-{name}");
+    let mut s = spec(&name);
+    s.cmd = vec!["sleep".into(), "300".into()];
+    s.port = Some(8080);
+
+    let old = runtime.create_and_start(&s).await.unwrap();
+
+    // Hold a host port so the replacement's start fails.
+    let held = std::net::TcpListener::bind("0.0.0.0:0").unwrap();
+    let mut broken = s.clone();
+    broken.host_port = Some(held.local_addr().unwrap().port());
+    let result = runtime.create_and_start(&broken).await;
+
+    let id = docker_inspect(&container, "{{.Id}}");
+    let running = docker_inspect(&container, "{{.State.Running}}");
+    let aside_left = docker_inspect(&format!("{container}.replaced"), "{{.Id}}").is_some();
+    let _ = runtime.remove(&old).await;
+    drop(held);
+
+    assert!(result.is_err(), "the replacement must fail");
+    assert_eq!(
+        id.as_deref(),
+        Some(old.runtime_id.as_str()),
+        "the old container is back"
+    );
+    assert_eq!(running.as_deref(), Some("true"), "and running");
+    assert!(!aside_left, "no aside container left behind");
+}

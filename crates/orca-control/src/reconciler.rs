@@ -36,6 +36,7 @@ pub async fn reconcile(state: &AppState, services: &[ServiceConfig]) -> (Vec<Str
                 if outcome == ReconcileOutcome::Changed {
                     changed.push(svc_config.name.clone());
                 }
+                state.failed_deploys.write().await.remove(&svc_config.name);
                 deployed.push(svc_config.name.clone());
             }
             Err(e) => {
@@ -45,6 +46,12 @@ pub async fn reconcile(state: &AppState, services: &[ServiceConfig]) -> (Vec<Str
                 state.last_failures.write().await.insert(
                     svc_config.name.clone(),
                     crate::failures::from_deploy_error(&msg),
+                );
+                // Remembered so the declarative loop doesn't retry the same
+                // failing spec every pass (#174).
+                state.failed_deploys.write().await.insert(
+                    svc_config.name.clone(),
+                    (svc_config.clone(), std::time::Instant::now()),
                 );
                 errors.push(format!("{}: {msg}", svc_config.name));
             }
@@ -205,6 +212,9 @@ pub(crate) async fn reconcile_service(
     // Compares image, env, cmd, ports, mounts, volume, domain, aliases,
     // extra_ports, strip_prefix, network, internal, health, and resources.
     let same_spec = svc_state.config.spec_matches(config);
+    // Put back if the deploy fails: a spec that was never applied must not
+    // look applied, or the next pass reports it as done (#174).
+    let previous = (svc_state.config.clone(), svc_state.desired_replicas);
 
     svc_state.config = config.clone();
     svc_state.desired_replicas = desired;
@@ -269,10 +279,20 @@ pub(crate) async fn reconcile_service(
         drop(services);
         if is_canary {
             info!("Canary deploy for {name} ({desired} stable + canary)");
-            crate::operations::canary_deploy(state, runtime, config, &spec, desired).await?;
+            if let Err(e) =
+                crate::operations::canary_deploy(state, runtime, config, &spec, desired).await
+            {
+                restore_config(state, &config.name, previous).await;
+                return Err(e);
+            }
         } else {
             info!("Rolling update for {name} ({desired} replicas)");
-            crate::operations::rolling_update(state, runtime, config, &spec, desired).await?;
+            if let Err(e) =
+                crate::operations::rolling_update(state, runtime, config, &spec, desired).await
+            {
+                restore_config(state, &config.name, previous).await;
+                return Err(e);
+            }
         }
         provision_service_certs(state, config).await;
         return Ok(ReconcileOutcome::Changed);
@@ -298,6 +318,7 @@ pub(crate) async fn reconcile_service(
 
         let mut new_instances = Vec::new();
         let mut failures = 0u32;
+        let mut first_error = None;
         for (idx, replica_spec) in specs.into_iter().enumerate() {
             match create_and_start_instance(runtime, &replica_spec).await {
                 Ok(inst) => new_instances.push(inst),
@@ -308,6 +329,7 @@ pub(crate) async fn reconcile_service(
                         current + idx as u32
                     );
                     failures += 1;
+                    first_error.get_or_insert_with(|| e.to_string());
                 }
             }
         }
@@ -343,6 +365,17 @@ pub(crate) async fn reconcile_service(
         for handle in excess_handles {
             let _ = runtime.stop(&handle, Duration::from_secs(10)).await;
             let _ = runtime.remove(&handle).await;
+        }
+        // Fewer replicas than declared came up: that is a failed deploy, not
+        // a success. It used to return Ok, so the caller reported success and
+        // the broken spec was persisted as applied (#174).
+        if failures > 0 {
+            restore_config(state, &config.name, previous).await;
+            anyhow::bail!(
+                "{failures}/{to_create} replicas of {} failed to start: {}",
+                config.name,
+                first_error.unwrap_or_default()
+            );
         }
         // A scale-up only counts as Changed if at least one instance was
         // actually added. If every create failed (or all were trimmed as
@@ -394,6 +427,14 @@ pub(crate) async fn reconcile_service(
     provision_service_certs(state, config).await;
 
     Ok(outcome)
+}
+
+/// Undo `reconcile_service`'s early config update after a failed deploy.
+async fn restore_config(state: &AppState, name: &str, previous: (ServiceConfig, u32)) {
+    if let Some(svc) = state.services.write().await.get_mut(name) {
+        svc.config = previous.0;
+        svc.desired_replicas = previous.1;
+    }
 }
 
 pub use crate::operations::{promote, redeploy, rollback, scale, start, stop, stop_all};
