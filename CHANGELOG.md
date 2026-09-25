@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Services pinned to the master itself were still treated as remote by the
+  watchdog and the declarative prune (#176).** The watchdog never healed
+  such a service: once its container crashed it stayed down and its route
+  was dropped. Pruning one broadcast `Stop` to the agents, which don't host
+  it, and forgot the service while its container kept running with its
+  ports bound. Both paths, and the startup restore (#151), now share one
+  check: a pin that names the master is local.
+- **Agent placeholders matched pins by substring.** When an agent
+  connected, a service pinned to a master named `ubuntu` was attached to an
+  agent at `ubuntu-16gb-fsn1-1`. Pins now resolve exactly, as they already
+  did for the re-sync and for deploys (#124).
+
 ## [0.3.0-rc.4] - 2026-09-25
 
 Fixes from running rc.2 and rc.3 in production: startup and placement

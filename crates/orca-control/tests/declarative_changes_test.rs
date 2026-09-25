@@ -122,3 +122,39 @@ async fn a_manual_scale_survives_but_a_replicas_edit_is_applied() {
     apply_config_dir(&state, dir.to_str().unwrap()).await;
     assert_eq!(state.services.read().await["relay"].desired_replicas, 3);
 }
+
+/// #176: pruning a service pinned to the master itself must stop its local
+/// container. It used to broadcast Stop to the agents (none of which host
+/// it) and forget the service, leaving the container running unmanaged
+/// with its ports bound.
+#[tokio::test]
+async fn pruning_a_master_self_pinned_service_stops_its_local_container() {
+    let tmp = tempfile::tempdir().unwrap();
+    let runtime = Arc::new(MockRuntime::with_host_port(9000));
+    let state = state_with_store(&tmp.path().join("c.db"), runtime.clone());
+    let dir = tmp.path().join("services");
+    write_service(
+        &dir,
+        &format!("{RELAY}\n    [service.placement]\n    node = \"localhost\"\n"),
+    );
+    let other = dir.join("keep");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(
+        other.join("service.toml"),
+        "[[service]]\nname = \"keep\"\nimage = \"nginx:latest\"\nport = 8081\n",
+    )
+    .unwrap();
+    apply_config_dir(&state, dir.to_str().unwrap()).await;
+    assert_eq!(runtime.count(MockOpKind::Create).await, 2);
+
+    std::fs::remove_dir_all(dir.join("relay")).unwrap();
+    apply_config_dir(&state, dir.to_str().unwrap()).await;
+
+    assert!(!state.services.read().await.contains_key("relay"));
+    assert_eq!(
+        runtime.count(MockOpKind::Stop).await,
+        1,
+        "the local container must be stopped"
+    );
+    assert_eq!(runtime.count(MockOpKind::Remove).await, 1);
+}

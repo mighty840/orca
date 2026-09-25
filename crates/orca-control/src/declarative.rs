@@ -171,18 +171,13 @@ pub async fn apply_config_dir(state: &AppState, dir: &str) {
 async fn prune_service(state: &AppState, name: &str) {
     info!("Declaratively pruning '{name}' (removed from service.toml)");
 
+    // A pin naming the master itself is local: broadcasting Stop to the
+    // agents would leave its container running, unmanaged (#176).
     let is_remote = {
         let services = state.services.read().await;
         services
             .get(name)
-            .map(|s| {
-                s.config
-                    .placement
-                    .as_ref()
-                    .and_then(|p| p.node.as_ref())
-                    .is_some()
-            })
-            .unwrap_or(false)
+            .is_some_and(|s| crate::placement::placed_on_agent(&s.config))
     };
 
     if is_remote {

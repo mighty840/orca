@@ -104,6 +104,19 @@ pub(crate) fn pin_matches_master(pin: &str) -> bool {
     pin == "master" || pin == "localhost" || pin == "127.0.0.1" || pin == master_hostname()
 }
 
+/// Whether `config` runs on an agent rather than on the master: it has a
+/// placement pin, and the pin doesn't name the master itself. A pin to the
+/// master's own hostname is local. Treating it as remote made startup file
+/// such services as placeholders (#151), the watchdog never heal them, and
+/// the declarative prune leave their container running (#176).
+pub(crate) fn placed_on_agent(config: &ServiceConfig) -> bool {
+    config
+        .placement
+        .as_ref()
+        .and_then(|p| p.node.as_deref())
+        .is_some_and(|pin| !pin_matches_master(pin))
+}
+
 /// Find a registered node matching the service's placement constraint.
 ///
 /// Returns `Ok(None)` when no placement node is set, or when the pin

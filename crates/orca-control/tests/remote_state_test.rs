@@ -254,3 +254,41 @@ async fn watchdog_placement_guard_prevents_reconcile_with_zero_instances() {
         "placement guard must prevent local reconcile even with zero instances"
     );
 }
+
+/// #176: a service pinned to the master's OWN hostname runs on the master, so
+/// the watchdog must heal it. It used to treat every pin as remote, so a
+/// crashed master-self-pinned service stayed down and its route was dropped.
+#[tokio::test]
+async fn watchdog_heals_a_service_pinned_to_the_master_itself() {
+    let state = make_state("tok");
+    let hostname = std::fs::read_to_string("/etc/hostname")
+        .map(|s| s.trim().to_string())
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "master".to_string());
+    {
+        let mut services = state.services.write().await;
+        let mut config = make_config("self-pinned");
+        config.placement = Some(PlacementConstraint {
+            node: Some(hostname),
+            labels: None,
+            requires_gpu: None,
+        });
+        // No instances: the container crashed and was pruned.
+        services.insert("self-pinned".into(), ServiceState::from_config(config));
+    }
+
+    run_watchdog_cycle(&state).await;
+
+    let services = state.services.read().await;
+    let ids: Vec<&str> = services["self-pinned"]
+        .instances
+        .iter()
+        .map(|i| i.handle.runtime_id.as_str())
+        .collect();
+    assert_eq!(
+        ids.len(),
+        1,
+        "the watchdog must recreate it locally: {ids:?}"
+    );
+    assert!(!ids[0].starts_with("remote-"), "{ids:?}");
+}

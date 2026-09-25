@@ -76,3 +76,36 @@ async fn paused_services_are_left_out_of_the_resync() {
         other => panic!("expected a Reconcile, got {other:?}"),
     }
 }
+
+/// Placeholders attach by exact pin resolution, like the re-sync above. A
+/// substring match on the address gave an agent at `ubuntu-16gb-fsn1-1` the
+/// services of a master pinned as `ubuntu`.
+#[tokio::test]
+async fn placeholders_do_not_match_a_pin_that_is_a_prefix_of_the_agent() {
+    let state = state_with_agent().await;
+    state
+        .registered_nodes
+        .write()
+        .await
+        .get_mut(&AGENT)
+        .unwrap()
+        .address = "ubuntu-16gb-fsn1-1:6881".into();
+    {
+        let mut services = state.services.write().await;
+        let mut on_master = pinned("on-master");
+        on_master.placement.as_mut().unwrap().node = Some("ubuntu".into());
+        let mut on_agent = pinned("on-agent");
+        on_agent.placement.as_mut().unwrap().node = Some("ubuntu-16gb-fsn1-1".into());
+        services.insert("on-master".into(), ServiceState::from_config(on_master));
+        services.insert("on-agent".into(), ServiceState::from_config(on_agent));
+    }
+
+    crate::ws_handler::placeholders::upsert_remote_placeholders(&state, AGENT).await;
+
+    let services = state.services.read().await;
+    assert!(
+        services["on-master"].instances.is_empty(),
+        "not the agent's"
+    );
+    assert_eq!(services["on-agent"].instances.len(), 1);
+}
