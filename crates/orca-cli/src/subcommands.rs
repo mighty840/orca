@@ -110,9 +110,12 @@ pub enum BackupAction {
     /// Restore a Docker volume from the latest local backup, or from S3
     RestoreVolume {
         volume_name: String,
-        /// S3 key of the volume tarball, e.g. agents/<host>/<date>/<volume>.tar.gz
+        /// S3 key of the volume tarball, e.g. agents/<host>/<date>/<volume>.tar.gz.age
         #[arg(long)]
         from_s3: Option<String>,
+        /// age identity file (from `age-keygen`) for encrypted tarballs
+        #[arg(long)]
+        identity: Option<std::path::PathBuf>,
     },
 }
 

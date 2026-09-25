@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Volume backups ignored `age_recipients` (#231).** Config files, secrets
+  and bind-mount archives were encrypted, but Docker volume tarballs,
+  including every database, were stored locally and uploaded to S3 in
+  plaintext.
+  - With recipients set, each tarball is now encrypted to
+    `<volume>.tar.gz.age` right after it is written, and the plaintext is
+    removed. If encryption fails, the volume counts as failed and nothing
+    is kept in clear.
+  - The summary says `volumes N/M encrypted`.
+  - `orca backup restore-volume` takes `--identity` and decrypts local or
+    S3 `.age` tarballs, streaming to a private staging directory.
+  - S3 retention counts a volume's encrypted and plaintext tarballs as one
+    group, so the old plaintext copies age out.
 - **An agent reconnect redeployed paused services (#227).** The master's
   re-sync told the agent to run every service placed on it, paused ones
   included, so reconnecting undid `orca stop`. Paused services are now left

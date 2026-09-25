@@ -87,3 +87,30 @@ fn s3_plan_prunes_per_artifact_and_leaves_foreign_keys_alone() {
         "oldest pruned"
     );
 }
+
+/// #231: once volumes are encrypted, the old plaintext tarballs must age out
+/// with the encrypted ones, not be held forever by `keep_min` in a group of
+/// their own.
+#[test]
+fn encrypted_and_plain_volume_tarballs_share_a_group() {
+    let day = 86_400;
+    let now = 1_790_121_600 + 30 * day; // 2026-10-23
+    let mut keys = Vec::new();
+    for d in 1..=10 {
+        keys.push(format!("agents/host/2026-09-{d:02}/orca-db-data.tar.gz"));
+    }
+    for d in 11..=30 {
+        keys.push(format!(
+            "agents/host/2026-09-{d:02}/orca-db-data.tar.gz.age"
+        ));
+    }
+    let plan = s3_prune_plan(&keys, now, 14, 7);
+    for d in 1..=10 {
+        let k = format!("agents/host/2026-09-{d:02}/orca-db-data.tar.gz");
+        assert!(plan.contains(&k), "old plaintext {k} must be pruned");
+    }
+    assert!(
+        plan.iter()
+            .all(|k| !k.ends_with("09-30/orca-db-data.tar.gz.age"))
+    );
+}

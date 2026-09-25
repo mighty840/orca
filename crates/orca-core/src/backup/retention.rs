@@ -33,7 +33,10 @@ pub fn to_prune<T: Clone>(
 /// Where an S3 key belongs, and when it was written, from the layout orca
 /// uploads with:
 /// - `master/<date>/<name>_<YYYYmmddTHHMMSSZ>.<ext>[.age]` → group `master/<name>`
-/// - `agents/<host>/<date>/<file>` → group `agents/<host>/<file>` (dated by `<date>`)
+/// - `agents/<host>/<date>/<file>[.age]` → group `agents/<host>/<file>` (dated
+///   by `<date>`). A volume's encrypted and plaintext tarballs share a group
+///   (#231), so once encryption is on, the old plaintext copies age out
+///   instead of `keep_min` keeping the last few forever.
 ///
 /// Returns `None` for anything else, which is then never pruned.
 pub fn s3_group(key: &str) -> Option<(String, u64)> {
@@ -46,6 +49,9 @@ pub fn s3_group(key: &str) -> Option<(String, u64)> {
         ["agents", host, date, file] => {
             let d = NaiveDate::parse_from_str(date, "%Y-%m-%d").ok()?;
             let t = d.and_hms_opt(0, 0, 0)?.and_utc().timestamp();
+            let file = file
+                .strip_suffix(super::encrypt::AGE_SUFFIX)
+                .unwrap_or(file);
             Some((format!("agents/{host}/{file}"), t.try_into().ok()?))
         }
         _ => None,

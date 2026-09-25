@@ -42,6 +42,8 @@ async fn attempt_backup(backup_cfg: &orca_core::backup::BackupConfig, report: &m
 
         println!("Backing up {} volume(s) to {}", volumes.len(), backup_dir);
         report.volumes_total = volumes.len() as u32;
+        report.volumes_encrypted = !backup_cfg.age_recipients.is_empty();
+        let dir = std::path::Path::new(&backup_dir);
         let mut hook_failed: Vec<String> = Vec::new();
 
         for vol in &volumes {
@@ -63,7 +65,12 @@ async fn attempt_backup(backup_cfg: &orca_core::backup::BackupConfig, report: &m
                     }
                 }
             }
-            match run_backup_container(&docker, vol, &backup_dir).await {
+            let sealed = match run_backup_container(&docker, vol, &backup_dir).await {
+                Ok(()) => super::seal::seal(&backup_cfg.age_recipients, dir, vol)
+                    .map_err(|e| format!("encrypting {vol} failed, so it was not stored: {e:#}")),
+                Err(e) => Err(format!("tar of {vol} failed: {e}")),
+            };
+            match sealed {
                 Ok(()) => {
                     println!("done");
                     if !hook_failed.contains(vol) {
@@ -72,7 +79,7 @@ async fn attempt_backup(backup_cfg: &orca_core::backup::BackupConfig, report: &m
                 }
                 Err(e) => {
                     println!("FAILED");
-                    report.fail(format!("tar of {vol} failed: {e}"));
+                    report.fail(e);
                 }
             }
         }
@@ -141,7 +148,8 @@ async fn backup_bind_mounts(
 }
 
 /// Upload each volume tarball from a completed local backup to all S3 targets.
-/// Uses `{vol}_{epoch}.tar.gz` as the S3 key so daily backups don't overwrite each other.
+/// Keys are `agents/<host>/<date>/<file>`, so daily backups don't overwrite
+/// each other.
 pub(super) fn upload_volumes_to_s3(
     config: &orca_core::backup::BackupConfig,
     volumes: &[String],
@@ -164,11 +172,14 @@ pub(super) fn upload_volumes_to_s3(
     let date = chrono::Utc::now().format("%Y-%m-%d");
 
     for vol in volumes {
-        let local_path = std::path::Path::new(backup_dir).join(format!("{vol}.tar.gz"));
-        if !local_path.exists() {
+        // The sealed `.tar.gz.age` when encryption is on (#231).
+        let Some(local_path) = super::seal::tarball(std::path::Path::new(backup_dir), vol) else {
             continue;
-        }
-        let s3_name = format!("agents/{hostname}/{date}/{vol}.tar.gz");
+        };
+        let Some(file_name) = local_path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        let s3_name = format!("agents/{hostname}/{date}/{file_name}");
         for target in &s3_targets {
             report.s3_total += 1;
             match orca_core::backup::s3::upload(&local_path, target, &s3_name) {
