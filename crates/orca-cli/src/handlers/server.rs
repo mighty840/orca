@@ -17,9 +17,15 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
     let mut cluster_config = cluster_config;
     if cluster_config.api_tokens.is_empty() {
         let token = ensure_cluster_token();
-        cluster_config.api_tokens = vec![token.clone()];
-        println!("Cluster token: {token}");
-        println!("Use this to join nodes: orca join <this-ip>:6880 --token {token}");
+        cluster_config.api_tokens = vec![token];
+        // Never print the token itself: under systemd, stdout goes to the
+        // journal, and from there often to a log pipeline (#226).
+        let path = token_path();
+        println!("Cluster token: stored in {}", path.display());
+        println!(
+            "Join nodes with: orca join <this-ip>:6880 --token \"$(cat {})\"",
+            path.display()
+        );
     }
 
     info!(

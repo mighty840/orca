@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An unresolved `${secrets.X}` in a token became a valid admin token
+  (#226).** When a `[[token]]` or `api_tokens` secret was missing, or the
+  secrets store could not be opened, the token was loaded as the literal
+  string `${secrets.X}`, so anyone who had read `cluster.toml` could
+  authenticate with it. Such tokens, and empty ones, are now dropped with an
+  error, never loaded as literals. Other secret-backed fields (AI key, SMTP
+  password, S3 keys, setup key) log a warning naming the missing secret.
+- **`orca server` printed the cluster token on every start (#226).** Under
+  systemd that put the admin token in the journal. It now prints the token
+  file's path instead.
 - **A service pinned to the master's own hostname came back as "down" after
   every master restart (#151).** Startup filed any pinned service as a remote
   placeholder, so the master never re-attached to its running container: the

@@ -109,3 +109,72 @@ secret_key = "${secrets.S3_SECRET_KEY}"
         _ => panic!("expected S3 target"),
     }
 }
+
+/// Write `cluster.toml` into `home` and load it.
+fn load_with(home: &TempHome, body: &str) -> ClusterConfig {
+    let toml_path = home.path().join("cluster.toml");
+    // Body first: top-level keys like `api_tokens` must precede any table.
+    std::fs::write(&toml_path, format!("{body}\n[cluster]\nname = \"test\"\n")).unwrap();
+    ClusterConfig::load(&toml_path).unwrap()
+}
+
+/// #226: a `[[token]]` whose secret is missing used to be loaded as the
+/// literal `${secrets.X}`, a valid admin token for anyone who had read
+/// cluster.toml. It must be dropped instead.
+#[test]
+fn token_with_a_missing_secret_is_dropped_not_literal() {
+    let home = TempHome::new();
+    let mut store = crate::secrets::SecretStore::open(crate::secrets::default_path()).unwrap();
+    store.set("CI_TOKEN", "ci-secret-value").unwrap();
+    drop(store);
+
+    let config = load_with(
+        &home,
+        r#"
+api_tokens = ["${secrets.LEGACY_MISSING}", "plain-legacy"]
+
+[[token]]
+name = "laptop"
+value = "${secrets.ORCA_LAPTOP_TOKEN}"
+role = "admin"
+
+[[token]]
+name = "ci"
+value = "${secrets.CI_TOKEN}"
+role = "deployer"
+
+[[token]]
+name = "empty"
+value = ""
+"#,
+    );
+
+    let tokens: Vec<(&str, &str)> = config
+        .token
+        .iter()
+        .map(|t| (t.name.as_str(), t.value.as_str()))
+        .collect();
+    assert_eq!(tokens, [("ci", "ci-secret-value")]);
+    assert_eq!(config.api_tokens, ["plain-legacy"]);
+    assert!(
+        !config.token.iter().any(|t| t.value.contains("${secrets.")),
+        "no unresolved reference may survive as a token"
+    );
+}
+
+/// A non-credential field keeps its value when the secret is missing: it
+/// fails visibly where it's used instead of silently disappearing.
+#[test]
+fn non_token_field_with_a_missing_secret_is_left_as_is() {
+    let home = TempHome::new();
+    let _store = crate::secrets::SecretStore::open(crate::secrets::default_path()).unwrap();
+
+    let config = load_with(
+        &home,
+        "\n[ai]\nprovider = \"openai\"\napi_key = \"${secrets.NOPE}\"\n",
+    );
+    assert_eq!(
+        config.ai.unwrap().api_key.as_deref(),
+        Some("${secrets.NOPE}")
+    );
+}
