@@ -93,6 +93,8 @@ pub(crate) async fn reconcile_service(
     state: &AppState,
     config: &ServiceConfig,
 ) -> anyhow::Result<ReconcileOutcome> {
+    // Keep the watchdog off this service while it is being worked on (#173).
+    let _in_flight = crate::in_flight::InFlight::mark(state, &config.name);
     let desired = match &config.replicas {
         Replicas::Fixed(n) => *n,
         Replicas::Auto => 1,

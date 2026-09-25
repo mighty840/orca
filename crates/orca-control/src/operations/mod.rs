@@ -54,6 +54,9 @@ fn load_fresh_config(service_name: &str) -> Option<orca_core::config::ServiceCon
 /// Re-reads `service.toml` from disk if available so config edits take effect
 /// without needing a full `orca deploy`.
 pub async fn redeploy(state: &AppState, service_name: &str) -> anyhow::Result<()> {
+    // Held across the whole redeploy, including the window after the instance
+    // list is cleared below, so the watchdog doesn't race it (#173).
+    let _in_flight = crate::in_flight::InFlight::mark(state, service_name);
     let cached_config = {
         let services = state.services.read().await;
         let svc = services
