@@ -1,5 +1,6 @@
 mod ai;
 mod cluster;
+mod resolve_secrets;
 mod service;
 
 use std::path::Path;
@@ -41,64 +42,6 @@ impl ClusterConfig {
         }
         config.resolve_secrets();
         Ok(config)
-    }
-
-    /// Resolve `${secrets.X}` patterns in config fields that may contain secrets.
-    fn resolve_secrets(&mut self) {
-        let store = match crate::secrets::open_configured() {
-            Ok(s) => s,
-            Err(_) => return,
-        };
-        let resolve = |s: &mut Option<String>| {
-            if let Some(val) = s
-                && val.contains("${secrets.")
-            {
-                let as_map = std::collections::HashMap::from([("_".to_string(), val.clone())]);
-                let resolved = store.resolve_env(&as_map);
-                *val = resolved.get("_").cloned().unwrap_or_default();
-            }
-        };
-        // AI config
-        if let Some(ai) = &mut self.ai {
-            resolve(&mut ai.api_key);
-            resolve(&mut ai.endpoint);
-            if let Some(alerts) = &mut ai.alerts
-                && let Some(channels) = &mut alerts.channels
-                && let Some(email) = &mut channels.email
-            {
-                let mut p = Some(email.password.clone());
-                resolve(&mut p);
-                if let Some(resolved) = p {
-                    email.password = resolved;
-                }
-            }
-        }
-        // Network config
-        if let Some(net) = &mut self.network {
-            resolve(&mut net.setup_key);
-        }
-        // Named API tokens
-        for token in &mut self.token {
-            let mut v = Some(token.value.clone());
-            resolve(&mut v);
-            if let Some(resolved) = v {
-                token.value = resolved;
-            }
-        }
-        // Backup S3 credentials
-        if let Some(backup) = &mut self.backup {
-            for target in &mut backup.targets {
-                if let BackupTarget::S3 {
-                    access_key,
-                    secret_key,
-                    ..
-                } = target
-                {
-                    resolve(access_key);
-                    resolve(secret_key);
-                }
-            }
-        }
     }
 }
 
