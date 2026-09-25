@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A service whose container exited with code 0 stayed down (#175).** Such
+  a container is recorded as `Completed`. The watchdog neither pruned it nor
+  counted it as missing, so the service sat at 1/1 until someone redeployed
+  by hand. That was Gitea, seven times in a month: its s6 supervisor exits 0
+  when the OOM killer takes Gitea. The watchdog now prunes `Completed`
+  instances of services that should be running, and counts only live
+  instances, so it replaces the container.
 - **A failed deploy deleted the healthy container, reported success, and was
   never retried (#174).**
   - **The old container is kept on failure.** A replacement now keeps the

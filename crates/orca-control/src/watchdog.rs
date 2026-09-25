@@ -151,6 +151,11 @@ async fn check_and_prune(state: &AppState, service_name: &str, runtime_kind: Run
 
     let mut removed = 0u32;
     let mut failed_pruned = 0u32;
+    // A container that exits 0 is `Completed`. For a service that should be
+    // running that is an outage, not success: Gitea's s6 supervisor exits 0
+    // when its child is OOM-killed, and the instance used to stay in the list
+    // as 1/1 until someone redeployed by hand (#175).
+    let long_running = svc.desired_replicas > 0;
     svc.instances.retain(|inst| {
         if inst.handle.runtime_id.starts_with("remote-") {
             return true;
@@ -162,6 +167,10 @@ async fn check_and_prune(state: &AppState, service_name: &str, runtime_kind: Run
                 false
             }
             WorkloadStatus::Stopped => {
+                removed += 1;
+                false
+            }
+            WorkloadStatus::Completed if long_running => {
                 removed += 1;
                 false
             }
@@ -205,7 +214,21 @@ async fn check_and_prune(state: &AppState, service_name: &str, runtime_kind: Run
         return false;
     }
 
-    let current = svc.instances.len() as u32;
+    // Count only instances that are up or on their way up, as the reconciler
+    // does: an exited one that survived pruning must not pass for a replica.
+    // Remote placeholders always count: their agent's heartbeat owns their
+    // status, not this watchdog.
+    let current = svc
+        .instances
+        .iter()
+        .filter(|i| {
+            i.handle.runtime_id.starts_with("remote-")
+                || !matches!(
+                    i.status,
+                    WorkloadStatus::Completed | WorkloadStatus::Stopped | WorkloadStatus::Failed
+                )
+        })
+        .count() as u32;
     let desired = svc.desired_replicas;
 
     if current < desired {
