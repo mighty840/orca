@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A service pinned to the master's own hostname came back as "down" after
+  every master restart (#151).** Startup filed any pinned service as a remote
+  placeholder, so the master never re-attached to its running container: the
+  service showed 0/1 replicas, lost health checks and routes, and raised a
+  Critical alert while it kept running. A pin naming the master (`master`,
+  `localhost`, `127.0.0.1` or its hostname) is now restored as local.
+
 ## [0.3.0-rc.3] - 2026-09-24
 
 Hotfix for rc.2.
