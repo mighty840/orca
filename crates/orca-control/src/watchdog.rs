@@ -57,6 +57,12 @@ async fn check_services(state: &AppState) {
     let mut reconciled = 0u32;
 
     for (name, runtime_kind) in &service_info {
+        // A deploy or redeploy is replacing this service's containers right
+        // now: its instance list is mid-change, and reconciling it here
+        // would create a second container for the same name (#173).
+        if crate::in_flight::is_in_flight(state, name) {
+            continue;
+        }
         let needs_reconcile = check_and_prune(state, name, *runtime_kind).await;
 
         if needs_reconcile {

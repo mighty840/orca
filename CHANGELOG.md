@@ -45,6 +45,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     suggesting `127.0.0.1:`.
   - A container picks up the new binding when it is next recreated; the
     upgrade itself restarts nothing.
+- **Every redeploy SIGKILLed the running container (#172).** Creating the
+  replacement ran `docker rm -f` on the old container first, so Postgres,
+  MariaDB, ClickHouse and every other service were killed mid-write on each
+  webhook deploy, spec change or health restart. The "graceful" stop that
+  followed found nothing. A container being replaced now gets SIGTERM and 30
+  seconds to shut down, then a normal remove, forced only if that fails. The
+  old container is still replaced before the new one starts. Overlapping
+  swaps are a later change.
+- **The watchdog raced redeploys (#173).** A redeploy empties the service's
+  instance list before creating the replacement. The watchdog saw 0/N in
+  that window and started its own container for the same name. Services
+  being deployed, redeployed or reconciled are now marked in flight, and
+  the watchdog leaves them alone until the work is done.
 - **Services pinned to the master itself were still treated as remote by the
   watchdog and the declarative prune (#176).** The watchdog never healed
   such a service: once its container crashed it stayed down and its route

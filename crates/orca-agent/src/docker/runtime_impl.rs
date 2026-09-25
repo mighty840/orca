@@ -24,6 +24,61 @@ impl AsAny for ContainerRuntime {
     }
 }
 
+/// How long a container being replaced gets to shut down cleanly before
+/// Docker kills it (#172). Docker's own default is 10 s; databases flushing
+/// under load want more.
+pub(crate) const REPLACE_GRACE_SECS: i64 = 30;
+
+impl ContainerRuntime {
+    /// Stop a container named `name` with [`REPLACE_GRACE_SECS`] of SIGTERM
+    /// grace, then remove it. Missing or already-stopped containers are fine.
+    /// A remove that still fails is forced, with a warning, so a deploy never
+    /// wedges on it.
+    async fn stop_and_remove_existing(&self, name: &str) {
+        match self
+            .docker
+            .stop_container(
+                name,
+                Some(StopContainerOptions {
+                    t: REPLACE_GRACE_SECS,
+                }),
+            )
+            .await
+        {
+            Ok(()) => info!("Stopped {name} before replacing it"),
+            Err(e) if is_status(&e, &[304, 404]) => {}
+            Err(e) => tracing::warn!("could not stop {name} gracefully: {e}"),
+        }
+        let remove = |force| {
+            self.docker.remove_container(
+                name,
+                Some(RemoveContainerOptions {
+                    force,
+                    ..Default::default()
+                }),
+            )
+        };
+        match remove(false).await {
+            Ok(()) => {}
+            Err(e) if is_status(&e, &[404]) => {}
+            Err(e) => {
+                tracing::warn!("could not remove {name} ({e}); forcing it");
+                let _ = remove(true).await;
+            }
+        }
+    }
+}
+
+/// Whether a Docker API error carries one of `codes` (304 not modified:
+/// already stopped; 404: no such container).
+fn is_status(e: &bollard::errors::Error, codes: &[u16]) -> bool {
+    matches!(
+        e,
+        bollard::errors::Error::DockerResponseServerError { status_code, .. }
+            if codes.contains(status_code)
+    )
+}
+
 #[async_trait]
 impl Runtime for ContainerRuntime {
     fn name(&self) -> &str {
@@ -65,16 +120,12 @@ impl Runtime for ContainerRuntime {
             platform: None,
         };
 
-        let _ = self
-            .docker
-            .remove_container(
-                &container_name,
-                Some(RemoveContainerOptions {
-                    force: true,
-                    ..Default::default()
-                }),
-            )
-            .await;
+        // Replace an existing container gracefully (#172). This used to be
+        // `docker rm -f`, a SIGKILL: every redeploy killed Postgres, MariaDB
+        // and ClickHouse mid-write, and the "graceful" stop afterwards found
+        // nothing. Done after the image pull and network setup, so a failed
+        // pull still leaves the old container running.
+        self.stop_and_remove_existing(&container_name).await;
 
         let response = self
             .docker

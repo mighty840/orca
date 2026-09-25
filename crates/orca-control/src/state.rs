@@ -42,6 +42,8 @@ pub struct AppState {
     pub api_tokens: std::sync::RwLock<Vec<String>>,
     /// The cluster-token rotation in progress, if any (#210).
     pub token_rotation: RwLock<Option<crate::token_rotation::Rotation>>,
+    /// Services being deployed or reconciled right now (#173); see `in_flight`.
+    pub deploys_in_flight: std::sync::Mutex<HashMap<String, u32>>,
     /// Pending commands for agent nodes, keyed by node_id.
     /// Uses serde_json::Value to avoid circular dependency on orca-agent types.
     pub pending_commands: RwLock<HashMap<u64, Vec<serde_json::Value>>>,
@@ -273,6 +275,7 @@ impl AppState {
             webhooks: crate::webhook::new_store(),
             api_tokens: std::sync::RwLock::new(api_tokens),
             token_rotation: RwLock::new(None),
+            deploys_in_flight: std::sync::Mutex::new(HashMap::new()),
             deploy_history: RwLock::new(crate::deploy_history::DeployHistory::new()),
             acme_manager: None,
             cert_resolver: None,

@@ -15,6 +15,7 @@ pub mod dependents;
 pub mod deploy_history;
 pub mod failures;
 pub mod health;
+pub(crate) mod in_flight;
 pub(crate) mod instance;
 pub(crate) mod master_node;
 pub mod metrics;
