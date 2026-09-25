@@ -303,6 +303,47 @@ async fn prunes_service_removed_from_config() {
     );
 }
 
+/// #227: the portal tenants were paused, then deleted from `service.toml`.
+/// Pausing used to exempt them from pruning, so they stayed in the registry
+/// and store forever, and an agent reconnect redeployed them.
+#[tokio::test]
+async fn paused_service_removed_from_config_is_pruned() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = tempfile::tempdir().unwrap();
+    write_service(tmp.path(), "web", WEB);
+    write_service(
+        tmp.path(),
+        "tenant",
+        r#"
+        [[service]]
+        name = "tenant"
+        image = "nginx:latest"
+        port = 9090
+        "#,
+    );
+    let state = state_with_store(&db.path().join("c.db"));
+    let dir = tmp.path().to_str().unwrap();
+    apply_config_dir(&state, dir).await;
+    orca_control::reconciler::stop(&state, "tenant")
+        .await
+        .unwrap();
+
+    std::fs::remove_dir_all(tmp.path().join("tenant")).unwrap();
+    apply_config_dir(&state, dir).await;
+
+    assert!(!state.services.read().await.contains_key("tenant"));
+    let store = state.store.as_ref().unwrap();
+    assert!(
+        store.get_service("tenant").unwrap().is_none(),
+        "store purged"
+    );
+    assert!(
+        !store.get_stopped().unwrap().contains("tenant"),
+        "stop-mark cleared"
+    );
+    assert!(state.services.read().await.contains_key("web"));
+}
+
 #[tokio::test]
 async fn empty_config_dir_does_not_prune() {
     // Guard: a transient/empty load must never mass-delete declared services.

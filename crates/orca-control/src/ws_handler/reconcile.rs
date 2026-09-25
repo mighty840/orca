@@ -68,6 +68,9 @@ pub(super) async fn send_reconcile(
     let services = state.services.read().await;
     let expected: Vec<Box<orca_core::types::WorkloadSpec>> = services
         .values()
+        // A paused service is not expected anywhere: including it made every
+        // agent reconnect redeploy it, undoing `orca stop` (#227).
+        .filter(|svc| !svc.stopped)
         .filter(|svc| {
             svc.config
                 .placement
@@ -109,3 +112,7 @@ pub(super) async fn send_reconcile(
     );
     let _ = tx.send(MasterMessage::Reconcile { expected }).await;
 }
+
+#[cfg(test)]
+#[path = "reconcile_tests.rs"]
+mod tests;
