@@ -76,6 +76,16 @@ pub trait Runtime: AsAny + Send + Sync + 'static {
     /// Start a previously created workload.
     async fn start(&self, handle: &WorkloadHandle) -> Result<()>;
 
+    /// Create and start a workload, replacing any existing one of the same
+    /// name. The container runtime keeps the existing workload aside and
+    /// restores it if the replacement fails to create or start (#174); the
+    /// default just creates and starts.
+    async fn create_and_start(&self, spec: &WorkloadSpec) -> Result<WorkloadHandle> {
+        let handle = self.create(spec).await?;
+        self.start(&handle).await?;
+        Ok(handle)
+    }
+
     /// Stop a running workload, waiting up to `timeout` for graceful shutdown.
     async fn stop(&self, handle: &WorkloadHandle, timeout: Duration) -> Result<()>;
 

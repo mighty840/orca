@@ -12,8 +12,9 @@ pub(crate) async fn create_and_start_instance(
     runtime: &dyn Runtime,
     spec: &WorkloadSpec,
 ) -> anyhow::Result<InstanceState> {
-    let handle = runtime.create(spec).await?;
-    runtime.start(&handle).await?;
+    // Keeps an existing same-name container aside and restores it if this
+    // one fails to create or start (#174).
+    let handle = runtime.create_and_start(spec).await?;
 
     let host_port = if let Some(port) = spec.port {
         runtime

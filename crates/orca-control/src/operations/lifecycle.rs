@@ -168,6 +168,7 @@ pub(crate) async fn rolling_update(
     };
 
     // Phase 1: Start all new instances and update the instance list.
+    let mut failed: Vec<String> = Vec::new();
     for i in 0..desired {
         let mut replica_spec = spec.clone();
         if desired > 1 {
@@ -186,12 +187,25 @@ pub(crate) async fn rolling_update(
             }
             Err(e) => {
                 tracing::error!("Rolling update failed for {}-{i}: {e}", config.name);
+                failed.push(format!("{}-{i}: {e}", config.name));
             }
         }
     }
 
     // Phase 2: Update routes to point only to new instances.
     update_routes_for_runtime(state, config).await;
+
+    // A replica failed: its old instance was kept (the runtime restores it),
+    // so stopping the old handles now would take down the only working copy
+    // (#174). Report the failure instead.
+    if !failed.is_empty() {
+        anyhow::bail!(
+            "rolling update of {}: {} of {desired} replica(s) failed, old instances kept: {}",
+            config.name,
+            failed.len(),
+            failed.join("; ")
+        );
+    }
 
     // Phase 3: Drain period -- let in-flight requests to old instances complete.
     tokio::time::sleep(DRAIN_PERIOD).await;

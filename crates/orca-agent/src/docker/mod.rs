@@ -1,6 +1,7 @@
 //! Docker container runtime implementing the [`Runtime`] trait via bollard.
 
 mod config_builder;
+mod replace;
 mod runtime;
 mod runtime_impl;
 mod stats;
