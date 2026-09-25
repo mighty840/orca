@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An agent reconnect redeployed paused services (#227).** The master's
+  re-sync told the agent to run every service placed on it, paused ones
+  included, so reconnecting undid `orca stop`. Paused services are now left
+  out.
+- **Paused services were never pruned after leaving `service.toml`
+  (#227).** Pausing exempted a service from pruning, so once its definition
+  was deleted it stayed in the registry and store forever. An undeclared
+  service is now pruned whether or not it is paused. A paused service that
+  is still declared stays paused.
 - **An unresolved `${secrets.X}` in a token became a valid admin token
   (#226).** When a `[[token]]` or `api_tokens` secret was missing, or the
   secrets store could not be opened, the token was loaded as the literal

@@ -112,14 +112,15 @@ pub async fn apply_config_dir(state: &AppState, dir: &str) {
     };
 
     // Prune services the master knows about that are no longer declared in
-    // `service.toml`. Paused (`stopped`) services are kept — pausing is an
-    // explicit "keep" signal. Guarded above, so an empty/garbled config view
-    // never reaches here.
+    // `service.toml`, paused ones included (#227): pausing keeps a service
+    // that is still declared, but once its definition is gone nothing could
+    // ever resume it, and it stayed in the registry and store forever.
+    // Guarded above, so an empty/garbled config view never reaches here.
     let to_prune: Vec<String> = {
         let services = state.services.read().await;
         services
             .keys()
-            .filter(|n| !declared.contains(n.as_str()) && !stopped.contains(n.as_str()))
+            .filter(|n| !declared.contains(n.as_str()))
             .cloned()
             .collect()
     };
