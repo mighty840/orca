@@ -161,3 +161,27 @@ fn snapshot_captures_all_state() {
     assert_eq!(snap.nodes.len(), 1);
     assert_eq!(snap.services.len(), 1);
 }
+
+/// #179: one undecodable row must not fail the whole load.
+#[test]
+fn an_undecodable_row_is_skipped_not_fatal() {
+    let store = temp_store();
+    let good: ServiceConfig = serde_json::from_value(serde_json::json!({
+        "name": "web", "image": "nginx:latest",
+    }))
+    .unwrap();
+    store.set_service("web", &good).unwrap();
+    {
+        let tx = store.db.begin_write().unwrap();
+        {
+            let mut table = tx.open_table(SERVICES).unwrap();
+            table.insert("broken", b"{not json".as_slice()).unwrap();
+        }
+        tx.commit().unwrap();
+    }
+
+    let services = store.get_all_services().unwrap();
+
+    assert_eq!(services.len(), 1);
+    assert!(services.contains_key("web"));
+}

@@ -107,7 +107,15 @@ pub async fn apply_config_dir(state: &AppState, dir: &str) {
     let declared: std::collections::HashSet<String> =
         valid.iter().map(|c| c.name.clone()).collect();
     let stopped: std::collections::HashSet<String> = match &state.store {
-        Some(s) => s.get_stopped().unwrap_or_default(),
+        Some(s) => match s.get_stopped() {
+            Ok(set) => set,
+            Err(e) => {
+                // Not the same as "nothing is paused": acting on an empty set
+                // would start paused services and prune nothing safely (#179).
+                warn!("declarative reconcile: cannot read paused services ({e}); skipping");
+                return;
+            }
+        },
         None => std::collections::HashSet::new(),
     };
 
