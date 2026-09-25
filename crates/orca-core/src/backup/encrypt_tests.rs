@@ -53,3 +53,30 @@ fn a_bad_recipient_is_an_error_not_a_plaintext_fallback() {
     assert!(err.contains("invalid age recipient"), "{err}");
     assert!(encrypt_to_temp(&src, &[]).is_err());
 }
+
+/// #231: volume tarballs go through the file-to-file path, which streams.
+#[test]
+fn file_to_file_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("orca-db-data.tar.gz");
+    let data: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&src, &data).unwrap();
+    let (public, private) = keypair();
+
+    let enc = dir.path().join("orca-db-data.tar.gz.age");
+    encrypt_file(&src, &enc, &[public]).unwrap();
+    assert!(
+        std::fs::read(&enc)
+            .unwrap()
+            .starts_with(b"age-encryption.org/v1")
+    );
+
+    let out = dir.path().join("restored.tar.gz");
+    decrypt_to_file(&enc, &private, &out).unwrap();
+    assert_eq!(std::fs::read(&out).unwrap(), data);
+
+    let (_, stranger) = keypair();
+    let bad = dir.path().join("bad.tar.gz");
+    assert!(decrypt_to_file(&enc, &stranger, &bad).is_err());
+    assert!(!bad.exists(), "no partial plaintext on failure");
+}

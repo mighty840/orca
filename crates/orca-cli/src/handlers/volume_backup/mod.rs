@@ -3,86 +3,14 @@
 mod bind_archive;
 mod bind_mounts;
 mod helpers;
+mod restore;
 mod run;
+mod seal;
 mod volume_owner;
 
-use bollard::Docker;
-use helpers::{find_latest_backup_dir, run_restore_container};
-
 pub(crate) use helpers::prune_old_backup_dirs;
+pub use restore::restore_volume;
 pub use run::backup_all_volumes;
-
-/// Restore a Docker volume from the latest local backup directory, or from
-/// the S3 object `from_s3` (#200: a fresh host has no local backups, so the
-/// tarballs in S3 were unreachable through the CLI). Returns success.
-pub async fn restore_volume(volume_name: &str, from_s3: Option<&str>) -> bool {
-    let docker = match Docker::connect_with_local_defaults() {
-        Ok(d) => d,
-        Err(e) => {
-            eprintln!("Failed to connect to Docker: {e}");
-            return false;
-        }
-    };
-
-    let backup_dir = match from_s3 {
-        Some(key) => match stage_from_s3(volume_name, key) {
-            Ok(dir) => dir,
-            Err(e) => {
-                eprintln!("Cannot fetch {key} from S3: {e:#}");
-                return false;
-            }
-        },
-        None => match find_latest_backup_dir() {
-            Some(d) => d,
-            None => {
-                eprintln!(
-                    "No backup directories found in ~/.orca/backups/. To restore from \
-                     S3, pass --from-s3 <key> (see `orca backup list`)."
-                );
-                return false;
-            }
-        },
-    };
-
-    let archive = format!("{backup_dir}/{volume_name}.tar.gz");
-    if !std::path::Path::new(&archive).exists() {
-        eprintln!("No backup found for volume '{volume_name}' in {backup_dir}");
-        return false;
-    }
-
-    println!("Restoring {volume_name} from {backup_dir} ...");
-    match run_restore_container(&docker, volume_name, &backup_dir).await {
-        Ok(()) => {
-            println!("Restored volume '{volume_name}' successfully.");
-            true
-        }
-        Err(e) => {
-            eprintln!("Restore failed: {e}");
-            false
-        }
-    }
-}
-
-/// Download `key` from the first S3 target into a fresh staging directory as
-/// `<volume>.tar.gz`, the layout `run_restore_container` expects.
-fn stage_from_s3(volume_name: &str, key: &str) -> anyhow::Result<String> {
-    let cfg = crate::handlers::backup::load_backup_config();
-    let target = cfg
-        .targets
-        .iter()
-        .find(|t| matches!(t, orca_core::backup::BackupTarget::S3 { .. }))
-        .ok_or_else(|| anyhow::anyhow!("no S3 backup target configured"))?;
-    anyhow::ensure!(
-        !key.ends_with(orca_core::backup::encrypt::AGE_SUFFIX),
-        "{key} is age-encrypted; volume tarballs are not, so this is not a volume backup"
-    );
-    let home = dirs_next::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
-    let stamp = chrono::Utc::now().timestamp();
-    let dir = home.join(format!(".orca/restore/{stamp}-{volume_name}"));
-    orca_core::fsutil::create_private_dir(&dir)?;
-    orca_core::backup::s3::download(target, key, &dir.join(format!("{volume_name}.tar.gz")))?;
-    Ok(dir.display().to_string())
-}
 
 #[cfg(test)]
 mod tests {

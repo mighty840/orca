@@ -24,8 +24,14 @@ pub async fn handle_backup(action: BackupAction) -> bool {
         BackupAction::RestoreVolume {
             volume_name,
             from_s3,
+            identity,
         } => {
-            return volume_backup::restore_volume(volume_name, from_s3.as_deref()).await;
+            return volume_backup::restore_volume(
+                volume_name,
+                from_s3.as_deref(),
+                identity.as_deref(),
+            )
+            .await;
         }
         _ => {}
     }

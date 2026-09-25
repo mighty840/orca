@@ -12,6 +12,8 @@ pub(crate) struct BackupReport {
     failures: Vec<String>,
     pub volumes_ok: u32,
     pub volumes_total: u32,
+    /// Volume tarballs were age-encrypted (#231).
+    pub volumes_encrypted: bool,
     pub hooks_run: u32,
     pub s3_ok: u32,
     pub s3_total: u32,
@@ -41,8 +43,13 @@ impl BackupReport {
     pub(crate) fn summary(&self) -> String {
         let mut parts = Vec::new();
         if self.volumes_total > 0 {
+            let encrypted = if self.volumes_encrypted {
+                " encrypted"
+            } else {
+                ""
+            };
             parts.push(format!(
-                "volumes {}/{} ({} pre-hook(s) run)",
+                "volumes {}/{}{encrypted} ({} pre-hook(s) run)",
                 self.volumes_ok, self.volumes_total, self.hooks_run
             ));
         }
