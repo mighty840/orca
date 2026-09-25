@@ -43,7 +43,7 @@ fn default_initial_delay() -> u64 {
 }
 
 /// Build-from-source configuration for a service.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct BuildConfig {
     /// Git repository URL (SSH or HTTPS).
     pub repo: String,
@@ -221,6 +221,11 @@ impl ServiceConfig {
                 self.name, p
             ));
         }
+        if let Some(memory) = self.resources.as_ref().and_then(|r| r.memory.as_deref())
+            && let Err(e) = crate::types::parse_memory_bytes(memory)
+        {
+            return Err(format!("service '{}': {e}", self.name));
+        }
         // #89 (network == name): NOT a hard error — prod runs five such
         // services healthily (incl. one agent-pinned), so the collision
         // alone doesn't break registration; the reported failure needs an
@@ -255,6 +260,35 @@ impl ServiceConfig {
             // Resource limits are container settings: a changed CPU or memory
             // cap must recreate the container like any other spec change.
             && self.resources == other.resources
+            // A different repo, branch or Dockerfile builds a different image.
+            && self.build == other.build
+    }
+
+    /// Whether two configs declare the same service, field for field, apart
+    /// from `replicas`.
+    ///
+    /// [`Self::spec_matches`] answers "must the container be recreated?";
+    /// this answers "has the declaration changed at all?" (#177). Placement,
+    /// probes, `pull_policy`, the deploy strategy, certificates and the rest
+    /// must be applied and persisted even when the container can stay: the
+    /// declarative loop used `spec_matches` alone, so such edits were never
+    /// applied, and a master restart restored the stale config from the store.
+    ///
+    /// `replicas` is left out because `orca scale` changes it at runtime; the
+    /// declarative loop compares it against the last declared value instead.
+    pub fn declared_matches(&self, other: &Self) -> bool {
+        // Comparing the serialized form covers every field, including ones
+        // added later, so this check cannot drift out of date the way a
+        // hand-written field list did. Map equality ignores key order.
+        let declared = |c: &Self| {
+            let mut v = serde_json::to_value(c).ok()?;
+            v.as_object_mut()?.remove("replicas");
+            Some(v)
+        };
+        match (declared(self), declared(other)) {
+            (Some(a), Some(b)) => a == b,
+            _ => false,
+        }
     }
 }
 

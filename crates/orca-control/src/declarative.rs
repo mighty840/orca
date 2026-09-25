@@ -129,17 +129,11 @@ pub async fn apply_config_dir(state: &AppState, dir: &str) {
 
     // Apply new/changed services. Never auto-start a paused service even if its
     // on-disk spec changed — resuming is an explicit `orca start`.
-    let changed: Vec<ServiceConfig> = {
-        let services = state.services.read().await;
-        valid
-            .into_iter()
-            .filter(|cfg| !stopped.contains(&cfg.name))
-            .filter(|cfg| match services.get(&cfg.name) {
-                None => true,
-                Some(svc) => !svc.config.spec_matches(cfg),
-            })
-            .collect()
-    };
+    let changed: Vec<ServiceConfig> = crate::config_diff::changed_services(
+        state,
+        valid.into_iter().filter(|cfg| !stopped.contains(&cfg.name)),
+    )
+    .await;
     if changed.is_empty() {
         return;
     }

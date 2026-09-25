@@ -186,19 +186,16 @@ pub(super) fn parse_resource_limits(spec: &WorkloadSpec) -> (Option<i64>, Option
     (memory, nano_cpus)
 }
 
-/// Parse a human-readable memory string (e.g. "512Mi", "2Gi") into bytes.
+/// Parse a memory limit into bytes. Config validation rejects bad units, so
+/// an error here means a spec that skipped validation: warn loudly, since
+/// the container then runs without a memory cap.
 fn parse_memory_string(s: &str) -> Option<i64> {
-    let s = s.trim();
-    if let Some(val) = s.strip_suffix("Gi") {
-        val.parse::<u64>()
-            .ok()
-            .map(|v| (v * 1024 * 1024 * 1024) as i64)
-    } else if let Some(val) = s.strip_suffix("Mi") {
-        val.parse::<u64>().ok().map(|v| (v * 1024 * 1024) as i64)
-    } else if let Some(val) = s.strip_suffix("Ki") {
-        val.parse::<u64>().ok().map(|v| (v * 1024) as i64)
-    } else {
-        s.parse::<i64>().ok()
+    match orca_core::types::parse_memory_bytes(s) {
+        Ok(bytes) => Some(bytes),
+        Err(e) => {
+            tracing::warn!("{e}; starting the container WITHOUT a memory limit");
+            None
+        }
     }
 }
 

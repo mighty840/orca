@@ -299,3 +299,69 @@ fn resolved_vs_unresolved_differs() {
         .insert("TOKEN".into(), "actual-secret-value-123".into());
     assert!(!a.spec_matches(&b));
 }
+
+/// #177: edits that leave the container as-is must still count as a change,
+/// or the declarative loop never applies or persists them.
+#[test]
+fn declared_matches_detects_non_container_edits() {
+    let a = base_config();
+    assert!(a.declared_matches(&a.clone()));
+
+    let mut placement = base_config();
+    placement.placement = Some(serde_json::from_str(r#"{"node": "vm1"}"#).unwrap());
+    let mut probe = base_config();
+    probe.liveness = Some(serde_json::from_str(r#"{"path": "/gesund"}"#).unwrap());
+    let mut pull = base_config();
+    pull.pull_policy = crate::types::PullPolicy::Always;
+    let mut cert = base_config();
+    cert.tls_cert = Some("/certs/a.pem".into());
+
+    for (what, b) in [
+        ("placement", placement),
+        ("liveness", probe),
+        ("pull_policy", pull),
+        ("tls_cert", cert),
+    ] {
+        assert!(a.spec_matches(&b), "{what}: no container change");
+        assert!(!a.declared_matches(&b), "{what}: must count as a change");
+        assert!(!b.declared_matches(&a), "{what}: removing it too");
+    }
+}
+
+#[test]
+fn declared_matches_ignores_replicas_and_env_order() {
+    let mut a = base_config();
+    let mut b = base_config();
+    b.replicas = crate::types::Replicas::Fixed(3);
+    for (k, v) in [("A", "1"), ("B", "2"), ("C", "3")] {
+        a.env.insert(k.into(), v.into());
+    }
+    for (k, v) in [("C", "3"), ("A", "1"), ("B", "2")] {
+        b.env.insert(k.into(), v.into());
+    }
+    assert!(a.declared_matches(&b));
+}
+
+#[test]
+fn spec_matches_detects_build_change() {
+    let mut a = base_config();
+    a.build = Some(serde_json::from_str(r#"{"repo": "git@x:a.git"}"#).unwrap());
+    let mut b = a.clone();
+    b.build.as_mut().unwrap().branch = Some("next".into());
+    assert!(!a.spec_matches(&b));
+}
+
+/// #177: `memory = "4g"` used to mean "no memory limit at all".
+#[test]
+fn validate_rejects_an_unparseable_memory_limit() {
+    let mut c = base_config();
+    c.resources = Some(crate::types::ResourceLimits {
+        memory: Some("4g".into()),
+        cpu: None,
+        gpu: None,
+    });
+    let err = c.validate().unwrap_err();
+    assert!(err.contains("4g"), "{err}");
+    c.resources.as_mut().unwrap().memory = Some("4Gi".into());
+    assert!(c.validate().is_ok());
+}
