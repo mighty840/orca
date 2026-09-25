@@ -12,11 +12,14 @@ use crate::state::{AppState, InstanceState};
 /// service placed on this node. Called on WS connect so the heartbeat and
 /// DeployResult handlers always have a slot to update.
 pub(super) async fn upsert_remote_placeholders(state: &AppState, node_id: u64) {
-    let node_addr = {
-        let nodes = state.registered_nodes.read().await;
-        nodes.get(&node_id).map(|n| n.address.clone())
-    };
-    let Some(node_addr) = node_addr else { return };
+    // Resolve pins exactly, as `send_reconcile` and the deploy path do
+    // (#124). A substring match on the address attached placeholders for a
+    // master pinned as `ubuntu` to an agent at `ubuntu-16gb-fsn1-1:6881`.
+    // A snapshot, so the node lock is released before the services lock.
+    let nodes = state.registered_nodes.read().await.clone();
+    if !nodes.contains_key(&node_id) {
+        return;
+    }
     let placeholder_id = format!("remote-{node_id}");
     let mut services = state.services.write().await;
     for svc in services.values_mut() {
@@ -24,8 +27,11 @@ pub(super) async fn upsert_remote_placeholders(state: &AppState, node_id: u64) {
             .config
             .placement
             .as_ref()
-            .and_then(|p| p.node.as_ref())
-            .is_some_and(|t| node_addr.contains(t.as_str()) || t == &node_id.to_string())
+            .and_then(|p| p.node.as_deref())
+            .is_some_and(|pin| {
+                crate::placement::resolve_placement(&nodes, pin)
+                    == crate::placement::PlacementResolution::Node(node_id)
+            })
         {
             continue;
         }

@@ -21,12 +21,7 @@ pub(crate) async fn restore_or_reconcile(
     // is already running. A pin naming the master itself is local (#151): as a
     // placeholder, its running container was never re-attached, so it showed
     // 0/1, lost health checks and routes, and raised a "down" alert.
-    if config
-        .placement
-        .as_ref()
-        .and_then(|p| p.node.as_deref())
-        .is_some_and(|pin| !crate::placement::pin_matches_master(pin))
-    {
+    if crate::placement::placed_on_agent(config) {
         let desired = match &config.replicas {
             orca_core::types::Replicas::Fixed(n) => *n,
             orca_core::types::Replicas::Auto => 1,
