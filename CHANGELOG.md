@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connected, a service pinned to a master named `ubuntu` was attached to an
   agent at `ubuntu-16gb-fsn1-1`. Pins now resolve exactly, as they already
   did for the re-sync and for deploys (#124).
+- **An agent silently reverted an edited token file (#210).** `orca join`
+  required `--token` or `ORCA_TOKEN` and copied it into
+  `~/.orca/cluster.token` on every start, so rotating by editing that file,
+  as on the master, was undone by the next restart. The token is now optional
+  and falls back to `~/.orca/cluster.token`. When the flag and the file
+  disagree, a warning names the file and says the flag wins. The value is
+  never logged.
 
 ## [0.3.0-rc.4] - 2026-09-25
 
