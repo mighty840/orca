@@ -153,13 +153,14 @@ pub enum Command {
     Join {
         /// Address of an existing cluster node
         address: String,
-        /// Cluster token for authentication.
+        /// Cluster token for authentication. Falls back to
+        /// ~/.orca/cluster.token when neither this nor ORCA_TOKEN is set.
         ///
         /// Prefer the ORCA_TOKEN environment variable (e.g. a systemd
         /// `EnvironmentFile=` with mode 0600): a `--token` value sits in the
         /// process list and the unit file, readable by every local user.
         #[arg(long, env = "ORCA_TOKEN", hide_env_values = true)]
-        token: String,
+        token: Option<String>,
         /// Run in the background as a daemon
         #[arg(short, long)]
         daemon: bool,

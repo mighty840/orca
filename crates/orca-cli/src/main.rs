@@ -147,6 +147,8 @@ async fn main() -> anyhow::Result<()> {
                 handlers::daemon::daemonize(&args)?;
                 return Ok(());
             }
+            let token =
+                handlers::join_token::resolve_token(token, &handlers::join_token::token_file())?;
             // SAFETY: single-threaded at this point, before tokio runtime starts work
             unsafe { std::env::set_var("ORCA_TOKEN", &token) };
             handlers::join::handle_join(
@@ -230,13 +232,29 @@ mod tests {
         assert!(join_token_arg().is_hide_env_values_set());
     }
 
+    /// #210: with no flag and no env, join parses; the token then comes
+    /// from ~/.orca/cluster.token (see `handlers::join_token`).
+    #[test]
+    fn join_parses_without_a_token() {
+        // Clap would take the env value; don't mutate the environment of a
+        // multithreaded test run, just skip where it happens to be set.
+        if std::env::var_os("ORCA_TOKEN").is_some() {
+            return;
+        }
+        let cli = Cli::try_parse_from(["orca", "join", "http://10.0.0.1:6880"]).expect("parses");
+        match cli.command {
+            Command::Join { token, .. } => assert_eq!(token, None),
+            _ => panic!("expected join"),
+        }
+    }
+
     #[test]
     fn join_still_accepts_an_explicit_token_flag() {
         let cli = Cli::try_parse_from(["orca", "join", "--token", "t0k", "http://10.0.0.1:6880"])
             .expect("parses");
         match cli.command {
             Command::Join { token, address, .. } => {
-                assert_eq!(token, "t0k");
+                assert_eq!(token.as_deref(), Some("t0k"));
                 assert_eq!(address, "http://10.0.0.1:6880");
             }
             _ => panic!("expected join"),
