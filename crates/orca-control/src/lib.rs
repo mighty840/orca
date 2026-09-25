@@ -30,6 +30,7 @@ mod restore;
 pub mod routes;
 pub mod scheduler;
 pub mod session;
+pub mod shutdown;
 pub mod state;
 pub mod stats;
 pub mod store;
@@ -204,12 +205,7 @@ pub async fn run_server_with_acme(
         listeners.push(listener);
     }
 
-    api_listen::serve_all(app, listeners, shutdown_signal()).await
-}
-
-async fn shutdown_signal() {
-    tokio::signal::ctrl_c()
-        .await
-        .expect("failed to install ctrl+c handler");
-    info!("Shutdown signal received");
+    let served = api_listen::serve_all(app, listeners, shutdown::signal_with_deadline()).await;
+    shutdown::mark_drained();
+    served
 }

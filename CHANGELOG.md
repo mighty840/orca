@@ -49,6 +49,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     a failed spec alone for 15 minutes rather than bouncing the old container
     every pass. A changed spec (the fix) is applied immediately, and
     `orca deploy` / `orca redeploy` always try.
+- **Stopping `orca server` with Ctrl-C removed every container on the host
+  (#178).** The server's exit path stopped and force-removed every
+  orca-managed container. Only SIGINT was handled, so under systemd, which
+  sends SIGTERM, the process died before reaching it, and restarts were
+  harmless by accident. Stopping orca now leaves workloads running; the next
+  start re-attaches. The teardown is opt-in with
+  `orca server --teardown-on-exit`, for development and tests.
+  - SIGTERM is now handled, so `systemctl stop|restart` shuts the API down
+    gracefully.
+  - The drain is capped at 10 seconds, because agent WebSocket sessions
+    never close on their own.
 - **Every backend's host port was published on all interfaces (#211).** A
   service's `port` was bound to a random host port on `0.0.0.0`, although
   only the node's own proxy and health checks use it, over `127.0.0.1`.

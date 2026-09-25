@@ -9,7 +9,11 @@ use super::port::{
 };
 
 /// Handle the `orca server` command.
-pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> {
+pub async fn handle_server(
+    config: &str,
+    proxy_port: u16,
+    teardown_on_exit: bool,
+) -> anyhow::Result<()> {
     check_privileged_port(proxy_port);
     cleanup_stale_redirects();
     let cluster_config = load_cluster_config_or_fail(std::path::Path::new(config))?;
@@ -221,9 +225,17 @@ pub async fn handle_server(config: &str, proxy_port: u16) -> anyhow::Result<()> 
     )
     .await?;
 
-    info!("Shutting down, cleaning up containers...");
     cleanup_port_redirects();
-    cleanup_runtime.cleanup_all().await;
+    // Stopping or restarting orca must not stop the workloads it manages: the
+    // next start re-attaches to them. This teardown used to run on every
+    // Ctrl-C, and only SIGTERM being unhandled kept `systemctl restart` from
+    // removing every container on the host (#178).
+    if teardown_on_exit {
+        info!("Shutting down, removing every orca-managed container (--teardown-on-exit)...");
+        cleanup_runtime.cleanup_all().await;
+    } else {
+        info!("Shutting down; containers keep running");
+    }
     info!("Shutdown complete");
     Ok(())
 }
