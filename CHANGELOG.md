@@ -15,6 +15,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   service showed 0/1 replicas, lost health checks and routes, and raised a
   Critical alert while it kept running. A pin naming the master (`master`,
   `localhost`, `127.0.0.1` or its hostname) is now restored as local.
+- **Config edits that don't change the container were never applied (#177).**
+  The declarative loop and the infra webhook only applied a service when its
+  container spec changed. Edits to placement, probes, `pull_policy`, the deploy
+  strategy, certificates or `replicas` were skipped and never persisted, so a
+  master restart restored the old config from the store. Every declared field
+  now counts:
+  - The container is recreated only when its spec changes.
+  - Other edits update the service in place and are persisted.
+  - A placement change moves the service: it is stopped on its old node, then
+    started on the new one.
+  - `replicas` is compared with the last declared value, so a manual
+    `orca scale` is kept until `service.toml` changes it.
+  - A changed `build` section (repo, branch, Dockerfile) now rebuilds the
+    image.
+- **An unparseable memory limit meant no memory limit (#177).** `memory = "4g"`
+  or `"512M"` silently removed the cgroup cap. Memory limits now accept a byte
+  count, binary units (`Ki`, `Mi`, `Gi`, `Ti`) and decimal units (`K`, `M`,
+  `G`, `T`, optionally with `B`), including fractions such as `1.5Gi`. Any
+  other value fails validation, and the service is not deployed. The infra
+  webhook now validates configs too, as the declarative loop already did.
 
 ## [0.3.0-rc.3] - 2026-09-24
 

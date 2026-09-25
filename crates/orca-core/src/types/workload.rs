@@ -88,7 +88,7 @@ impl WorkloadSpec {
 }
 
 /// Replica count: either a fixed number or "auto" for auto-scaling.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Replicas {
     Fixed(u32),
     Auto,

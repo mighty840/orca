@@ -348,7 +348,7 @@ async fn handle_infra_deploy(state: &AppState) -> anyhow::Result<usize> {
     };
 
     // Secrets are resolved in service_config_to_spec() at container creation
-    // time, not here. This ensures spec_matches() compares unresolved templates
+    // time, not here. This ensures the change check compares unresolved templates
     // and doesn't restart containers just because a token was refreshed.
     //
     // Reconcile only NEW or SPEC-CHANGED services (#120) — same filter the
@@ -356,18 +356,19 @@ async fn handle_infra_deploy(state: &AppState) -> anyhow::Result<usize> {
     // push recreated every placement-pinned service across unrelated
     // projects (the 2026-07-07 incident); a push touching one file must
     // only converge the services it actually changed.
-    let changed: Vec<orca_core::config::ServiceConfig> = {
-        let services = state.services.read().await;
-        configs
-            .service
-            .iter()
-            .filter(|cfg| match services.get(&cfg.name) {
-                None => true,
-                Some(svc) => !svc.config.spec_matches(cfg),
-            })
-            .cloned()
-            .collect()
-    };
+    // Invalid configs (e.g. a memory limit with an unknown unit) are skipped,
+    // as in the declarative loop, instead of deploying without the setting.
+    let valid = configs
+        .service
+        .into_iter()
+        .filter(|cfg| match cfg.validate() {
+            Ok(()) => true,
+            Err(e) => {
+                warn!("Infra deploy: skipping {}: {e}", cfg.name);
+                false
+            }
+        });
+    let changed = crate::config_diff::changed_services(state, valid).await;
     let count = changed.len();
     let (deployed, errors) = reconciler::reconcile(state, &changed).await;
 
