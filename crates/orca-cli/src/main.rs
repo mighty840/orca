@@ -68,13 +68,14 @@ async fn main() -> anyhow::Result<()> {
             config,
             proxy_port,
             daemon,
+            teardown_on_exit,
         } => {
             if daemon {
                 let args: Vec<String> = std::env::args().skip(1).collect();
                 handlers::daemon::daemonize(&args)?;
                 return Ok(());
             }
-            handlers::server::handle_server(&config, proxy_port).await?;
+            handlers::server::handle_server(&config, proxy_port, teardown_on_exit).await?;
         }
         Command::Deploy { service, file } => {
             let filter = if service.is_empty() {
@@ -241,6 +242,28 @@ mod tests {
     #[test]
     fn join_token_value_is_hidden_from_help() {
         assert!(join_token_arg().is_hide_env_values_set());
+    }
+
+    /// #178: stopping orca must not remove the workloads it manages; the
+    /// teardown is opt-in.
+    #[test]
+    fn server_keeps_containers_on_exit_unless_asked() {
+        let cli = Cli::try_parse_from(["orca", "server"]).expect("parses");
+        assert!(matches!(
+            cli.command,
+            Command::Server {
+                teardown_on_exit: false,
+                ..
+            }
+        ));
+        let cli = Cli::try_parse_from(["orca", "server", "--teardown-on-exit"]).expect("parses");
+        assert!(matches!(
+            cli.command,
+            Command::Server {
+                teardown_on_exit: true,
+                ..
+            }
+        ));
     }
 
     /// #210: with no flag and no env, join parses; the token then comes

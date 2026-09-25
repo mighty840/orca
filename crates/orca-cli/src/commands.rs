@@ -19,6 +19,11 @@ pub enum Command {
         /// Run in the background as a daemon
         #[arg(short, long)]
         daemon: bool,
+        /// On exit, stop and remove every orca-managed container on this host.
+        /// For development and tests only: by default stopping or restarting
+        /// orca leaves workloads running, and the next start re-attaches.
+        #[arg(long)]
+        teardown_on_exit: bool,
     },
 
     /// Deploy services from config (file or directory)
