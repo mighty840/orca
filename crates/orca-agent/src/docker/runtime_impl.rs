@@ -37,6 +37,7 @@ impl ContainerRuntime {
         spec: &WorkloadSpec,
     ) -> Result<(String, bollard::container::Config<String>, String)> {
         self.ensure_image(&spec.image, spec.pull_policy).await?;
+        self.warn_uncovered_image_volumes(spec).await;
 
         let container_name = format!("orca-{}", spec.name);
         let config = super::config_builder::build_container_config(spec);
@@ -124,6 +125,39 @@ impl ContainerRuntime {
             name: container_name,
             metadata: std::collections::HashMap::new(),
         })
+    }
+
+    /// Log each image `VOLUME` the service doesn't cover (#184): Docker gives
+    /// it a fresh anonymous volume on every create, so any data there is
+    /// silently lost at the next redeploy. Logged, not refused: running
+    /// services rely on this today for caches and logs.
+    async fn warn_uncovered_image_volumes(&self, spec: &WorkloadSpec) {
+        let Ok(image) = self.docker.inspect_image(&spec.image).await else {
+            return;
+        };
+        let declared = image
+            .config
+            .and_then(|c| c.volumes)
+            .map(|v| v.into_keys().collect::<Vec<_>>())
+            .unwrap_or_default();
+        use super::config_builder::image_volumes::{Uncovered, uncovered};
+        for (path, how) in uncovered(declared, spec) {
+            match how {
+                Uncovered::Partially { inside } => tracing::error!(
+                    service = %spec.name,
+                    "image {} declares VOLUME {path}, but only {inside} inside it is \
+                     persisted: the rest of {path} starts empty on every redeploy. Set \
+                     `volume.path = \"{path}\"` or mount {path} if it holds data",
+                    spec.image
+                ),
+                Uncovered::Entirely => tracing::warn!(
+                    service = %spec.name,
+                    "image {} declares VOLUME {path}, which no volume or mount covers: it \
+                     starts empty on every redeploy (fine for a cache, not for data)",
+                    spec.image
+                ),
+            }
+        }
     }
 
     /// Stop a container named `name` with [`REPLACE_GRACE_SECS`] of SIGTERM
