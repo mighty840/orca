@@ -184,7 +184,12 @@ pub(crate) async fn handle_request(
             routes.contains_key(&host)
         };
         if known {
-            return Ok(redirect_to_https(&host, &path));
+            // With the query string: it used to be dropped (#194).
+            let target = req
+                .uri()
+                .path_and_query()
+                .map_or(path.as_str(), |pq| pq.as_str());
+            return Ok(redirect_to_https(&host, target));
         }
     }
 

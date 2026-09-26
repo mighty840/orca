@@ -120,7 +120,7 @@ async fn acme_http_listener_still_redirects_routed_host() {
 
     assert_eq!(
         resp.status(),
-        StatusCode::MOVED_PERMANENTLY,
+        StatusCode::PERMANENT_REDIRECT,
         "with ACME running, HTTP requests for routed hosts must redirect"
     );
     assert_eq!(
@@ -152,4 +152,33 @@ async fn unknown_host_is_never_redirected() {
         .expect("request to proxy");
 
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+/// #194: a POST redirected to HTTPS must keep its method and body (308, not
+/// 301), and the redirect must keep the query string.
+#[tokio::test]
+async fn a_post_is_redirected_with_308_and_its_query_string() {
+    let table = routed_table("app.local", dead_port().await);
+    let acme = AcmeManager::new(
+        "test@example.com",
+        std::env::temp_dir().join("orca-test-acme-cache"),
+    );
+    let proxy_port = spawn_proxy(table, Some(acme)).await;
+
+    let resp = no_redirect_client()
+        .post(format!("http://127.0.0.1:{proxy_port}/upload?chunk=3"))
+        .header("Host", "app.local")
+        .body("payload")
+        .send()
+        .await
+        .expect("request to proxy");
+
+    assert_eq!(resp.status(), StatusCode::PERMANENT_REDIRECT);
+    assert_eq!(
+        resp.headers()
+            .get("location")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default(),
+        "https://app.local/upload?chunk=3"
+    );
 }

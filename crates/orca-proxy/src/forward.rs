@@ -354,12 +354,15 @@ pub(crate) async fn forward_streaming(
     }
 }
 
-/// Build a 301 redirect response to HTTPS.
+/// Build a `308 Permanent Redirect` to HTTPS. A 301 lets clients turn a
+/// POST or PUT into a bodyless GET, so a WebDAV upload, a `docker push` or a
+/// webhook sent to `http://` failed confusingly; 308 keeps method and body
+/// (#194). `path` includes the query string.
 pub(crate) fn redirect_to_https(host: &str, path: &str) -> Response<ProxyBody> {
     let location = format!("https://{host}{path}");
     let body = full_body(hyper::body::Bytes::from(format!("Moved to {location}")));
     let mut resp = Response::new(body);
-    *resp.status_mut() = StatusCode::MOVED_PERMANENTLY;
+    *resp.status_mut() = StatusCode::PERMANENT_REDIRECT;
     resp.headers_mut().insert(
         hyper::header::LOCATION,
         location.parse().expect("valid location header"),
