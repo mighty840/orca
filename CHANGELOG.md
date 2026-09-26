@@ -42,6 +42,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the full cause chain.
   - Clients get "upstream unavailable" or "upstream timed out" instead of
     the raw error, which exposed the backend's internal `127.0.0.1:port`.
+- **The readiness wait rejected any answer but 2xx/3xx (#193).** A service
+  that doesn't serve `/` answers 404 or 401 there, so without a `health`
+  path every deploy waited out the whole readiness budget. That's up to 75 s,
+  logged as "15s", 428 times in two weeks on breakpilot.
+  - Without an explicit readiness or health path, any HTTP response now
+    means ready. An explicit path still needs 2xx or 3xx.
+  - A service with no host port (network-routed) is now probed on its
+    container address, instead of being routed the moment it starts.
+  - The warning reports the real elapsed time.
 - **A proxy that couldn't bind port 80 or 443 still reported a successful
   start (#189).** The ACME listeners were bound inside background tasks, so
   a failure was one `HTTP listener failed` line. With port 80 gone, every
