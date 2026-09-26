@@ -5,6 +5,7 @@
 //! Supports automatic TLS via ACME/Let's Encrypt (Caddy-style zero-config).
 
 pub mod acme;
+mod backend_timeouts;
 mod body;
 mod error_page;
 mod forward;
@@ -328,25 +329,8 @@ pub(crate) async fn serve_loop_with_fallback(
     fallback: Option<FallbackConfig>,
 ) -> anyhow::Result<()> {
     let counter = Arc::new(AtomicUsize::new(0));
-    let client = Arc::new(
-        reqwest::Client::builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            // Timeouts are mandatory: without them, a hung upstream (slow
-            // backend, dead fallback, slowloris) parks the per-request task
-            // forever. But a *total* request timeout is wrong for a proxy that
-            // streams large bodies — a 300s cap killed Docker registry blob
-            // pushes/pulls partway through (a ~2GB upload over a typical link
-            // exceeds 300s and died mid-transfer). Use an inactivity
-            // (`read_timeout`) instead: it still recovers from a hung backend
-            // (no bytes → fires) but never caps a transfer that keeps making
-            // progress, so arbitrarily large blobs go through.
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .read_timeout(std::time::Duration::from_secs(120))
-            .pool_idle_timeout(std::time::Duration::from_secs(90))
-            .build()
-            .expect("failed to build HTTP client"),
-    );
+    // Upload- and response-aware timeouts (#187), not reqwest's read_timeout.
+    let client = Arc::new(backend_timeouts::client());
     // A TLS endpoint exists if this listener terminates TLS itself, or if
     // an ACME manager is present — the plain-HTTP listener of the ACME
     // dual-listener setup carries one for HTTP-01 challenges, which is

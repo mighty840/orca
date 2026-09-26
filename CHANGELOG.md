@@ -42,6 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     time), `warn!` when nothing covers it (usually a cache).
   - Deploys aren't refused yet, because running services rely on uncovered
     cache and log volumes. A per-service opt-out comes before that.
+- **The proxy cut off uploads and slow responses at 120 seconds (#187).**
+  reqwest's `read_timeout`, meant as an inactivity timeout, is a single
+  wall-clock timer from dispatch to response headers. Any upload plus
+  backend think time over 120 s got a 502, however fast data flowed: Harbor
+  layer pushes, large Nextcloud uploads, slow LLM completions
+  (`latency_ms=120001` in production). Timeouts now follow progress instead:
+  - An upload fails only after 120 s with no data.
+  - After the upload, the backend has 10 minutes to respond.
+  - The response body fails after 120 s idle per chunk.
+  - TCP keepalive catches backends that disappear.
+  - The "slow backend" warning moved from 30 s to 120 s, since Gitea Actions'
+    long polls triggered it about 15,000 times a week.
 - **A service whose container exited with code 0 stayed down (#175).** Such
   a container is recorded as `Completed`. The watchdog neither pruned it nor
   counted it as missing, so the service sat at 1/1 until someone redeployed
