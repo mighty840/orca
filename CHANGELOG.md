@@ -45,6 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     serving N local routes.
   - The ACME contact email is cached from the last fetch, so the proxy
     doesn't need the master for it.
+- **`orca install-service` let another local user install a root unit
+  (#208).** It wrote the systemd unit to the fixed path `/tmp/orca.service`
+  and then `sudo cp`'d it into `/etc/systemd/system`. Another user could
+  pre-create that path as a symlink, or swap the file in between, and have a
+  unit of their choosing installed and enabled as root. The unit is now
+  streamed to `sudo install -m 0644 /dev/stdin <path>`, so it never touches
+  a shared directory.
 - **The HTTP-to-HTTPS redirect turned uploads into GETs and dropped query
   strings (#194).** It answered `301`, which lets clients change a POST or
   PUT into a bodyless GET. A WebDAV upload, a `docker push` or a webhook

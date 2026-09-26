@@ -89,19 +89,15 @@ pub fn handle_install_service(leader: Option<String>, token: Option<String>) -> 
         "/etc/systemd/system/orca.service"
     };
 
-    // Write to a temp file then sudo mv, since /etc/systemd needs root.
-    let tmp = std::env::temp_dir().join("orca.service");
-    std::fs::write(&tmp, &unit).context("failed to write temp unit file")?;
-
-    let status = std::process::Command::new("sudo")
-        .args(["cp", &tmp.display().to_string(), unit_path])
-        .status()
-        .context("failed to run sudo cp")?;
-
-    if !status.success() {
-        anyhow::bail!("failed to install unit file to {unit_path}");
-    }
-    let _ = std::fs::remove_file(&tmp);
+    // Stream the unit to root through stdin. It used to be written to the
+    // fixed path /tmp/orca.service and then `sudo cp`'d: another local user
+    // could pre-create that path as a symlink or swap the file in between,
+    // and get a unit of their choosing installed and enabled as root (#208).
+    install_unit(
+        &["sudo", "install", "-m", "0644", "/dev/stdin"],
+        &unit,
+        unit_path,
+    )?;
 
     // Reload systemd and enable the service
     let service_name = if is_agent {
@@ -200,6 +196,30 @@ fn default_workdir(user: &str) -> String {
     } else {
         format!("/home/{user}/orca")
     }
+}
+
+/// Write `unit` to `path` by piping it into `command` (followed by `path`),
+/// so it never touches a shared directory.
+fn install_unit(command: &[&str], unit: &str, path: &str) -> Result<()> {
+    use std::io::Write;
+    let (program, args) = command.split_first().context("empty install command")?;
+    let mut child = std::process::Command::new(program)
+        .args(args)
+        .arg(path)
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .with_context(|| format!("failed to run {}", command.join(" ")))?;
+    child
+        .stdin
+        .take()
+        .context("no stdin for the install command")?
+        .write_all(unit.as_bytes())
+        .context("failed to send the unit file")?;
+    let status = child.wait().context("install command did not finish")?;
+    if !status.success() {
+        anyhow::bail!("failed to install unit file to {path}");
+    }
+    Ok(())
 }
 
 fn run_systemctl(args: &[&str]) -> Result<()> {
@@ -316,5 +336,40 @@ mod tests {
     #[test]
     fn default_workdir_user() {
         assert_eq!(default_workdir("sharang"), "/home/sharang/orca");
+    }
+
+    /// #208: the unit reaches its destination through stdin, never through
+    /// a file in the shared temp directory.
+    #[test]
+    fn the_unit_is_streamed_not_staged_in_tmp() {
+        let dest = tempfile::tempdir().unwrap();
+        let path = dest.path().join("orca.service");
+        let staged = std::env::temp_dir().join("orca.service");
+        let staged_before = std::fs::metadata(&staged)
+            .ok()
+            .and_then(|m| m.modified().ok());
+
+        let unit = "[Service]\nExecStart=/usr/local/bin/orca server\n";
+        install_unit(
+            &["install", "-m", "0644", "/dev/stdin"],
+            unit,
+            path.to_str().unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), unit);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o644);
+        }
+        let staged_after = std::fs::metadata(&staged)
+            .ok()
+            .and_then(|m| m.modified().ok());
+        assert_eq!(
+            staged_before, staged_after,
+            "nothing written to /tmp/orca.service"
+        );
     }
 }
