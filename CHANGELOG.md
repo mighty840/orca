@@ -32,6 +32,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Failing certificate orders were retried on every reconcile pass
+  (#188).** The reconcile path requested a certificate for each domain
+  without one, every 30–60 s, with no backoff. Only the renewal task backed
+  off, with its own separate state. Domains whose DNS no longer points here
+  opened a Let's Encrypt order each time, which could exhaust the
+  account-wide limit (300 orders per 3 hours) and block renewals of healthy
+  domains.
+  - The backoff now lives in `AcmeManager`, so every caller shares one
+    budget: 5 min, 15 min, 1 h, then every 6 h per failing domain.
+  - A `rateLimited` answer pauses all orders for an hour.
+  - A skipped order is logged at debug on the reconcile path, not as an
+    error every minute.
+  - Each order now removes only its own challenge tokens, including when
+    validation fails, instead of clearing every pending challenge.
 - **Image `VOLUME`s the service didn't cover were silently recreated empty
   (#184, detection).** Docker gives each image `VOLUME` that no mount covers
   exactly a fresh anonymous volume on every container create. Any data there

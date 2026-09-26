@@ -55,7 +55,13 @@ pub(crate) async fn provision_service_certs(state: &AppState, config: &ServiceCo
             }
             // ACME auto-provisioning
             if let Err(e) = acme.ensure_cert_for_resolver(&domain, resolver).await {
-                tracing::error!(domain, "Hot cert provisioning failed: {e}");
+                // This runs on every reconcile pass: a domain in its ACME
+                // backoff is expected and not worth an error each time (#188).
+                if e.downcast_ref::<orca_proxy::acme::AcmeCooldown>().is_some() {
+                    tracing::debug!(domain, "Hot cert provisioning skipped: {e}");
+                } else {
+                    tracing::error!(domain, "Hot cert provisioning failed: {e}");
+                }
             }
         }
     }
