@@ -1,6 +1,7 @@
 //! Helper to build Docker container configs from a [`WorkloadSpec`].
 
 mod helpers;
+pub(crate) mod image_volumes;
 
 use std::collections::HashMap;
 

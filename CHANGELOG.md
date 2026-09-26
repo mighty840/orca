@@ -32,6 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Image `VOLUME`s the service didn't cover were silently recreated empty
+  (#184, detection).** Docker gives each image `VOLUME` that no mount covers
+  exactly a fresh anonymous volume on every container create. Any data there
+  was lost at the next redeploy without a word. For example, `postgres:18`
+  moved its `VOLUME`, so a tag bump would have started an empty database.
+  - Deploys now log each uncovered path: `error!` when a declared volume or
+    mount lies inside it (partial coverage: the rest starts empty each
+    time), `warn!` when nothing covers it (usually a cache).
+  - Deploys aren't refused yet, because running services rely on uncovered
+    cache and log volumes. A per-service opt-out comes before that.
 - **A service whose container exited with code 0 stayed down (#175).** Such
   a container is recorded as `Completed`. The watchdog neither pruned it nor
   counted it as missing, so the service sat at 1/1 until someone redeployed
