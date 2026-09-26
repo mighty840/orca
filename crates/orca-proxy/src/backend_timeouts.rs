@@ -126,6 +126,69 @@ pub(crate) enum SendError {
     Idle(String),
 }
 
+impl SendError {
+    /// A timeout is a `504 Gateway Timeout`; anything else a `502` (#192).
+    pub(crate) fn status(&self) -> hyper::StatusCode {
+        match self {
+            Self::Idle(_) => hyper::StatusCode::GATEWAY_TIMEOUT,
+            Self::Backend(e) if e.is_timeout() => hyper::StatusCode::GATEWAY_TIMEOUT,
+            Self::Backend(_) => hyper::StatusCode::BAD_GATEWAY,
+        }
+    }
+
+    /// What the client is told. Never the upstream error itself, which
+    /// carries the backend's internal `127.0.0.1:port` (#192).
+    pub(crate) fn client_message(&self) -> &'static str {
+        if self.status() == hyper::StatusCode::GATEWAY_TIMEOUT {
+            "upstream timed out"
+        } else {
+            "upstream unavailable"
+        }
+    }
+
+    /// Log the failure with its cause. reqwest's `Display` is only "error
+    /// sending request for url (...)": a container being recreated, a
+    /// timeout and a TLS error all logged the same line (#192).
+    pub(crate) fn log(&self, backend: &str, path: &str) {
+        let (kind, cause) = match self {
+            Self::Idle(why) => ("timeout", why.clone()),
+            Self::Backend(e) => {
+                let kind = if e.is_timeout() {
+                    "timeout"
+                } else if e.is_connect() {
+                    "connect"
+                } else if e.is_body() {
+                    "body"
+                } else if e.is_request() {
+                    "request"
+                } else {
+                    "other"
+                };
+                (kind, error_chain(e))
+            }
+        };
+        tracing::error!(
+            backend = %backend,
+            path = %path,
+            kind,
+            status = self.status().as_u16(),
+            "proxy error: {cause}"
+        );
+    }
+}
+
+/// `e` and every `source()` below it, joined with ": ".
+fn error_chain(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut next = e.source();
+    while let Some(cause) = next {
+        out.push_str(": ");
+        out.push_str(&cause.to_string());
+        next = cause.source();
+    }
+    out
+}
+
 impl std::fmt::Display for SendError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

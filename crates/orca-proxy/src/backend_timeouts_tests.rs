@@ -78,3 +78,36 @@ async fn a_response_body_that_stops_flowing_ends_with_a_timeout() {
     assert_eq!(err.kind(), std::io::ErrorKind::TimedOut);
     assert!(body.next().await.is_none());
 }
+
+/// #192: a timeout is a 504, and says so.
+#[test]
+fn a_stall_is_a_gateway_timeout() {
+    let e = SendError::Idle("upload stalled: no data for 120s".into());
+    assert_eq!(e.status(), hyper::StatusCode::GATEWAY_TIMEOUT);
+    assert_eq!(e.client_message(), "upstream timed out");
+}
+
+/// #192: a refused connection (container being recreated) is a 502, and
+/// the logged cause reaches past reqwest's bare "error sending request".
+#[tokio::test]
+async fn a_refused_connection_is_a_bad_gateway_with_its_cause() {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let err = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{port}/"))
+        .send()
+        .await
+        .unwrap_err();
+    let chain = error_chain(&err);
+    let e = SendError::Backend(err);
+
+    assert_eq!(e.status(), hyper::StatusCode::BAD_GATEWAY);
+    assert_eq!(e.client_message(), "upstream unavailable");
+    assert!(
+        chain.to_lowercase().contains("refused"),
+        "the cause must be in the log line: {chain}"
+    );
+}
