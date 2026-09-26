@@ -98,37 +98,13 @@ pub async fn handle_join(
 
     let agent = orca_agent::grpc::AgentClient::new(leader_url.clone(), node_id);
 
-    // Retry registration with exponential backoff
-    let mut delay = Duration::from_secs(2);
-    for attempt in 1..=30 {
-        match agent.register(&local_address, &labels).await {
-            Ok(()) => break,
-            Err(e) => {
-                if attempt == 30 {
-                    anyhow::bail!("Registration failed after 30 attempts: {e}");
-                }
-                tracing::warn!("Registration attempt {attempt} failed: {e}, retrying in {delay:?}");
-                tokio::time::sleep(delay).await;
-                delay = (delay * 2).min(Duration::from_secs(30));
-            }
-        }
-    }
-
-    info!("Registered with cluster. Running heartbeat loop...");
-
-    // Pull acme_email from the master's cluster.toml so the node-local proxy
-    // can provision certs with a valid contact. Falls back to ORCA_ACME_EMAIL
-    // env var, then a placeholder (which will fail validation — that's the
-    // signal to set acme_email properly on the master).
-    let acme_email = match agent.fetch_cluster_info().await {
-        Some(info) => info
-            .get("acme_email")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .or_else(|| std::env::var("ORCA_ACME_EMAIL").ok())
-            .unwrap_or_else(|| "admin@localhost".to_string()),
-        None => std::env::var("ORCA_ACME_EMAIL").unwrap_or_else(|_| "admin@localhost".to_string()),
-    };
+    // The data plane starts before the control plane (#209): the proxy's
+    // routes come from local container labels, so it doesn't need the
+    // master. Gating it on registration turned a wrong token or an
+    // unreachable master into an outage of every site on this node (11.5
+    // minutes on 2026-09-23). The ACME contact email comes from the last
+    // successful fetch; the account it is used for is created once.
+    let acme_email = crate::handlers::join_control::cached_acme_email();
     info!("Using ACME email: {acme_email}");
 
     // Spawn a node-local reverse proxy. Without this, services scheduled
@@ -176,17 +152,39 @@ pub async fn handle_join(
     });
 
     let agent_arc = Arc::new(agent);
+    // For the log line while the master is unreachable: what this node
+    // serves from its own container labels.
+    let local_routes = docker_runtime
+        .list_local_routes()
+        .await
+        .map(|r| r.len())
+        .unwrap_or(0);
 
-    tokio::select! {
-        // Try WS streaming (auto-reconnects, sends heartbeats over WS)
-        _ = orca_agent::ws_client::run_ws_loop(
+    // The control plane: register (retrying for as long as it takes, while
+    // the proxy keeps serving), refresh the cached ACME email, then run the
+    // WebSocket session, which reconnects on its own.
+    let control = async {
+        crate::handlers::join_control::register_until_accepted(
+            &agent_arc,
+            &local_address,
+            &labels,
+            local_routes,
+        )
+        .await;
+        crate::handlers::join_control::refresh_acme_email(&agent_arc).await;
+        orca_agent::ws_client::run_ws_loop(
             &leader_url,
             node_id,
             &local_address,
             container_runtime.clone(),
             agent_arc.clone(),
             domain_tx,
-        ) => {},
+        )
+        .await
+    };
+
+    tokio::select! {
+        _ = control => {},
         _ = tokio::signal::ctrl_c() => {
             info!("Shutdown signal received");
         }
