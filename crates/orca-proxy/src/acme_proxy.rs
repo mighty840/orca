@@ -92,7 +92,9 @@ pub(crate) async fn run_acme_proxy_on(
             )
         })?;
     info!("Reverse proxy listening on 0.0.0.0:{http_port} (HTTP) and 0.0.0.0:{https_port} (HTTPS)");
-    let resolver = Arc::new(acme::DynCertResolver::new());
+    // With a fallback certificate, so a handshake without SNI or for a
+    // domain with no certificate yet still reaches HTTP (#206).
+    let resolver = Arc::new(acme::DynCertResolver::with_fallback()?);
 
     let acme_mgr = acme_manager.clone();
     let routes_clone = route_table.clone();
