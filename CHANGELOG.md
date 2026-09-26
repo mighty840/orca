@@ -38,6 +38,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sent to an `http://` URL then failed with a confusing 405 or 400. It is
   now `308 Permanent Redirect`, which keeps method and body. The redirect
   also dropped the query string (`?q=…`); it now keeps it.
+- **TLS handshakes failed for unknown names and missing SNI (#206).** The
+  certificate resolver returned nothing when a client sent no SNI, sent an
+  IP address, or named a domain with no certificate yet. The handshake died
+  below HTTP (`ERR_SSL_PROTOCOL_ERROR`), 323 times in two weeks on
+  breakpilot, and a domain whose certificate never provisioned was simply
+  unreachable.
+  - A self-signed fallback certificate now answers these handshakes. The
+    client gets a certificate warning and then orca's error page.
+  - An unknown hostname is logged once as a warning (it was debug), which
+    is early notice that a certificate never provisioned.
+  - `Host` headers are lowercased before routing, so `Host:
+    Cloud.Example.Com` no longer returns 404.
 - **Every upstream failure was a cause-less 502 (#192).** A timeout, a
   refused connection (a container being recreated) and a TLS error all
   logged `error sending request for url (...)`, because reqwest's message

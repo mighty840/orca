@@ -17,6 +17,40 @@ async fn free_port() -> u16 {
         .port()
 }
 
+/// #206: hostnames are case-insensitive; a mixed-case Host must route.
+#[tokio::test]
+async fn a_mixed_case_host_header_is_routed() {
+    let dead = free_port().await;
+    let routes = Arc::new(RwLock::new(HashMap::from([(
+        "app.test".to_string(),
+        vec![RouteTarget {
+            address: format!("127.0.0.1:{dead}"),
+            service_name: "app".into(),
+            path_pattern: None,
+            weight: 100,
+            strip_prefix: None,
+        }],
+    )])));
+    let port = free_port().await;
+    let triggers = Arc::new(RwLock::new(Vec::new()));
+    tokio::spawn(async move {
+        let _ = run_proxy_with_fallback(routes, triggers, None, port, None, None, None).await;
+    });
+    while TcpStream::connect(("127.0.0.1", port)).await.is_err() {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    let resp = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{port}/"))
+        .header("host", "App.Test")
+        .send()
+        .await
+        .unwrap();
+
+    // Routed to the (dead) backend: 502, not the unknown-host 404.
+    assert_eq!(resp.status(), 502);
+}
+
 #[tokio::test]
 async fn a_dead_backend_gives_a_502_without_leaking_its_address() {
     let dead = free_port().await;

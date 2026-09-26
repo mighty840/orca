@@ -164,7 +164,9 @@ pub(crate) async fn handle_request(
         .get("host")
         .and_then(|h| h.to_str().ok())
         .or_else(|| req.uri().authority().map(|a| a.as_str()))
-        .map(|h| h.split(':').next().unwrap_or(h).to_string());
+        // Lowercase: hostnames are case-insensitive, and the route table
+        // and TLS SNI use lowercase (#206: `Host: Cloud.Example.Com` 404'd).
+        .map(|h| h.split(':').next().unwrap_or(h).to_ascii_lowercase());
 
     let Some(host) = host else {
         return Ok(error_response(
