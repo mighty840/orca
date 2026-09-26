@@ -32,6 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An agent served no traffic until it had registered with the master
+  (#209).** Its proxy started only after registration, which retried
+  forever. A wrong token, an unreachable master or a late mesh interface
+  took down every site on the node, although its routes come from local
+  container labels: 11.5 minutes on breakpilot's agent on 2026-09-23, during
+  a token change.
+  - The proxy now starts first.
+  - Registration, then the control session, run next to it and retry for as
+    long as needed. They no longer give up after 30 attempts and exit.
+  - While the master is unreachable, the agent logs that it is still
+    serving N local routes.
+  - The ACME contact email is cached from the last fetch, so the proxy
+    doesn't need the master for it.
 - **The HTTP-to-HTTPS redirect turned uploads into GETs and dropped query
   strings (#194).** It answered `301`, which lets clients change a POST or
   PUT into a bodyless GET. A WebDAV upload, a `docker push` or a webhook
