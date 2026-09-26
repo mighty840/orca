@@ -3,49 +3,10 @@
 use http_body_util::BodyDataStream;
 use hyper::body::Incoming;
 use hyper::{Response, StatusCode};
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 use crate::RouteTarget;
 use crate::body::{ProxyBody, full_body, stream_body};
-
-/// First-byte latency beyond which the backend is called out explicitly.
-///
-/// A backend that stalls until the client read timeout otherwise surfaces
-/// only as a proxy-side 502, which reads as a proxy fault. 2026-08-10:
-/// black-holed session-store connections made login POSTs hang for the full
-/// 120s read timeout, and the resulting 502s were initially blamed on the
-/// proxy. 30s is far above any healthy backend's first byte but well below
-/// the read timeout, so the log points at the backend while the request is
-/// still pending.
-const SLOW_BACKEND_WARN_AFTER: std::time::Duration = std::time::Duration::from_secs(30);
-
-/// Await `send()`, emitting a warning *while the request is still pending* if
-/// the backend takes longer than [`SLOW_BACKEND_WARN_AFTER`] to respond, then
-/// continuing to wait for the eventual result. Racing the send against a timer
-/// (rather than measuring after it resolves) means the log lands at the 30s
-/// mark during a live stall — not at ~120s alongside the read-timeout 502,
-/// where it would add nothing over the error itself.
-async fn send_with_slow_warn(
-    forward_req: reqwest::RequestBuilder,
-    address: &str,
-    path_and_query: &str,
-) -> Result<reqwest::Response, reqwest::Error> {
-    let send = forward_req.send();
-    tokio::pin!(send);
-    tokio::select! {
-        result = &mut send => result,
-        _ = tokio::time::sleep(SLOW_BACKEND_WARN_AFTER) => {
-            warn!(
-                backend = %address,
-                path = %path_and_query,
-                threshold_secs = SLOW_BACKEND_WARN_AFTER.as_secs(),
-                "slow backend: no response after threshold and still waiting — \
-                 if this surfaces as a 502, the backend stalled, not the proxy"
-            );
-            send.await
-        }
-    }
-}
 
 /// Select a target index using weighted round-robin.
 ///
@@ -227,7 +188,7 @@ pub(crate) fn forwarded_for_value(incoming: Option<&str>, client_ip: &str) -> St
 fn build_response(resp: reqwest::Response) -> Response<ProxyBody> {
     let status = resp.status();
     let backend_headers = resp.headers().clone();
-    let body = stream_body(resp.bytes_stream());
+    let body = stream_body(crate::backend_timeouts::response_body(resp.bytes_stream()));
     let mut response = Response::new(body);
     *response.status_mut() = status;
     // Forward backend headers (skip hop-by-hop only). content-length is
@@ -291,7 +252,16 @@ pub(crate) async fn forward_with_retry(
         debug!("Proxying {host}{path_and_query} -> {uri} (attempt {attempt})");
         let forward_req = forward_req.body(body.clone());
 
-        match send_with_slow_warn(forward_req, &target.address, path_and_query).await {
+        // A buffered body is sent in one go: nothing to track per chunk.
+        let upload = crate::backend_timeouts::Upload::none();
+        let sent = crate::backend_timeouts::send(
+            forward_req.send(),
+            &upload,
+            &target.address,
+            path_and_query,
+        )
+        .await;
+        match sent {
             Ok(resp) if resp.status() == StatusCode::BAD_GATEWAY && attempt + 1 < max_attempts => {
                 debug!("Got 502 from {}, retrying", target.address);
                 continue;
@@ -359,13 +329,26 @@ pub(crate) async fn forward_streaming(
     // no `Content-Type` — which broke every empty-body POST through the proxy.
     // Only non-empty bodies are streamed (the large-blob case #102 targets).
     use hyper::body::Body as _;
-    let forward_req = if body.size_hint().exact() == Some(0) {
-        forward_req.body(reqwest::Body::from(Vec::<u8>::new()))
+    // The upload is tracked chunk by chunk, so a long upload that keeps
+    // making progress is never cut off (#187).
+    let (forward_req, upload) = if body.size_hint().exact() == Some(0) {
+        (
+            forward_req.body(reqwest::Body::from(Vec::<u8>::new())),
+            crate::backend_timeouts::Upload::none(),
+        )
     } else {
-        forward_req.body(reqwest::Body::wrap_stream(BodyDataStream::new(body)))
+        let upload = crate::backend_timeouts::Upload::started();
+        let tracked = upload.track(BodyDataStream::new(body));
+        (
+            forward_req.body(reqwest::Body::wrap_stream(tracked)),
+            upload,
+        )
     };
 
-    match send_with_slow_warn(forward_req, &target.address, path_and_query).await {
+    let sent =
+        crate::backend_timeouts::send(forward_req.send(), &upload, &target.address, path_and_query)
+            .await;
+    match sent {
         Ok(resp) => build_response(resp),
         Err(e) => {
             error!("Proxy error to {}: {e}", target.address);
