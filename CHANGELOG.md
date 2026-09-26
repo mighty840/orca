@@ -46,6 +46,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Cleanup of leftover redirect rules checks both chains, so an orphaned
     OUTPUT rule is found.
   - Existence probes no longer log "iptables rule failed" warnings.
+- **With more than one backend, the proxy read every request body into
+  memory (#190).** A service with several replicas, or mid-canary, got
+  every upload buffered whole before forwarding, with no cap: about twice
+  the body's size at peak, so a 4 GB registry push needed about 8 GB.
+  - Only a body of known size up to 1 MB is still buffered, for the
+    retry-on-502 to a second backend.
+  - Anything larger or of unknown length streams to one backend without the
+    retry, as single-backend routes already did.
+  - Wasm triggers, which receive the body in full, now reject bodies over
+    10 MB with `413`.
 - **Failing certificate orders were retried on every reconcile pass
   (#188).** The reconcile path requested a certificate for each domain
   without one, every 30–60 s, with no backoff. Only the renewal task backed
