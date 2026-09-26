@@ -32,6 +32,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A proxy that couldn't bind port 80 or 443 still reported a successful
+  start (#189).** The ACME listeners were bound inside background tasks, so
+  a failure was one `HTTP listener failed` line. With port 80 gone, every
+  certificate order failed and the HTTPS redirect disappeared.
+  - Both ports are now bound before startup continues.
+  - `orca server` exits with an error naming the consequence.
+  - An agent keeps running, since some nodes leave 80/443 to another web
+    server, but logs that it serves no public traffic and issues no
+    certificates.
+  - The iptables port redirect adds each rule only if it's missing (no more
+    duplicates across restarts), and removes a half-applied pair.
+  - Cleanup of leftover redirect rules checks both chains, so an orphaned
+    OUTPUT rule is found.
+  - Existence probes no longer log "iptables rule failed" warnings.
 - **Failing certificate orders were retried on every reconcile pass
   (#188).** The reconcile path requested a certificate for each domain
   without one, every 30–60 s, with no backoff. Only the renewal task backed
