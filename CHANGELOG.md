@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The HTTP-to-HTTPS redirect turned uploads into GETs and dropped query
+  strings (#194).** It answered `301`, which lets clients change a POST or
+  PUT into a bodyless GET. A WebDAV upload, a `docker push` or a webhook
+  sent to an `http://` URL then failed with a confusing 405 or 400. It is
+  now `308 Permanent Redirect`, which keeps method and body. The redirect
+  also dropped the query string (`?q=…`); it now keeps it.
 - **Every upstream failure was a cause-less 502 (#192).** A timeout, a
   refused connection (a container being recreated) and a TLS error all
   logged `error sending request for url (...)`, because reqwest's message

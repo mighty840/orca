@@ -1,9 +1,9 @@
 use super::*;
 
 #[test]
-fn test_redirect_to_https_returns_301() {
+fn test_redirect_to_https_returns_308() {
     let resp = redirect_to_https("example.com", "/some/path");
-    assert_eq!(resp.status(), StatusCode::MOVED_PERMANENTLY);
+    assert_eq!(resp.status(), StatusCode::PERMANENT_REDIRECT);
 }
 
 #[test]
@@ -28,7 +28,7 @@ fn test_redirect_to_https_root_path() {
         .to_str()
         .unwrap();
     assert_eq!(location, "https://myapp.dev/");
-    assert_eq!(resp.status(), StatusCode::MOVED_PERMANENTLY);
+    assert_eq!(resp.status(), StatusCode::PERMANENT_REDIRECT);
 }
 
 #[test]
