@@ -18,6 +18,14 @@ use crate::forward::{forward_streaming, forward_with_retry, redirect_to_https};
 use crate::rate_limit::RateLimiter;
 use crate::routing::{find_matching_trigger, select_path_targets};
 use crate::{RouteTarget, SharedWasmTriggers, WasmInvoker};
+
+/// Largest request body buffered so it can be replayed against a second
+/// backend on a 502 (#190). Anything bigger, or of unknown size, is
+/// streamed to one backend: a multi-GB registry push must never sit in the
+/// proxy's memory, and retrying a large upload isn't safe anyway.
+const RETRY_BUFFER_MAX: usize = 1024 * 1024;
+/// Largest request body a Wasm trigger accepts; it is handed over in full.
+const WASM_BODY_MAX: usize = 10 * 1024 * 1024;
 use orca_core::config::FallbackConfig;
 
 /// ACME challenge path prefix.
@@ -112,8 +120,16 @@ pub(crate) async fn handle_request(
 
             debug!("Wasm trigger matched: {path} -> {service_name}");
 
-            let body_bytes = match req.into_body().collect().await {
+            // Capped: the body is handed to the trigger in full (#190).
+            let limited = http_body_util::Limited::new(req.into_body(), WASM_BODY_MAX);
+            let body_bytes = match limited.collect().await {
                 Ok(collected) => collected.to_bytes(),
+                Err(e) if e.is::<http_body_util::LengthLimitError>() => {
+                    return Ok(error_response(
+                        StatusCode::PAYLOAD_TOO_LARGE,
+                        "request body too large for a Wasm trigger",
+                    ));
+                }
                 Err(e) => {
                     error!("Failed to read request body: {e}");
                     return Ok(error_response(
@@ -122,7 +138,7 @@ pub(crate) async fn handle_request(
                     ));
                 }
             };
-            let body_str = String::from_utf8_lossy(&body_bytes).to_string();
+            let body_str = String::from_utf8_lossy(&body_bytes).into_owned();
 
             match invoker(runtime_id, method, path, body_str).await {
                 Ok(response_body) => {
@@ -239,15 +255,27 @@ pub(crate) async fn handle_request(
         .unwrap_or("/")
         .to_string();
 
-    // Single-target route: stream the request body straight through with no
-    // buffering. There's no alternate backend, so giving up 502-retry (a
-    // streamed body is single-use) costs nothing, and a 100MB+ registry blob
-    // push never has to materialize in the proxy task. Multi-target routes
-    // buffer the body so it can be replayed against a second backend on 502.
-    let resp = if matched.len() == 1 {
+    // Stream the request body straight through unless it is small enough to
+    // buffer for a 502 retry on a second backend: a single-target route has
+    // no second backend, and a large body must never materialize in the
+    // proxy task (#190; a streamed body is single-use, so it isn't retried).
+    // A multi-target route buffers only a small body of known size, for the
+    // 502 retry; everything else streams to one backend (#190).
+    use hyper::body::Body as _;
+    let small = req
+        .body()
+        .size_hint()
+        .upper()
+        .is_some_and(|n| n <= RETRY_BUFFER_MAX as u64);
+    let resp = if matched.len() == 1 || !small {
+        let target = if matched.len() == 1 {
+            &matched[0]
+        } else {
+            &matched[crate::forward::weighted_index(&matched, base_idx)]
+        };
         forward_streaming(
             client,
-            &matched[0],
+            target,
             &method_reqwest,
             &headers,
             req.into_body(),
@@ -258,7 +286,9 @@ pub(crate) async fn handle_request(
         )
         .await
     } else {
-        let body_bytes = match req.into_body().collect().await {
+        // `Limited` guards against a body longer than its declared size.
+        let limited = http_body_util::Limited::new(req.into_body(), RETRY_BUFFER_MAX);
+        let body_bytes = match limited.collect().await {
             Ok(collected) => collected.to_bytes(),
             Err(e) => {
                 error!("Failed to read request body: {e}");
