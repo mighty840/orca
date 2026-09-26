@@ -3,11 +3,13 @@
 //! Uses `instant-acme` for native Rust ACME (RFC 8555) support — no certbot
 //! dependency. Certificates are cached at `~/.orca/certs/`.
 
+mod backoff;
 pub(crate) mod certs;
 mod provider;
 pub mod renewal;
 mod resolver;
 
+pub use backoff::AcmeCooldown;
 pub use provider::AcmeProvider;
 pub use resolver::DynCertResolver;
 
@@ -31,6 +33,8 @@ pub struct AcmeManager {
     domains: Arc<RwLock<HashSet<String>>>,
     /// Semaphore ensuring only one ACME order is in-flight at a time.
     provision_lock: Arc<tokio::sync::Semaphore>,
+    /// Failure backoff shared by every caller (#188).
+    backoff: Arc<std::sync::Mutex<backoff::Backoff>>,
 }
 
 impl AcmeManager {
@@ -41,6 +45,7 @@ impl AcmeManager {
             challenges: Arc::new(RwLock::new(HashMap::new())),
             domains: Arc::new(RwLock::new(HashSet::new())),
             provision_lock: Arc::new(tokio::sync::Semaphore::new(1)),
+            backoff: Arc::default(),
         }
     }
 
@@ -185,8 +190,29 @@ impl AcmeManager {
                 info!(domain, "Loading cached cert for hot provisioning");
                 (std::fs::read(&cert_path)?, std::fs::read(&key_path)?)
             } else {
+                // A domain that failed recently gets no new order yet: every
+                // caller shares this budget (#188).
+                self.backoff
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .check(domain)?;
                 info!(domain, "Hot-provisioning TLS certificate");
-                provider.provision_cert(domain).await?
+                match provider.provision_cert(domain).await {
+                    Ok(pair) => {
+                        self.backoff
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .succeeded(domain);
+                        pair
+                    }
+                    Err(e) => {
+                        self.backoff
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .failed(domain, &format!("{e:#}"));
+                        return Err(e);
+                    }
+                }
             };
 
         let certified_key = Self::build_certified_key(&cert_pem, &key_pem)?;
@@ -281,3 +307,7 @@ mod tests {
         assert!(mgr.needs_renewal("example.com"));
     }
 }
+
+#[cfg(test)]
+#[path = "backoff_wiring_tests.rs"]
+mod backoff_wiring_tests;

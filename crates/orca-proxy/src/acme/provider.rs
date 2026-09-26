@@ -54,14 +54,22 @@ impl AcmeProvider {
         debug!(domain, "ACME order created");
 
         // Process authorizations
-        self.handle_authorizations(&mut order).await?;
+        let tokens = self.handle_authorizations(&mut order).await?;
 
         // Poll until order is ready for finalization.
         // Challenge tokens remain available until LE validates them.
-        let status = order.poll_ready(&RetryPolicy::default()).await?;
+        let status = order.poll_ready(&RetryPolicy::default()).await;
 
-        // Clean up challenge tokens now that validation is complete
-        self.challenges.write().await.clear();
+        // Remove this order's challenge tokens, and only those, whether or not
+        // validation succeeded: clearing the whole map would break a
+        // concurrent order, and a failed poll used to leave them behind (#188).
+        {
+            let mut challenges = self.challenges.write().await;
+            for token in &tokens {
+                challenges.remove(token);
+            }
+        }
+        let status = status?;
 
         if status != OrderStatus::Ready {
             anyhow::bail!("Order not ready after challenges: {status:?}");
@@ -81,7 +89,28 @@ impl AcmeProvider {
     }
 
     /// Process all authorizations for an order, handling HTTP-01 challenges.
-    async fn handle_authorizations(&self, order: &mut instant_acme::Order) -> anyhow::Result<()> {
+    /// Returns the challenge tokens it published, so the caller removes
+    /// exactly those. On failure it removes them itself.
+    async fn handle_authorizations(
+        &self,
+        order: &mut instant_acme::Order,
+    ) -> anyhow::Result<Vec<String>> {
+        let mut tokens = Vec::new();
+        let result = self.authorize(order, &mut tokens).await;
+        if result.is_err() {
+            let mut challenges = self.challenges.write().await;
+            for token in &tokens {
+                challenges.remove(token);
+            }
+        }
+        result.map(|()| tokens)
+    }
+
+    async fn authorize(
+        &self,
+        order: &mut instant_acme::Order,
+        tokens: &mut Vec<String>,
+    ) -> anyhow::Result<()> {
         let mut authorizations = order.authorizations();
         while let Some(result) = authorizations.next().await {
             let mut authz = result?;
@@ -103,13 +132,13 @@ impl AcmeProvider {
                 .write()
                 .await
                 .insert(token.clone(), key_auth);
+            tokens.push(token);
 
             challenge.set_ready().await?;
 
-            // Don't remove the token yet — Let's Encrypt needs to hit our
-            // /.well-known/acme-challenge/{token} endpoint. The token stays
-            // in memory until poll_ready succeeds on the order, then we
-            // clean up all challenge tokens.
+            // Don't remove the token yet: Let's Encrypt needs to hit our
+            // /.well-known/acme-challenge/{token} endpoint. `provision_cert`
+            // removes this order's tokens once polling is done.
         }
 
         Ok(())
