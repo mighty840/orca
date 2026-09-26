@@ -3,7 +3,7 @@
 use http_body_util::BodyDataStream;
 use hyper::body::Incoming;
 use hyper::{Response, StatusCode};
-use tracing::{debug, error};
+use tracing::debug;
 
 use crate::RouteTarget;
 use crate::body::{ProxyBody, full_body, stream_body};
@@ -275,11 +275,8 @@ pub(crate) async fn forward_with_retry(
                 continue;
             }
             Err(e) => {
-                error!("Proxy error to {}: {e}", target.address);
-                return super::handler::error_response(
-                    StatusCode::BAD_GATEWAY,
-                    &format!("backend error: {e}"),
-                );
+                e.log(&target.address, path_and_query);
+                return super::handler::error_response(e.status(), e.client_message());
             }
         }
     }
@@ -351,8 +348,8 @@ pub(crate) async fn forward_streaming(
     match sent {
         Ok(resp) => build_response(resp),
         Err(e) => {
-            error!("Proxy error to {}: {e}", target.address);
-            super::handler::error_response(StatusCode::BAD_GATEWAY, &format!("backend error: {e}"))
+            e.log(&target.address, path_and_query);
+            super::handler::error_response(e.status(), e.client_message())
         }
     }
 }

@@ -32,6 +32,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Every upstream failure was a cause-less 502 (#192).** A timeout, a
+  refused connection (a container being recreated) and a TLS error all
+  logged `error sending request for url (...)`, because reqwest's message
+  drops the underlying cause.
+  - Timeouts, including the upload and response limits from #187, now
+    return `504`; other failures stay `502`.
+  - The log line gives the kind of failure (timeout, connect, body) and
+    the full cause chain.
+  - Clients get "upstream unavailable" or "upstream timed out" instead of
+    the raw error, which exposed the backend's internal `127.0.0.1:port`.
 - **A proxy that couldn't bind port 80 or 443 still reported a successful
   start (#189).** The ACME listeners were bound inside background tasks, so
   a failure was one `HTTP listener failed` line. With port 80 gone, every
