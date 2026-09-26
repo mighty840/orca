@@ -149,10 +149,10 @@ pub async fn handle_server(
         .await
         {
             Ok(resolver) => (Some(acme_clone), Some(resolver)),
-            Err(e) => {
-                tracing::error!("Proxy with ACME failed: {e}");
-                (None, None)
-            }
+            // A master that can't serve 80/443 must not report a successful
+            // start: every certificate order would fail and nothing public
+            // would be reachable, with one error line to show for it (#189).
+            Err(e) => return Err(e.context("the reverse proxy could not start")),
         }
     } else {
         // Fallback: HTTP only proxy

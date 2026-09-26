@@ -31,13 +31,13 @@ pub fn is_permission_denied(e: &anyhow::Error) -> bool {
 pub fn setup_port_redirect(target_port: u16) -> u16 {
     let high_port = if target_port == 80 { 8080 } else { 8443 };
 
-    let rules = redirect_rules(target_port, high_port);
-
-    for rule in &rules {
-        if !run_iptables_rule(rule) {
-            return target_port;
-        }
-        info!("iptables redirect: {target_port} -> {high_port} (rule applied)");
+    if !apply_redirect(
+        target_port,
+        high_port,
+        &mut run_iptables_rule,
+        &mut probe_iptables_rule,
+    ) {
+        return target_port;
     }
 
     if let Ok(mut active) = ACTIVE_REDIRECTS.lock() {
@@ -82,35 +82,75 @@ pub fn cleanup_port_redirects() {
 /// Checks for the specific PREROUTING rules we create (80→8080, 443→8443)
 /// and deletes them if found. Safe to call on every startup.
 pub fn cleanup_stale_redirects() {
+    remove_stale(&mut run_iptables_rule, &mut probe_iptables_rule);
+}
+
+/// The two chains a redirect uses, as (chain, rule spec).
+fn redirect_specs(target: u16, high: u16) -> [(&'static str, String); 2] {
+    [
+        (
+            "PREROUTING",
+            format!("-p tcp --dport {target} -j REDIRECT --to-port {high}"),
+        ),
+        (
+            "OUTPUT",
+            format!("-o lo -p tcp --dport {target} -j REDIRECT --to-port {high}"),
+        ),
+    ]
+}
+
+/// Install both redirect rules, each only if missing (no duplicates across
+/// restarts), and remove a half-applied pair if the second one fails, so
+/// no untracked rule is left behind (#189).
+fn apply_redirect(
+    target: u16,
+    high: u16,
+    run: &mut dyn FnMut(&str) -> bool,
+    probe: &mut dyn FnMut(&str) -> bool,
+) -> bool {
+    let mut added: Vec<String> = Vec::new();
+    for (chain, spec) in redirect_specs(target, high) {
+        if probe(&format!("-t nat -C {chain} {spec}")) {
+            continue;
+        }
+        if run(&format!("-t nat -A {chain} {spec}")) {
+            info!("iptables redirect: {target} -> {high} ({chain} rule applied)");
+            added.push(format!("-t nat -D {chain} {spec}"));
+        } else {
+            for undo in added.iter().rev() {
+                run(undo);
+            }
+            return false;
+        }
+    }
+    true
+}
+
+/// Remove orca's redirect rules left from a previous run, checking each
+/// chain on its own: an orphaned OUTPUT rule used to go unnoticed because
+/// only PREROUTING was probed.
+fn remove_stale(run: &mut dyn FnMut(&str) -> bool, probe: &mut dyn FnMut(&str) -> bool) {
     for (target, high) in [(80u16, 8080u16), (443, 8443)] {
-        let check =
-            format!("-t nat -C PREROUTING -p tcp --dport {target} -j REDIRECT --to-port {high}");
-        if run_iptables_rule(&check) {
-            info!("Found stale iptables redirect {target} -> {high}, removing");
-            let rules = [
-                format!(
-                    "-t nat -D PREROUTING -p tcp --dport {target} -j REDIRECT --to-port {high}"
-                ),
-                format!(
-                    "-t nat -D OUTPUT -o lo -p tcp --dport {target} -j REDIRECT --to-port {high}"
-                ),
-            ];
-            for rule in &rules {
-                run_iptables_rule(rule);
+        for (chain, spec) in redirect_specs(target, high) {
+            if probe(&format!("-t nat -C {chain} {spec}")) {
+                info!("Removing stale iptables redirect {target} -> {high} ({chain})");
+                run(&format!("-t nat -D {chain} {spec}"));
             }
         }
     }
 }
 
-fn redirect_rules(target_port: u16, high_port: u16) -> [String; 2] {
-    [
-        format!(
-            "-t nat -A PREROUTING -p tcp --dport {target_port} -j REDIRECT --to-port {high_port}"
-        ),
-        format!(
-            "-t nat -A OUTPUT -o lo -p tcp --dport {target_port} -j REDIRECT --to-port {high_port}"
-        ),
-    ]
+/// `iptables -C`: whether a rule exists. Exit 1 just means "no", so unlike
+/// [`run_iptables_rule`] it doesn't warn (those warnings filled the log).
+fn probe_iptables_rule(rule: &str) -> bool {
+    std::process::Command::new("sudo")
+        .arg("-n")
+        .arg("iptables")
+        .args(rule.split_whitespace())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 fn run_iptables_rule(rule: &str) -> bool {
@@ -204,20 +244,64 @@ mod tests {
     }
 
     #[test]
-    fn redirect_rules_format() {
-        let rules = redirect_rules(80, 8080);
-        assert!(rules[0].contains("PREROUTING"));
-        assert!(rules[0].contains("--dport 80"));
-        assert!(rules[0].contains("--to-port 8080"));
-        assert!(rules[1].contains("OUTPUT"));
-        assert!(rules[1].contains("-o lo"));
+    fn redirect_specs_cover_both_chains() {
+        let specs = redirect_specs(80, 8080);
+        assert_eq!(specs[0].0, "PREROUTING");
+        assert!(specs[0].1.contains("--dport 80") && specs[0].1.contains("--to-port 8080"));
+        assert_eq!(specs[1].0, "OUTPUT");
+        assert!(specs[1].1.contains("-o lo"));
     }
 
+    /// #189: a second run must not add duplicates of rules already present.
     #[test]
-    fn redirect_rules_443() {
-        let rules = redirect_rules(443, 8443);
-        assert!(rules[0].contains("--dport 443"));
-        assert!(rules[0].contains("--to-port 8443"));
+    fn existing_rules_are_not_added_again() {
+        let mut ran = Vec::new();
+        let ok = apply_redirect(
+            80,
+            8080,
+            &mut |r| {
+                ran.push(r.to_string());
+                true
+            },
+            &mut |_| true,
+        );
+        assert!(ok);
+        assert!(ran.is_empty(), "{ran:?}");
+    }
+
+    /// #189: if OUTPUT fails after PREROUTING went in, PREROUTING is removed
+    /// again instead of staying installed and untracked.
+    #[test]
+    fn a_half_applied_pair_is_rolled_back() {
+        let mut ran = Vec::new();
+        let ok = apply_redirect(
+            80,
+            8080,
+            &mut |r| {
+                ran.push(r.to_string());
+                !r.contains("-A OUTPUT")
+            },
+            &mut |_| false,
+        );
+        assert!(!ok);
+        assert!(ran[0].contains("-A PREROUTING"));
+        assert!(ran[1].contains("-A OUTPUT"));
+        assert!(ran[2].contains("-D PREROUTING"), "{ran:?}");
+    }
+
+    /// #189: an orphaned OUTPUT rule is found even without its PREROUTING twin.
+    #[test]
+    fn stale_cleanup_checks_each_chain() {
+        let mut removed = Vec::new();
+        remove_stale(
+            &mut |r| {
+                removed.push(r.to_string());
+                true
+            },
+            &mut |c| c.contains("OUTPUT") && c.contains("--dport 443"),
+        );
+        assert_eq!(removed.len(), 1);
+        assert!(removed[0].contains("-D OUTPUT") && removed[0].contains("--dport 443"));
     }
 
     #[test]

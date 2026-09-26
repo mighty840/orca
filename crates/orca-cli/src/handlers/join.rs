@@ -252,8 +252,14 @@ async fn spawn_local_proxy(
             );
             Some(resolver)
         }
+        // Not fatal on an agent: some nodes deliberately leave 80/443 to
+        // another web server (e.g. Apache in front of a local Nextcloud). But
+        // say what it means (#189).
         Err(e) => {
-            tracing::error!("Node-local proxy failed: {e}");
+            tracing::error!(
+                "Node-local proxy not started: {e:#}. This node serves no public traffic \
+                 through orca and no certificates are issued here."
+            );
             None
         }
     };
