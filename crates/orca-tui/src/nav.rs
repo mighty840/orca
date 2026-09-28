@@ -31,14 +31,14 @@ pub(crate) fn navigate(state: &mut AppState, code: KeyCode) -> bool {
                 }
             }
             View::Webhooks => {
-                if !state.webhooks.is_empty() && state.selected_webhook + 1 < state.webhooks.len() {
+                if state.selected_webhook + 1 < state.visible_webhooks().len() {
                     state.selected_webhook += 1;
                 }
             }
             View::Networks => state.network_scroll = state.network_scroll.saturating_add(1),
             View::Help => state.help_scroll = state.help_scroll.saturating_add(1),
             View::Alerts => {
-                if !state.alerts.is_empty() && state.selected_alert + 1 < state.alerts.len() {
+                if state.selected_alert + 1 < state.visible_alerts().len() {
                     state.selected_alert += 1;
                 }
             }
@@ -103,8 +103,8 @@ pub(crate) fn navigate(state: &mut AppState, code: KeyCode) -> bool {
                 }
             }
             View::Webhooks => {
-                if !state.webhooks.is_empty() {
-                    state.selected_webhook = state.webhooks.len() - 1;
+                if !state.visible_webhooks().is_empty() {
+                    state.selected_webhook = state.visible_webhooks().len() - 1;
                 }
             }
             View::Networks => {
@@ -113,8 +113,8 @@ pub(crate) fn navigate(state: &mut AppState, code: KeyCode) -> bool {
                 state.network_scroll = total.saturating_sub(1);
             }
             View::Alerts => {
-                if !state.alerts.is_empty() {
-                    state.selected_alert = state.alerts.len() - 1;
+                if !state.visible_alerts().is_empty() {
+                    state.selected_alert = state.visible_alerts().len() - 1;
                 }
             }
             View::AlertDetail { .. } => {

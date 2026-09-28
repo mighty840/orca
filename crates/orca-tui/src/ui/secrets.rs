@@ -31,7 +31,7 @@ pub fn draw_secrets(f: &mut Frame, area: Rect, state: &AppState) {
         return;
     }
 
-    let rows_data = flatten(&state.secrets_usage, state.secrets_scope_filter.as_deref());
+    let rows_data = rows(state);
     let total_keys = rows_data
         .iter()
         .filter(|r| matches!(r, FlatRow::Key { .. }))
@@ -63,7 +63,12 @@ pub fn draw_secrets(f: &mut Frame, area: Rect, state: &AppState) {
         .secrets_scope_filter
         .as_deref()
         .map(|fltr| format!(" ⛉ {fltr}"))
-        .unwrap_or_default();
+        .unwrap_or_default()
+        + &if state.secret_filter.is_empty() {
+            String::new()
+        } else {
+            format!(" /{}", state.secret_filter)
+        };
     let title = if rows_data.len() > visible_rows {
         format!(
             " Secrets ({total_keys}){filter_tag} [{}/{}] ",
@@ -107,6 +112,26 @@ pub fn group_labels(usage: &[SecretUsage]) -> Vec<String> {
 }
 
 pub fn flatten<'a>(usage: &'a [SecretUsage], filter: Option<&str>) -> Vec<FlatRow<'a>> {
+    flatten_matching(usage, filter, "")
+}
+
+/// The Secrets view's rows: scope filter (`p`) and `/` text filter applied.
+/// Every navigation and action uses this, so indexes always agree.
+pub fn rows(state: &AppState) -> Vec<FlatRow<'_>> {
+    flatten_matching(
+        &state.secrets_usage,
+        state.secrets_scope_filter.as_deref(),
+        &state.secret_filter,
+    )
+}
+
+/// [`flatten`], keeping only keys that contain `text` (case-insensitive).
+pub fn flatten_matching<'a>(
+    usage: &'a [SecretUsage],
+    filter: Option<&str>,
+    text: &str,
+) -> Vec<FlatRow<'a>> {
+    let needle = text.to_lowercase();
     use std::collections::BTreeMap;
 
     // Bucket each usage into a group. The infer_group rule lives in one place
@@ -115,6 +140,9 @@ pub fn flatten<'a>(usage: &'a [SecretUsage], filter: Option<&str>) -> Vec<FlatRo
     for u in usage {
         let group = infer_group(u);
         if filter.is_some_and(|f| f != group) {
+            continue;
+        }
+        if !needle.is_empty() && !u.key.to_lowercase().contains(&needle) {
             continue;
         }
         groups.entry(group).or_default().push(u);
@@ -232,7 +260,7 @@ fn group_color(name: &str) -> Color {
 /// Used by the event-loop drill-down handler so it can stay decoupled from
 /// the rendering structure.
 pub fn selected_key(state: &AppState) -> Option<&SecretUsage> {
-    let rows = flatten(&state.secrets_usage, state.secrets_scope_filter.as_deref());
+    let rows = rows(state);
     match rows.get(state.selected_secret) {
         Some(FlatRow::Key { usage }) => Some(usage),
         _ => None,
@@ -384,5 +412,33 @@ mod tests {
             group_labels(&usages),
             vec!["global", "alpha", "broken refs"]
         );
+    }
+}
+
+#[cfg(test)]
+mod filter_tests {
+    use super::*;
+
+    fn usage(key: &str) -> SecretUsage {
+        serde_json::from_value(serde_json::json!({
+            "key": key,
+            "in_store": true,
+            "refs": [],
+        }))
+        .expect("usage")
+    }
+
+    #[test]
+    fn a_text_filter_keeps_matching_keys_only() {
+        let usages = vec![usage("DB_PASSWORD"), usage("SMTP_PASS"), usage("API_KEY")];
+        let keys: Vec<&str> = flatten_matching(&usages, None, "pass")
+            .iter()
+            .filter_map(|r| match r {
+                FlatRow::Key { usage, .. } => Some(usage.key.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(keys.len(), 2);
+        assert!(keys.contains(&"DB_PASSWORD") && keys.contains(&"SMTP_PASS"));
     }
 }

@@ -201,6 +201,15 @@ fn build_title(state: &AppState, count: usize) -> String {
     }
 }
 
+/// "7", or "3 of 7 matching /api" while a `/` filter is set.
+pub(crate) fn filtered_count(shown: usize, total: usize, filter: &str) -> String {
+    if filter.is_empty() {
+        total.to_string()
+    } else {
+        format!("{shown} of {total} matching /{filter}")
+    }
+}
+
 /// The rows of a bordered table with a header in `area` that keep
 /// `selected` on screen: (first row, row count). Without it a table draws
 /// from the top and the cursor moves off-screen (#264).

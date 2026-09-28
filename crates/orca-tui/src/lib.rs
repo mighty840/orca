@@ -8,6 +8,7 @@ pub mod confirm;
 pub(crate) use chat_dispatch::{drain_chat_result, send_chat_message};
 mod input_keys;
 mod keys;
+mod list_filters;
 mod log_follow;
 mod metrics;
 mod nav;

@@ -40,9 +40,9 @@ pub fn draw_alerts(f: &mut Frame, area: Rect, state: &AppState) {
     ])
     .style(Style::default().add_modifier(Modifier::BOLD));
 
-    let (first, count) = super::table::window(state.selected_alert, area, state.alerts.len());
-    let rows: Vec<Row> = state
-        .alerts
+    let visible = state.visible_alerts();
+    let (first, count) = super::table::window(state.selected_alert, area, visible.len());
+    let rows: Vec<Row> = visible
         .iter()
         .enumerate()
         .skip(first)
@@ -95,13 +95,12 @@ pub fn draw_alerts(f: &mut Frame, area: Rect, state: &AppState) {
         .iter()
         .filter(|a| a.severity == AlertSeverity::Critical)
         .count();
+    let shown =
+        super::table::filtered_count(visible.len(), state.alerts.len(), &state.alert_filter);
     let title = if critical > 0 {
-        format!(
-            " Alerts ({scope}: {}, {critical} critical) ",
-            state.alerts.len()
-        )
+        format!(" Alerts ({scope}: {shown}, {critical} critical) ")
     } else {
-        format!(" Alerts ({scope}: {}) ", state.alerts.len())
+        format!(" Alerts ({scope}: {shown}) ")
     };
     let block = Block::default()
         .title(title)
@@ -261,7 +260,7 @@ pub fn current_alert_id(state: &AppState) -> Option<String> {
     match &state.view {
         View::AlertDetail { id } => Some(id.clone()),
         View::Alerts => state
-            .alerts
+            .visible_alerts()
             .get(state.selected_alert)
             .map(|a| a.id.to_string()),
         _ => None,
