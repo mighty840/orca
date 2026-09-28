@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.6] - 2026-09-28
+
+Alert diagnoses that carry the evidence, and a TUI that is safe to act
+from and does most of what the CLI does: y/N confirmations, no freezes on
+a slow master, start/redeploy/rollback/promote, live logs, token
+rotation, filters, and layouts that fit narrow terminals.
+
 ### Added
 
 - **TUI: start, redeploy, roll back and promote a service (#265).** `u`
