@@ -96,7 +96,8 @@ fn polled_alerts_are_applied() {
 #[test]
 fn a_log_tail_for_a_service_no_longer_shown_is_dropped() {
     let mut state = AppState::new();
-    state.view = View::Logs {
+    // Detail polls its tail; the Logs view streams (`log_follow`).
+    state.view = View::Detail {
         service: "db".into(),
     };
     state.logs = "db logs".into();

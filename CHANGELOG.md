@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `:redeploy`, `:rollback` and `:promote` take a service name. Redeploy,
   rollback and promote ask y/N. Before, `x` could pause a service and
   nothing in the TUI could bring it back.
+- **TUI: logs follow live (#265).** The Logs view polled the last 50 lines
+  every 2 s and replaced them, so older lines vanished and bursts were
+  missed. It now streams the log and keeps the last 5000 lines; scrolling
+  up holds its place while new lines arrive. The master streams only its
+  own services; for a service on an agent it falls back to polling 200
+  lines every 2 s. The title shows `[live]` or `[polling]`.
 - **TUI: the Nodes view has a selection (#265).** `x` drains the selected
   node (y/N) and `u` undrains it; before, both needed `:drain <id>` typed
   by hand. The selection stays on its node across refreshes.

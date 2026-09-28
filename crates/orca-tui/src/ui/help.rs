@@ -81,7 +81,10 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
             "a / d / R (alerts)",
             "Show all incl. resolved / dismiss / resolve the selected alert",
         ),
-        ("l", "Logs for selected service"),
+        (
+            "l",
+            "Logs for selected service: live for services on the master, polled every 2 s for an agent's",
+        ),
         ("?", "This help screen (j/k to scroll)"),
     ] {
         lines.push(bind(k, d, ks, ds));

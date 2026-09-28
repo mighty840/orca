@@ -8,6 +8,7 @@ pub mod confirm;
 pub(crate) use chat_dispatch::{drain_chat_result, send_chat_message};
 mod input_keys;
 mod keys;
+mod log_follow;
 mod metrics;
 mod nav;
 mod persist;
@@ -88,8 +89,12 @@ async fn event_loop(
             last_refresh = tokio::time::Instant::now();
         }
 
+        // Follow the Logs view's service live where the master can stream
+        // it; poll the rest (#265).
+        log_follow::sync(client, state);
         // Auto-refresh logs in the Logs view and the Detail view's tail.
         if let View::Logs { service } | View::Detail { service } = &state.view
+            && !(matches!(state.view, View::Logs { .. }) && log_follow::is_followed(state, service))
             && state.auto_refresh_logs
             && last_log_refresh.elapsed() >= Duration::from_secs(2)
         {
