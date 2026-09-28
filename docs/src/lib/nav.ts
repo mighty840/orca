@@ -25,6 +25,7 @@ export const nav: NavSection[] = [
       { text: 'Deployment', link: '/guide/deployment' },
       { text: 'Multi-Node', link: '/guide/multi-node' },
       { text: 'Monitoring', link: '/guide/monitoring' },
+      { text: 'Upgrading to 0.3.0', link: '/guide/upgrading' },
     ],
   },
   {

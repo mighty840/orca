@@ -113,7 +113,7 @@ EOF
 ## Deploy
 
 ```bash
-orca server &        # Start the control plane
+orca server -d       # Start the control plane as a daemon
 orca deploy          # Auto-discovers services/*/service.toml
 ```
 
@@ -157,8 +157,9 @@ curl -X POST http://127.0.0.1:6880/api/v1/webhooks \
   -H "Content-Type: application/json" \
   -d '{
     "repo": "myorg/orca-infra",
-    "service_name": "__infra__",
+    "service_name": "infra",
     "branch": "main",
+    "infra": true,
     "secret": "your-webhook-secret"
   }'
 ```

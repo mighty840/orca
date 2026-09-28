@@ -119,7 +119,7 @@ is opt-in. RBAC to control access. Integration with external secret stores
 
 **Coolify / Dokploy:** Single node only.
 
-**Orca:** `orca join <leader>:6880 --token <...>` and the node is in the
+**Orca:** `ORCA_TOKEN=<token> orca join <leader>:6880` and the node is in the
 cluster. Raft consensus via openraft, embedded redb storage, no external
 state store. Services are pinned to nodes with
 `[service.placement] node = "gpu-box"`.
@@ -160,7 +160,7 @@ Then:
   cluster context (services, logs, stats).
 - **Conversational alerts** — AI analyzes health every 60s and creates
   threaded conversations about anomalies.
-- **Smart import** — `orca import compose docker-compose.yml` suggests
+- **Smart import** — `orca import docker-compose docker-compose.yml` suggests
   better service names and config improvements.
 
 ### GPU workloads

@@ -14,6 +14,9 @@ Orca automatically detects and recovers from common failure scenarios without ma
 | Remote service at startup | Agent WS connect | Placeholder upsert + Reconcile | On reconnect |
 | Orphan container (running, unregistered) | Adoption reconciler (30s) | Re-register into the registry | ~30s |
 | Failed / crashing container | Agent heartbeat | Record reason + exit code + log tail | ~5s |
+| Container exited with code 0 (`Completed`) | Watchdog | Prune it and start a replacement | ~30s |
+| Replacement container fails to start | Deploy | Restore the old container, report the error | Instant |
+| Failed spec in `[reconcile]` / infra webhook | Declarative loop | Leave it alone for 15 min unless it changes | 15 min |
 
 ## Watchdog
 
@@ -24,6 +27,16 @@ The watchdog runs on a 30-second cycle and checks:
 3. **Resource cleanup** -- are there orphaned resources?
 
 If a container is missing or stopped, the watchdog restarts it using the persisted config from `~/.orca/cluster.db`.
+
+- It counts only live instances. A container that exited with code 0 is
+  recorded as `Completed`; for a service that should be running, the watchdog
+  prunes it and starts a replacement. (Some supervisors exit 0 when the OOM
+  killer takes their child.)
+- Services being deployed, redeployed or reconciled are marked in flight and
+  left alone until that work is done, so the watchdog doesn't race a redeploy.
+- A service pinned to the master itself (`master`, `localhost`, `127.0.0.1`
+  or the master's hostname) is treated as local and healed like any other.
+- Paused services (`orca stop`) are not restarted.
 
 ## Health Checker
 
@@ -57,16 +70,18 @@ When a container dies, its proxy route becomes stale. The watchdog detects route
 
 If a worker node loses connection to the control plane:
 
-1. The agent retries with **exponential backoff** (5s, 10s, 20s, 40s, 60s max)
+1. The agent reconnects with **exponential backoff** (2 s, doubling up to 30 s), for as long as it takes
 2. Workloads on the disconnected node **continue running** -- they don't stop
-3. On reconnection, the agent reconciles state with the control plane
-4. If the node is unreachable beyond the heartbeat timeout, the scheduler marks it unhealthy and migrates workloads
+3. The agent's proxy keeps serving its local routes; it starts before registration and doesn't need the master
+4. On reconnection, the agent reconciles state with the control plane and applies spec changes it missed; paused services stay paused
+5. If the session is silent beyond `ws_idle_timeout_secs`, the master marks the node unreachable and deploys to it fail fast until it rejoins
 
 ## Persistent State
 
 All service configurations are persisted to `~/.orca/cluster.db` (redb). This means:
 
-- Server restarts automatically recreate all containers
+- Server restarts re-attach to the running containers (stopping orca doesn't remove them)
+- An unreadable store stops the master from starting, instead of starting empty
 - Deploys are idempotent -- redeploying the same config is a no-op
 - Rollback is always available from deploy history
 
