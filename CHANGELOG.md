@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Networks view showed no domains for services on agents (#277).**
+  Each node's domain list came from the master's proxy route table, which
+  holds only the routes the master serves, so every agent row was empty.
+  Domains now come from the service definitions, on the node each
+  service's placement resolves to; a pin to the master's own hostname
+  counts as the master, and a pin no node matches right now stays visible
+  on the agent row of that hostname. The dashboard no longer reads the
+  proxy route table at all.
+
 ## [0.3.0-rc.6] - 2026-09-28
 
 Alert diagnoses that carry the evidence, and a TUI that is safe to act

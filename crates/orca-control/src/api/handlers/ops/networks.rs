@@ -1,5 +1,5 @@
 //! Cluster networks dashboard: per-node `orca-*` Docker bridge listing plus
-//! the public-edge domain routes registered with each node's proxy, and a
+//! the domains each node serves (`network_domains`), and a
 //! missing-alias pass that flags env references with no DNS path.
 
 use std::collections::{HashMap, HashSet};
@@ -17,6 +17,7 @@ use orca_core::api_types::{
 };
 use orca_core::ws_types::{MasterMessage, NetworkStatusReportData};
 
+use super::network_domains::{NodeKey, domains_by_node};
 use crate::state::AppState;
 
 /// Per-agent collection timeout. Generous because docker `inspect_container`
@@ -32,9 +33,8 @@ const DNS_TIMEOUT: Duration = Duration::from_millis(800);
 /// across every node in the cluster, with DNS-resolved domain IPs and a
 /// missing-alias pass that flags broken env references.
 pub(crate) async fn cluster_networks(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    // Step 1: slice the master's route table by placement node so each
-    // node row gets the edge routes for services it actually hosts.
-    let routes_by_node = group_routes_by_placement(&state).await;
+    // Step 1: each service's domains, on the node its placement resolves to.
+    let routes_by_node = domains_by_node(&state).await;
 
     let master = collect_master(&state, &routes_by_node).await;
     let agents = collect_agents(&state, &routes_by_node).await;
@@ -53,69 +53,15 @@ pub(crate) async fn cluster_networks(State(state): State<Arc<AppState>>) -> impl
     Json(ClusterNetworksResponse { nodes })
 }
 
-/// Build `placement.node → [DomainRoute]`. The key is `Some(hostname)` for
-/// agent-pinned services and `None` for services with no placement (i.e.,
-/// the master). Routes whose service isn't in the services map (e.g. stale
-/// route after a service was removed) fall under `None` defensively.
-async fn group_routes_by_placement(state: &AppState) -> HashMap<Option<String>, Vec<DomainRoute>> {
-    // Snapshot the data we need under tight, scoped reads, then drop both
-    // guards before any further work. Holding `state.route_table.read()`
-    // across iteration was the primary lock-contention source that stalled
-    // proxy TLS handshakes by up to 20 seconds — tokio::sync::RwLock uses
-    // write-priority, so once *any* writer (update_container_routes from
-    // the reconciler/watchdog) queues behind this long-running reader, all
-    // subsequent readers (including the serve-loop check that happens
-    // between peek_sni and acceptor.accept) queue behind the writer too.
-    // See project_v0_2_9_rc2_proxy_lock_contention for the diagnosis.
-    let service_placements: HashMap<String, Option<String>> = {
-        let services = state.services.read().await;
-        services
-            .values()
-            .map(|s| {
-                (
-                    s.config.name.clone(),
-                    s.config.placement.as_ref().and_then(|p| p.node.clone()),
-                )
-            })
-            .collect()
-    };
-    let route_snapshot: Vec<(String, Vec<String>)> = {
-        let routes = state.route_table.read().await;
-        routes
-            .iter()
-            .map(|(domain, targets)| {
-                (
-                    domain.clone(),
-                    targets.iter().map(|t| t.service_name.clone()).collect(),
-                )
-            })
-            .collect()
-    };
-
-    let mut out: HashMap<Option<String>, Vec<DomainRoute>> = HashMap::new();
-    for (domain, service_names) in &route_snapshot {
-        for service_name in service_names {
-            let node = service_placements.get(service_name).cloned().flatten();
-            out.entry(node).or_default().push(DomainRoute {
-                domain: domain.clone(),
-                service: service_name.clone(),
-                resolved_ip: None,
-            });
-        }
-    }
-    for v in out.values_mut() {
-        v.sort_by(|a, b| a.domain.cmp(&b.domain).then(a.service.cmp(&b.service)));
-        v.dedup_by(|a, b| a.domain == b.domain && a.service == b.service);
-    }
-    out
-}
-
 async fn collect_master(
     _state: &AppState,
-    routes_by_node: &HashMap<Option<String>, Vec<DomainRoute>>,
+    routes_by_node: &HashMap<NodeKey, Vec<DomainRoute>>,
 ) -> NodeNetworks {
     let networks = enumerate_local_orca_networks().await;
-    let domains = routes_by_node.get(&None).cloned().unwrap_or_default();
+    let domains = routes_by_node
+        .get(&NodeKey::Master)
+        .cloned()
+        .unwrap_or_default();
     NodeNetworks {
         node_id: None,
         hostname: crate::placement::master_hostname(),
@@ -128,7 +74,7 @@ async fn collect_master(
 
 async fn collect_agents(
     state: &AppState,
-    routes_by_node: &HashMap<Option<String>, Vec<DomainRoute>>,
+    routes_by_node: &HashMap<NodeKey, Vec<DomainRoute>>,
 ) -> Vec<NodeNetworks> {
     let agent_ids: Vec<u64> = state.ws_agents.read().await.keys().copied().collect();
     if agent_ids.is_empty() {
@@ -199,10 +145,14 @@ async fn collect_agents(
         .into_iter()
         .map(|node_id| match reports.remove(&node_id) {
             Some(data) => {
-                let domains = routes_by_node
-                    .get(&Some(data.hostname.clone()))
-                    .cloned()
-                    .unwrap_or_default();
+                let mut domains: Vec<DomainRoute> =
+                    [NodeKey::Node(node_id), NodeKey::Pin(data.hostname.clone())]
+                        .iter()
+                        .filter_map(|k| routes_by_node.get(k))
+                        .flatten()
+                        .cloned()
+                        .collect();
+                domains.sort_by(|a, b| a.domain.cmp(&b.domain));
                 NodeNetworks {
                     node_id: Some(node_id),
                     hostname: data.hostname,

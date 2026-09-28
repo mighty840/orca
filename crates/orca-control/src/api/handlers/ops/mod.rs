@@ -3,6 +3,7 @@
 mod backups;
 mod cluster;
 mod deploy;
+mod network_domains;
 mod networks;
 
 use axum::Json;
