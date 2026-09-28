@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `:redeploy`, `:rollback` and `:promote` take a service name. Redeploy,
   rollback and promote ask y/N. Before, `x` could pause a service and
   nothing in the TUI could bring it back.
+- **TUI: narrow and short terminals (#265).** The services table needed
+  ~112 columns and squeezed every column into slivers below that. It now
+  drops columns as the terminal narrows (runtime, project, image, domain,
+  node, in that order), keeps name, replicas and status, and gives spare
+  width to the name. The Nodes view gave every node a sparkline strip and
+  broke past ~6 nodes; it now shows as many strips as fit, around the
+  selected node.
 - **TUI: cluster-token rotation (#265).** Key `8` or `:token` opens a view
   of the rotation and each agent's progress, refreshed every 2 s. `s`
   starts a rotation, `f` finishes it and `F` forces the finish, each after

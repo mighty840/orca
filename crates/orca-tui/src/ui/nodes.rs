@@ -22,26 +22,42 @@ pub fn draw_nodes(f: &mut Frame, area: Rect, state: &AppState) {
         return;
     }
 
-    let n_nodes = state.nodes.len() as u16;
-    let spark_height: u16 = 5;
-    // Reserve enough rows for the table itself, then split the rest between
-    // each node's sparkline strip.
-    let table_height = (area.height.saturating_sub(spark_height * n_nodes)).max(6);
+    let (table_height, strips) =
+        sparkline_window(area.height, state.nodes.len(), state.selected_node);
     let mut constraints: Vec<Constraint> = vec![Constraint::Length(table_height)];
-    for _ in 0..n_nodes {
-        constraints.push(Constraint::Length(spark_height));
+    for _ in strips.clone() {
+        constraints.push(Constraint::Length(SPARK_HEIGHT));
     }
+    constraints.push(Constraint::Min(0));
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints(constraints)
         .split(area);
 
     draw_table(f, chunks[0], state);
-    for (i, node) in state.nodes.iter().enumerate() {
-        if let Some(rect) = chunks.get(i + 1) {
+    for (slot, i) in strips.enumerate() {
+        if let (Some(rect), Some(node)) = (chunks.get(slot + 1), state.nodes.get(i)) {
             draw_node_sparklines(f, *rect, state, node);
         }
     }
+}
+
+/// Rows per node's sparkline strip.
+const SPARK_HEIGHT: u16 = 5;
+
+/// Table height and which nodes get a sparkline strip in `height` rows.
+/// The table gets a row per node (plus border and header) up to half the
+/// screen; strips fill what's left, centred on the selected node. Before,
+/// every node got a strip, and past ~6 nodes the layout squeezed them all
+/// into nothing (#265).
+fn sparkline_window(height: u16, nodes: usize, selected: usize) -> (u16, std::ops::Range<usize>) {
+    let table = (nodes as u16 + 3).min(height / 2).max(6.min(height));
+    let fit = (height.saturating_sub(table) / SPARK_HEIGHT) as usize;
+    let fit = fit.min(nodes);
+    let first = selected
+        .saturating_sub(fit / 2)
+        .min(nodes.saturating_sub(fit));
+    (table, first..first + fit)
 }
 
 fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
@@ -262,7 +278,19 @@ fn parse_iso_timestamp(ts: &str) -> Option<u64> {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_iso_timestamp;
+    use super::{parse_iso_timestamp, sparkline_window};
+
+    #[test]
+    fn strips_fit_the_screen_and_follow_the_selection() {
+        // 40 rows, 12 nodes: a 15-row table, 5 strips around node 9.
+        let (table, strips) = sparkline_window(40, 12, 9);
+        assert_eq!(table, 15);
+        assert_eq!(strips, 7..12);
+        // Two nodes on a tall screen: both get a strip.
+        assert_eq!(sparkline_window(50, 2, 0).1, 0..2);
+        // A short screen: the table only.
+        assert_eq!(sparkline_window(10, 3, 0).1.len(), 0);
+    }
 
     #[test]
     fn heartbeat_timestamps_parse() {
