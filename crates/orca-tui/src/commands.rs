@@ -1,6 +1,7 @@
 //! Command-mode handlers for `:` commands.
 
 use crate::api::ApiClient;
+use crate::confirm::Confirm;
 use crate::state::{AppState, View};
 
 pub async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str) {
@@ -24,8 +25,8 @@ pub async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str
         Some("logs") => cmd_logs(state, client, &parts).await,
         Some("help") => state.push_view(View::Help),
         Some("scale") => cmd_scale(state, client, &parts).await,
-        Some("stop") => cmd_stop(state, client, &parts).await,
-        Some("stop-project") => cmd_stop_project(state, client, &parts).await,
+        Some("stop") => cmd_stop(state, &parts),
+        Some("stop-project") => cmd_stop_project(state, &parts),
         Some("deploy") => {
             state.flash("Use `orca deploy` from CLI to redeploy all services".into());
         }
@@ -33,7 +34,7 @@ pub async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str
         Some("project") => cmd_project(state, &parts),
         Some("exec") => cmd_exec(state, &parts),
         Some("sh") => cmd_sh(state, &parts),
-        Some("drain") => cmd_drain(state, client, &parts).await,
+        Some("drain") => cmd_drain(state, &parts),
         Some("undrain") => cmd_undrain(state, client, &parts).await,
         Some("secrets") => {
             crate::refresh_secrets_usage(client, state).await;
@@ -41,7 +42,7 @@ pub async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str
             state.push_view(View::Secrets);
         }
         Some("set") => cmd_secret_set(state, client, &parts).await,
-        Some("rm") => cmd_secret_rm(state, client, &parts).await,
+        Some("rm") => cmd_secret_rm(state, &parts),
         Some("webhooks") => {
             crate::refresh_webhooks(client, state).await;
             state.selected_webhook = 0;
@@ -181,29 +182,12 @@ fn resolve_service(state: &AppState, parts: &[&str]) -> Option<(String, Option<S
         .map(|s| (s.name.clone(), s.node.clone()))
 }
 
-async fn cmd_secret_rm(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
+fn cmd_secret_rm(state: &mut AppState, parts: &[&str]) {
     if parts.len() < 2 {
         state.flash("Usage: :rm <KEY>".into());
         return;
     }
-    let key = parts[1];
-    match client.remove_secret(key).await {
-        Ok(()) => {
-            state.flash(format!("Secret {key} removed"));
-            crate::refresh_secrets_usage(client, state).await;
-            // After the row drops out, clamp selection back into the
-            // selectable range (skip past group headers).
-            let rows = crate::ui::secrets::flatten(
-                &state.secrets_usage,
-                state.secrets_scope_filter.as_deref(),
-            );
-            let sel = crate::ui::secrets::selectable_indices(&rows);
-            if !sel.contains(&state.selected_secret) {
-                state.selected_secret = sel.last().copied().unwrap_or(0);
-            }
-        }
-        Err(e) => state.error = Some(format!("Remove secret failed: {e}")),
-    }
+    crate::confirm::arm(state, Confirm::DeleteSecret(parts[1].to_string()));
 }
 
 async fn cmd_logs(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
@@ -238,7 +222,7 @@ async fn cmd_scale(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
     }
 }
 
-async fn cmd_stop(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
+fn cmd_stop(state: &mut AppState, parts: &[&str]) {
     let name = if let Some(n) = parts.get(1) {
         (*n).to_string()
     } else if let Some(n) = state.selected_service_name() {
@@ -247,22 +231,15 @@ async fn cmd_stop(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
         state.flash("Usage: :stop <service>".into());
         return;
     };
-    match client.stop(&name).await {
-        Ok(()) => state.flash(format!("Stopped {name}")),
-        Err(e) => state.error = Some(format!("Stop failed: {e}")),
-    }
+    crate::confirm::arm(state, Confirm::StopService(name));
 }
 
-async fn cmd_stop_project(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
+fn cmd_stop_project(state: &mut AppState, parts: &[&str]) {
     if parts.len() < 2 {
         state.flash("Usage: :stop-project <project>".into());
         return;
     }
-    let project = parts[1];
-    match client.stop_project(project).await {
-        Ok(()) => state.flash(format!("Stopped project {project}")),
-        Err(e) => state.error = Some(format!("Stop project failed: {e}")),
-    }
+    crate::confirm::arm(state, Confirm::StopProject(parts[1].to_string()));
 }
 
 fn cmd_filter(state: &mut AppState, parts: &[&str]) {
@@ -289,7 +266,7 @@ fn cmd_project(state: &mut AppState, parts: &[&str]) {
     }
 }
 
-async fn cmd_drain(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
+fn cmd_drain(state: &mut AppState, parts: &[&str]) {
     if parts.len() < 2 {
         state.flash("Usage: :drain <node_id>".into());
         return;
@@ -301,10 +278,7 @@ async fn cmd_drain(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
             return;
         }
     };
-    match client.drain(node_id).await {
-        Ok(()) => state.flash(format!("Draining node {node_id}")),
-        Err(e) => state.error = Some(format!("Drain failed: {e}")),
-    }
+    crate::confirm::arm(state, Confirm::DrainNode(node_id));
 }
 
 async fn cmd_undrain(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
