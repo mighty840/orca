@@ -31,10 +31,10 @@ pub fn draw_detail(f: &mut Frame, area: Rect, state: &AppState, service_name: &s
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(14), // service info
-            Constraint::Length(7),  // sparklines
-            Constraint::Min(5),     // recent logs
-            Constraint::Length(1),  // action bar
+            Constraint::Length(info_height(svc)), // service info
+            Constraint::Length(7),                // sparklines
+            Constraint::Min(5),                   // recent logs
+            Constraint::Length(1),                // action bar
         ])
         .split(area);
 
@@ -115,6 +115,20 @@ fn draw_sparklines(f: &mut Frame, area: Rect, state: &AppState, service: &str) {
         mem_spark = mem_spark.max(max.max(1));
     }
     f.render_widget(mem_spark, cols[1]);
+}
+
+/// Failure message lines shown under the service info.
+const FAILURE_LINES: usize = 6;
+
+/// Rows the info box needs: 10 fields and 2 borders, plus the failure
+/// reason and message when there is one. A fixed 14 cut off the failure,
+/// the most useful part of a broken service's detail (#264).
+fn info_height(svc: &crate::api::ServiceStatus) -> u16 {
+    let failure = svc
+        .last_failure
+        .as_ref()
+        .map_or(0, |f| 1 + f.message.lines().take(FAILURE_LINES).count());
+    (12 + failure) as u16
 }
 
 fn draw_info(f: &mut Frame, area: Rect, svc: &crate::api::ServiceStatus) {
@@ -205,7 +219,7 @@ fn draw_info(f: &mut Frame, area: Rect, svc: &crate::api::ServiceStatus) {
             Span::styled("  Failure:   ", label),
             Span::styled(reason, Style::default().fg(Color::Red)),
         ]));
-        for line in f.message.lines().take(6) {
+        for line in f.message.lines().take(FAILURE_LINES) {
             info_lines.push(Line::from(vec![
                 Span::styled("    ", label),
                 Span::styled(line.to_string(), Style::default().fg(Color::DarkGray)),

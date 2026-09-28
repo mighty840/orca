@@ -89,6 +89,7 @@ pub(crate) fn parse_slash(raw: &str) -> Option<SlashAction> {
         "backups" => SlashAction::Goto(View::Backups),
         "webhooks" => SlashAction::Goto(View::Webhooks),
         "networks" => SlashAction::Goto(View::Networks),
+        "alerts" => SlashAction::Goto(View::Alerts),
         "logs" => match parts.next() {
             Some(svc) => SlashAction::Logs(svc.to_string()),
             None => SlashAction::Usage("Usage: /logs <service>".to_string()),
@@ -139,6 +140,11 @@ async fn send_chat(state: &mut AppState, client: &ApiClient) {
                 View::Networks => {
                     crate::refresh_networks(client, state).await;
                     state.push_view(View::Networks);
+                }
+                View::Alerts => {
+                    crate::refresh_alerts(client, state).await;
+                    state.selected_alert = 0;
+                    state.push_view(View::Alerts);
                 }
                 other => state.push_view(other),
             },
@@ -194,6 +200,15 @@ mod tests {
             Some(SlashAction::Logs("api".to_string()))
         );
         assert!(matches!(parse_slash("/logs"), Some(SlashAction::Usage(_))));
+    }
+
+    #[test]
+    fn slash_alerts_opens_the_alerts_view() {
+        // The chat hint advertised /alerts, but it fell through to Unknown.
+        assert_eq!(
+            parse_slash("/alerts"),
+            Some(SlashAction::Goto(View::Alerts))
+        );
     }
 
     #[test]

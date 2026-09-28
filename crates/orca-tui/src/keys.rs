@@ -1,5 +1,7 @@
 //! Key event handlers — filter, command, and normal mode input.
 
+use std::sync::atomic::Ordering;
+
 use crossterm::event::KeyCode;
 
 use crate::api::ApiClient;
@@ -36,7 +38,10 @@ pub async fn handle_normal_key(
                 state.input_mode = InputMode::Filter;
             }
         }
-        KeyCode::Char('?') => state.push_view(View::Help),
+        KeyCode::Char('?') => {
+            state.help_scroll = 0;
+            state.push_view(View::Help);
+        }
         KeyCode::Esc => handle_esc(state),
 
         // Navigation
@@ -60,13 +65,15 @@ pub async fn handle_normal_key(
                 }
             }
             View::Networks => state.network_scroll = state.network_scroll.saturating_add(1),
+            View::Help => state.help_scroll = state.help_scroll.saturating_add(1),
             View::Alerts => {
                 if !state.alerts.is_empty() && state.selected_alert + 1 < state.alerts.len() {
                     state.selected_alert += 1;
                 }
             }
             View::AlertDetail { .. } => {
-                state.alert_detail_scroll = state.alert_detail_scroll.saturating_add(1);
+                let max = state.alert_detail_max.load(Ordering::Relaxed);
+                state.alert_detail_scroll = (state.alert_detail_scroll + 1).min(max);
             }
             _ => state.next_service(),
         },
@@ -88,6 +95,7 @@ pub async fn handle_normal_key(
                 }
             }
             View::Networks => state.network_scroll = state.network_scroll.saturating_sub(1),
+            View::Help => state.help_scroll = state.help_scroll.saturating_sub(1),
             View::Alerts => {
                 if state.selected_alert > 0 {
                     state.selected_alert -= 1;
@@ -138,7 +146,7 @@ pub async fn handle_normal_key(
                 }
             }
             View::AlertDetail { .. } => {
-                state.alert_detail_scroll = state.alert_detail_scroll.saturating_add(100);
+                state.alert_detail_scroll = state.alert_detail_max.load(Ordering::Relaxed);
             }
             _ => {
                 let len = state.filtered_services().len();

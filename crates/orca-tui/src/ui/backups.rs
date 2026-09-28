@@ -54,10 +54,13 @@ fn draw_table(f: &mut Frame, area: Rect, state: &AppState, resp: &ClusterBackups
     ])
     .style(Style::default().add_modifier(Modifier::BOLD));
 
+    let (first, count) = super::table::window(state.selected_backup_node, area, resp.nodes.len());
     let rows: Vec<Row> = resp
         .nodes
         .iter()
         .enumerate()
+        .skip(first)
+        .take(count)
         .map(|(i, n)| {
             let selected = i == state.selected_backup_node;
             let style = if selected {

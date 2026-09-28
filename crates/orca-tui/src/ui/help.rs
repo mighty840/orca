@@ -46,6 +46,7 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled("  Views", hs)));
     for (k, d) in [
+        ("0", "Chat with the cluster AI (the landing view)"),
         ("1", "Services view (grouped by project)"),
         ("2 / n", "Nodes view (CPU/Mem/Disk/Net sparklines)"),
         ("3", "Secrets view (grouped by inferred scope + ref counts)"),
@@ -75,8 +76,13 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
             "↵ on a webhook row",
             "Drill into invocation history for that webhook",
         ),
+        ("7", "Alerts view (AI alert conversations)"),
+        (
+            "a / d / R (alerts)",
+            "Show all incl. resolved / dismiss / resolve the selected alert",
+        ),
         ("l", "Logs for selected service"),
-        ("?", "This help screen"),
+        ("?", "This help screen (j/k to scroll)"),
     ] {
         lines.push(bind(k, d, ks, ds));
     }
@@ -86,12 +92,15 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
     lines.push(Line::from(Span::styled("  Actions", hs)));
     for (k, d) in [
         ("s", "Scale service (opens :scale prompt)"),
-        ("x", "Stop selected service"),
+        ("x", "Stop selected service (asks y/N)"),
         ("c", "Collapse / expand the selected project"),
         ("p", "Filter by project of selected"),
         ("r", "Refresh immediately"),
         ("b", "Trigger backup on selected node (Backups view)"),
-        ("a / e / x", "Add / edit / delete webhook (Webhooks view)"),
+        (
+            "a / e / x",
+            "Add / edit / delete webhook (Webhooks view; x asks y/N)",
+        ),
         ("/", "Filter services by name"),
         ("w", "Toggle word wrap (in logs)"),
     ] {
@@ -103,14 +112,19 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
     lines.push(Line::from(Span::styled("  Commands (:)", hs)));
     for (k, d) in [
         (":scale <svc> <n>", "Scale service to n replicas"),
-        (":stop <svc>", "Stop a service"),
-        (":stop-project <p>", "Stop entire project"),
+        (":stop <svc>", "Stop a service (asks y/N)"),
+        (":stop-project <p>", "Stop entire project (asks y/N)"),
+        (":logs <svc>", "Open a service's logs"),
+        (":chat / :nodes / :help", "Open those views"),
         (":filter <text>", "Filter services"),
         (":project <name>", "Filter by project"),
         (":secrets", "Open the secrets view"),
         (":backups", "Open the cluster backups dashboard"),
         (":webhooks", "Open the webhooks dashboard"),
         (":networks", "Open the cluster networks view"),
+        (":alerts", "Open the alerts view"),
+        (":reply <msg>", "Answer the AI in the open alert"),
+        (":dismiss / :resolve", "Dismiss or resolve the open alert"),
         (
             ":webhook-add <repo> <branch> <svc> [--secret X] [--infra]",
             "Register a webhook",
@@ -121,10 +135,17 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
         ),
         (":webhook-rm <service>", "Remove a webhook"),
         (":set <KEY> <val>", "Create or update a secret"),
-        (":rm <KEY>", "Remove a secret"),
-        (":drain <id>", "Drain a node"),
+        (":rm <KEY>", "Remove a secret (asks y/N)"),
+        (":drain <id>", "Drain a node (asks y/N)"),
         (":undrain <id>", "Undrain a node"),
-        (":exec <svc> <cmd>", "Info on exec"),
+        (
+            ":sh [svc]",
+            "Interactive shell in the selected (or named) service",
+        ),
+        (
+            ":exec <svc> <cmd>",
+            "Run a command in a service's container",
+        ),
         (":q", "Quit"),
     ] {
         lines.push(bind(k, d, ks, ds));
@@ -142,7 +163,11 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
         Span::styled(api_display.to_string(), dim),
     ]));
 
-    let para = Paragraph::new(lines).block(block);
+    let visible = (area.height as usize).saturating_sub(2);
+    let scroll = state.help_scroll.min(lines.len().saturating_sub(visible));
+    let para = Paragraph::new(lines)
+        .block(block)
+        .scroll((scroll as u16, 0));
     f.render_widget(para, area);
 }
 

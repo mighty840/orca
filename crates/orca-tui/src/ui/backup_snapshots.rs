@@ -49,10 +49,14 @@ fn draw_snapshot_table(f: &mut Frame, area: Rect, state: &AppState, node: &NodeB
     let header = Row::new(vec!["#", "TIMESTAMP", "AGE", "FILES", "SIZE"])
         .style(Style::default().add_modifier(Modifier::BOLD));
 
+    let (first, count) =
+        super::table::window(state.selected_backup_snapshot, area, node.snapshots.len());
     let rows: Vec<Row> = node
         .snapshots
         .iter()
         .enumerate()
+        .skip(first)
+        .take(count)
         .map(|(i, s)| {
             let selected = i == state.selected_backup_snapshot;
             let style = if selected {

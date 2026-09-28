@@ -44,7 +44,7 @@ pub fn draw_secrets(f: &mut Frame, area: Rect, state: &AppState) {
     //
     // Reserve 3 rows for the surrounding Block borders + header.
     let visible_rows = (area.height as usize).saturating_sub(3).max(1);
-    let scroll = compute_scroll(state.selected_secret, visible_rows, rows_data.len());
+    let scroll = super::table::compute_scroll(state.selected_secret, visible_rows, rows_data.len());
     let end = (scroll + visible_rows).min(rows_data.len());
 
     let rows: Vec<Row> = rows_data[scroll..end]
@@ -83,20 +83,6 @@ pub fn draw_secrets(f: &mut Frame, area: Rect, state: &AppState) {
         Row::new(vec!["KEY", "REFERENCES"]).style(Style::default().add_modifier(Modifier::BOLD));
     let table = Table::new(rows, widths).header(header).block(block);
     f.render_widget(table, area);
-}
-
-/// Keep `selected` inside the visible window of `visible` rows. Mirrors the
-/// services view's scroll logic in `ui/table.rs` so cursor movement feels
-/// consistent across the two list views.
-fn compute_scroll(selected: usize, visible: usize, total: usize) -> usize {
-    if total <= visible {
-        return 0;
-    }
-    if selected < visible / 2 {
-        return 0;
-    }
-    let ideal = selected.saturating_sub(visible / 2);
-    ideal.min(total.saturating_sub(visible))
 }
 
 /// One render slot in the flat list. Group headers and key rows interleave so

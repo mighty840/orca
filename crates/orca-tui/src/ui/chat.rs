@@ -48,7 +48,7 @@ fn draw_transcript(f: &mut Frame, area: Rect, state: &AppState) {
             )),
             Line::from(""),
             Line::from(Span::styled(
-                "  Tab/digit keys (1-6) jump to other views; the transcript stays put for the session.",
+                "  With the input empty, digit keys 1-7 jump to other views; the transcript stays for the session.",
                 Style::default().fg(Color::DarkGray),
             )),
         ]
@@ -85,7 +85,10 @@ fn draw_transcript(f: &mut Frame, area: Rect, state: &AppState) {
     // the last visible row is `chat_scroll` lines above the actual last
     // line. The transcript pane height excludes the top/bottom borders.
     let visible = (area.height as usize).saturating_sub(2).max(1);
-    let total = lines.len();
+    // Count wrapped rows: counting source lines left long replies' newest
+    // text below the bottom edge (#264).
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let total = para.line_count(area.width.saturating_sub(2));
     let from_top = total
         .saturating_sub(visible)
         .saturating_sub(state.chat_scroll);
@@ -102,10 +105,7 @@ fn draw_transcript(f: &mut Frame, area: Rect, state: &AppState) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
-    let para = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: false })
-        .scroll((from_top as u16, 0));
+    let para = para.block(block).scroll((from_top as u16, 0));
     f.render_widget(para, area);
 }
 

@@ -147,6 +147,8 @@ pub struct AppState {
     /// Scroll offset (in rendered lines) for the Networks view. The view has
     /// no selection cursor — j/k just shift the viewport.
     pub network_scroll: usize,
+    /// Scroll offset for the Help view (it outgrew short terminals).
+    pub help_scroll: usize,
     /// Session chat transcript for `View::Chat`. Cleared on quit.
     pub chat: Vec<ChatTurn>,
     /// Composition buffer for the next chat message. Single-line in v1.
@@ -166,8 +168,10 @@ pub struct AppState {
     pub alerts: Vec<crate::api::AlertConversation>,
     /// Selected row in the Alerts list.
     pub selected_alert: usize,
-    /// Scroll offset for the AlertDetail conversation view.
+    /// Scroll offset for the AlertDetail conversation view, and its largest
+    /// useful value as of the last draw (wrapped rows depend on the width).
     pub alert_detail_scroll: usize,
+    pub alert_detail_max: std::sync::atomic::AtomicUsize,
     /// Whether the Alerts list includes resolved/dismissed/remediated rows
     /// (toggled with `a` for "show all").
     pub alerts_show_all: bool,
@@ -252,6 +256,7 @@ impl AppState {
             secrets_usage: Vec::new(),
             networks: None,
             network_scroll: 0,
+            help_scroll: 0,
             chat: Vec::new(),
             chat_input: String::new(),
             chat_scroll: 0,
@@ -261,6 +266,7 @@ impl AppState {
             alerts: Vec::new(),
             selected_alert: 0,
             alert_detail_scroll: 0,
+            alert_detail_max: Default::default(),
             alerts_show_all: false,
             alerts_unavailable: false,
             bg: Default::default(),

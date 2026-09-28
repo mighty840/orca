@@ -40,10 +40,13 @@ pub fn draw_alerts(f: &mut Frame, area: Rect, state: &AppState) {
     ])
     .style(Style::default().add_modifier(Modifier::BOLD));
 
+    let (first, count) = super::table::window(state.selected_alert, area, state.alerts.len());
     let rows: Vec<Row> = state
         .alerts
         .iter()
         .enumerate()
+        .skip(first)
+        .take(count)
         .map(|(i, a)| {
             let selected = i == state.selected_alert;
             let base = if selected {
@@ -175,22 +178,28 @@ pub fn draw_alert_detail(f: &mut Frame, area: Rect, state: &AppState, id: &str) 
         lines.push(Line::from(""));
     }
 
-    let total = lines.len();
+    // Scroll by wrapped rows and stop at the last page: counting source
+    // lines let `G` scroll past the end or short of it (#264).
+    let para = Paragraph::new(lines).wrap(Wrap { trim: false });
+    let total = para.line_count(area.width.saturating_sub(2));
+    let visible = (area.height as usize).saturating_sub(2).max(1);
+    let max = total.saturating_sub(visible);
+    state
+        .alert_detail_max
+        .store(max, std::sync::atomic::Ordering::Relaxed);
+    let scroll = state.alert_detail_scroll.min(max);
     let block = Block::default()
         .title(format!(
             " Alert: {} — {} [{}/{}] ",
             conv.service,
             severity_label(conv.severity),
-            state.alert_detail_scroll + 1,
+            (scroll + visible).min(total),
             total.max(1)
         ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 
-    let para = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: false })
-        .scroll((state.alert_detail_scroll as u16, 0));
+    let para = para.block(block).scroll((scroll as u16, 0));
     f.render_widget(para, area);
 }
 

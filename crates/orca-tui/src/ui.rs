@@ -203,12 +203,21 @@ fn draw_breadcrumb(f: &mut Frame, area: Rect, state: &AppState) {
     f.render_widget(Paragraph::new(line).block(block), area);
 }
 
+/// `set KEY value` shows the value as bullets: the command bar is on screen
+/// for anyone looking, and the value is a secret (#264).
+fn mask_secret_value(input: &str) -> String {
+    match crate::commands::split_set(input) {
+        Some((key, value)) => format!("set {key} {}", "•".repeat(value.chars().count())),
+        None => input.to_string(),
+    }
+}
+
 /// Command/filter input bar — shown ABOVE the content area.
 fn draw_command_bar(f: &mut Frame, area: Rect, state: &AppState) {
     let line = if state.input_mode == InputMode::Command {
         Line::from(vec![
             Span::styled(":", Style::default().fg(Color::Cyan)),
-            Span::raw(state.command_input.clone()),
+            Span::raw(mask_secret_value(&state.command_input)),
             Span::styled("_", Style::default().fg(Color::Cyan)),
         ])
     } else {
@@ -291,11 +300,13 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
         // Services: 1 services, 2 nodes, 3 secrets. `c` collapses the
         // project of the currently selected row (was SPC, but space
         // collides with paging in list scrolling).
-        View::Services => "1-3:views ↵:detail /filter s:scale x:stop p:project c:collapse ?:help",
+        View::Services => {
+            "0-7:views ↵:detail l:logs /filter s:scale x:stop p:project c:collapse :sh ?:help"
+        }
         View::Nodes => "Esc:back :drain/:undrain ?:help",
         View::Logs { .. } => "Esc:back w:wrap PgUp/PgDn:scroll ?:help",
-        View::Detail { .. } => "Esc:back s:scale x:stop l:logs ?:help",
-        View::Help => "Esc:back",
+        View::Detail { .. } => "Esc:back s:scale x:stop l:logs :sh ?:help",
+        View::Help => "Esc:back j/k:scroll",
         View::Secrets => {
             "Esc:back j/k:select ↵:refs a:add e:edit x:delete p:scope r:refresh ?:help"
         }
@@ -307,7 +318,7 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
             "Esc:back j/k:select ↵:invocations a:add e:edit x:delete r:refresh ?:help"
         }
         View::WebhookInvocations { .. } => "Esc:back r:refresh ?:help",
-        View::Chat => "type:ask Enter:send PgUp/PgDn:scroll /cmd:jump 0-6:views Esc:clear ?:help",
+        View::Chat => "type:ask Enter:send PgUp/PgDn:scroll /cmd:jump 1-7:views Esc:clear ?:help",
         View::Alerts => "Esc:back j/k:select ↵:detail a:all r:refresh d:dismiss R:resolve ?:help",
         View::AlertDetail { .. } => "Esc:back j/k:scroll d:dismiss R:resolve :reply ?:help",
     };
@@ -335,5 +346,20 @@ pub fn status_icon(status: &str) -> &'static str {
         "stopped" | "failed" => "\u{25cb}",    // empty circle
         "creating" | "starting" => "\u{25d0}", // half circle
         _ => "\u{25cb}",                       // empty circle
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::mask_secret_value;
+
+    #[test]
+    fn a_secret_value_is_masked_in_the_command_bar() {
+        assert_eq!(
+            mask_secret_value("set DB_PASSWORD hunter2"),
+            "set DB_PASSWORD •••••••"
+        );
+        assert_eq!(mask_secret_value("set DB_PASSWORD "), "set DB_PASSWORD ");
+        assert_eq!(mask_secret_value("scale api 3"), "scale api 3");
     }
 }

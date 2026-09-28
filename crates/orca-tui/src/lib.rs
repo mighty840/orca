@@ -84,8 +84,8 @@ async fn event_loop(
             last_refresh = tokio::time::Instant::now();
         }
 
-        // Auto-refresh logs when in Logs view.
-        if let View::Logs { service } = &state.view
+        // Auto-refresh logs in the Logs view and the Detail view's tail.
+        if let View::Logs { service } | View::Detail { service } = &state.view
             && state.auto_refresh_logs
             && last_log_refresh.elapsed() >= Duration::from_secs(2)
         {
