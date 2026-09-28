@@ -1,4 +1,5 @@
 pub mod adoption;
+mod alert_context;
 pub mod alerts;
 pub mod api;
 mod api_listen;
@@ -29,6 +30,7 @@ mod remote_deploy;
 mod restore;
 pub mod routes;
 pub mod scheduler;
+mod service_logs;
 pub mod session;
 pub mod shutdown;
 pub mod state;

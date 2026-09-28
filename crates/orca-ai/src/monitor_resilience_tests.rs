@@ -69,6 +69,7 @@ fn down(name: &str) -> ServiceSummary {
         recent_logs: Vec::new(),
         error_count_1h: 0,
         restart_count_24h: 0,
+        ..Default::default()
     }
 }
 

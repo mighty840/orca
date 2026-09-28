@@ -10,19 +10,16 @@
 
 use std::sync::Arc;
 
-use async_trait::async_trait;
-use chrono::{Duration, Utc};
 use tokio::sync::RwLock;
 use tracing::info;
 
 use orca_ai::backend::{LlmBackend, OpenAiCompatibleBackend};
 use orca_ai::channels::Dispatcher;
-use orca_ai::context::{ClusterContext, NodeSummary, ServiceSummary};
 use orca_ai::conversation::ConversationEngine;
 use orca_ai::monitor::{AiMonitor, ContextProvider};
 use orca_core::config::AiConfig;
-use orca_core::types::{RuntimeKind, WorkloadStatus};
 
+pub use crate::alert_context::StateContextProvider;
 use crate::state::AppState;
 
 pub type AlertEngine = ConversationEngine<Box<dyn LlmBackend>>;
@@ -99,97 +96,6 @@ pub fn spawn_alert_monitor(state: Arc<AppState>) -> Option<tokio::task::JoinHand
         let monitor = AiMonitor::new(engine, interval, grace);
         monitor.run(provider).await;
     }))
-}
-
-/// Reads `AppState` snapshots into a `ClusterContext` the AI can reason about.
-/// Kept deliberately lean: services + nodes (CPU/mem) are the signal that
-/// matters for the current monitor heuristics. Logs / error counts / GPU
-/// summaries can be enriched later as the heuristics need them.
-pub struct StateContextProvider {
-    state: Arc<AppState>,
-}
-
-impl StateContextProvider {
-    pub fn for_state(state: Arc<AppState>) -> Self {
-        Self { state }
-    }
-}
-
-#[async_trait]
-impl ContextProvider for StateContextProvider {
-    async fn snapshot(&self) -> anyhow::Result<ClusterContext> {
-        let cluster_name = self.state.cluster_config.cluster.name.clone();
-
-        let services = self.state.services.read().await;
-        let events = self.state.instance_events.read().await;
-        let now = Utc::now();
-        let one_hour = Duration::hours(1);
-        let day = Duration::hours(24);
-        let services: Vec<ServiceSummary> = services
-            .values()
-            .map(|svc| {
-                let running = svc
-                    .instances
-                    .iter()
-                    .filter(|i| matches!(i.status, WorkloadStatus::Running))
-                    .count() as u32;
-                let status = if svc.instances.is_empty() {
-                    "stopped".into()
-                } else if running == svc.desired_replicas {
-                    "healthy".into()
-                } else {
-                    "degraded".into()
-                };
-                let (errors_1h, restarts_24h) = events
-                    .get(&svc.config.name)
-                    .map(|log| (log.failures_in(now, one_hour), log.restarts_in(now, day)))
-                    .unwrap_or((0, 0));
-                ServiceSummary {
-                    name: svc.config.name.clone(),
-                    runtime: match svc.config.runtime {
-                        RuntimeKind::Container => "container".into(),
-                        RuntimeKind::Wasm => "wasm".into(),
-                    },
-                    replicas_running: running,
-                    replicas_desired: svc.desired_replicas,
-                    status,
-                    uses_gpu: false,
-                    recent_logs: Vec::new(),
-                    error_count_1h: errors_1h,
-                    restart_count_24h: restarts_24h,
-                }
-            })
-            .collect();
-
-        let nodes = self.state.registered_nodes.read().await;
-        let nodes: Vec<NodeSummary> = nodes
-            .values()
-            .map(|n| NodeSummary {
-                id: n.node_id.to_string(),
-                address: n.address.clone(),
-                status: if n.drain {
-                    "draining".into()
-                } else {
-                    "healthy".into()
-                },
-                cpu_percent: n.cpu_percent,
-                memory_percent: if n.memory_total > 0 {
-                    (n.memory_bytes as f64 / n.memory_total as f64) * 100.0
-                } else {
-                    0.0
-                },
-                gpu_summary: Vec::new(),
-            })
-            .collect();
-
-        Ok(ClusterContext {
-            cluster_name,
-            nodes,
-            services,
-            recent_events: Vec::new(),
-            active_alerts: Vec::new(),
-        })
-    }
 }
 
 #[cfg(test)]

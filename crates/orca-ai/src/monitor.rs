@@ -67,7 +67,8 @@ impl<B: LlmBackend> AiMonitor<B> {
 
             match context_provider.snapshot().await {
                 Ok(ctx) => {
-                    if let Err(e) = self.analyze_cycle(&ctx).await {
+                    let provider = Some(context_provider.as_ref());
+                    if let Err(e) = self.analyze_cycle_with(&ctx, provider).await {
                         warn!("AI monitor analysis failed: {e}");
                     }
                 }
@@ -82,7 +83,18 @@ impl<B: LlmBackend> AiMonitor<B> {
     /// I/O-free steps (plan, record). The model call and alert delivery run
     /// without it, so `orca alerts` and the TUI never wait on a slow model.
     /// Every alert is handled independently: one failure never skips the rest.
+    #[cfg(test)]
     async fn analyze_cycle(&self, ctx: &ClusterContext) -> anyhow::Result<()> {
+        self.analyze_cycle_with(ctx, None).await
+    }
+
+    /// One pass. `provider` supplies the log tail of each service that opens
+    /// an alert; logs are fetched only then, never for the whole snapshot.
+    async fn analyze_cycle_with(
+        &self,
+        ctx: &ClusterContext,
+        provider: Option<&dyn ContextProvider>,
+    ) -> anyhow::Result<()> {
         let now = Instant::now();
 
         // 1. Plan under a short read lock.
@@ -119,7 +131,15 @@ impl<B: LlmBackend> AiMonitor<B> {
                 req.service, req.severity
             );
             // 2. Ask the model, with no lock held and a hard deadline.
-            let prompt = ConversationEngine::<B>::open_prompt(&req.service, &req.trigger, ctx);
+            let with_logs = match provider {
+                Some(p) => with_recent_logs(ctx, &req.service, p).await,
+                None => None,
+            };
+            let prompt = ConversationEngine::<B>::open_prompt(
+                &req.service,
+                &req.trigger,
+                with_logs.as_ref().unwrap_or(ctx),
+            );
             let diagnosis =
                 match tokio::time::timeout(self.llm_timeout, backend.chat(&prompt)).await {
                     Ok(Ok(r)) => Ok(r.content),
@@ -163,6 +183,37 @@ impl<B: LlmBackend> AiMonitor<B> {
 #[async_trait::async_trait]
 pub trait ContextProvider: Send + Sync + 'static {
     async fn snapshot(&self) -> anyhow::Result<ClusterContext>;
+
+    /// The last `tail` log lines of one service. Called only for a service
+    /// that is opening an alert. Empty when logs can't be had.
+    async fn recent_logs(&self, _service: &str, _tail: usize) -> Vec<String> {
+        Vec::new()
+    }
+}
+
+/// Upper bound for fetching one service's logs for a diagnosis.
+const LOG_FETCH_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// A copy of `ctx` with `service`'s recent logs filled in, or `None` when
+/// there are none (the caller then uses `ctx` as it is).
+async fn with_recent_logs(
+    ctx: &ClusterContext,
+    service: &str,
+    provider: &dyn ContextProvider,
+) -> Option<ClusterContext> {
+    let fetch = provider.recent_logs(service, crate::alert_prompt::ALERT_LOG_LINES);
+    let logs = match tokio::time::timeout(LOG_FETCH_TIMEOUT, fetch).await {
+        Ok(logs) if !logs.is_empty() => logs,
+        Ok(_) => return None,
+        Err(_) => {
+            warn!("Fetching logs of {service} for its diagnosis timed out");
+            return None;
+        }
+    };
+    let mut ctx = ctx.clone();
+    let svc = ctx.services.iter_mut().find(|s| s.name == service)?;
+    svc.recent_logs = logs;
+    Some(ctx)
 }
 
 #[cfg(test)]
@@ -202,6 +253,7 @@ mod tests {
                 recent_logs: Vec::new(),
                 error_count_1h: 0,
                 restart_count_24h: 0,
+                ..Default::default()
             }],
             recent_events: Vec::new(),
             active_alerts: Vec::new(),

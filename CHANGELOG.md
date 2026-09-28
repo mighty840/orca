@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Alert diagnoses get the evidence, not just counts.** The model used to
+  see "0/1 replicas" and the same line for every other service, so its
+  diagnosis could only be generic. Each alert's prompt now carries, for the
+  affected service:
+  - the failure orca recorded: reason (OOMKilled, ImagePullError,
+    CrashLoopBackOff, ...), exit code, restart count and its log tail;
+  - its last 40 log lines, fetched from its node only when the alert opens,
+    including from a crashed container;
+  - its image and the previous one, when it was deployed, memory use against
+    its limit, CPU, its health checks, and its node with heartbeat age.
+
+  The rest of the cluster is one line per service with a problem and a list
+  of the healthy ones. A node without a heartbeat for 60 s shows as
+  unreachable.
+  - The model answers in fixed sections: what happened, evidence, likely
+    cause with confidence, fix, verify, and whether it resolves on its own.
+    The suggested command is taken from the Fix section.
+  - Secrets are masked in every log line before it leaves the cluster:
+    `key=value` for password, token and key names, bearer tokens, URL
+    passwords, and long opaque tokens. Digests and hashes are kept.
+  - The command list in the prompt had `orca scale <service> --replicas N`,
+    which fails; it is `orca scale <service> <N>`. `orca start` is listed.
+- **`examples/alert_eval` scores diagnoses against a real model.** Eight
+  scenarios (OOM, image tag typo, crash loop on a missing variable, a failed
+  database behind a failing service, a port clash, an unreachable agent,
+  external API timeouts, a deploy in progress) run against any
+  OpenAI-compatible endpoint set in `ORCA_AI_ENDPOINT` and `ORCA_AI_MODEL`.
+  `--old` sends the previous prompt for comparison. A test checks that each
+  scenario's evidence reaches the prompt, without a model.
+
 ## [0.3.0-rc.5] - 2026-09-28
 
 Hardening from the rc.4 production run: deploys that replace containers

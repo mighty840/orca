@@ -1,3 +1,4 @@
+use orca_core::api_types::FailureInfo;
 use orca_core::types::GpuStats;
 use serde::Serialize;
 
@@ -13,7 +14,7 @@ pub struct ClusterContext {
     pub active_alerts: Vec<AlertSummary>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct NodeSummary {
     pub id: String,
     pub address: String,
@@ -21,6 +22,8 @@ pub struct NodeSummary {
     pub cpu_percent: f64,
     pub memory_percent: f64,
     pub gpu_summary: Vec<GpuSummary>,
+    /// Seconds since the node's last heartbeat, when known.
+    pub heartbeat_age_secs: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -46,7 +49,7 @@ impl From<&GpuStats> for GpuSummary {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct ServiceSummary {
     pub name: String,
     pub runtime: String,
@@ -54,9 +57,26 @@ pub struct ServiceSummary {
     pub replicas_desired: u32,
     pub status: String,
     pub uses_gpu: bool,
+    /// Recent log lines. The snapshot leaves this empty; the monitor fills it
+    /// only for a service that is about to open an alert.
     pub recent_logs: Vec<String>,
     pub error_count_1h: u64,
     pub restart_count_24h: u32,
+    /// The evidence below is what makes a diagnosis specific ("OOM-killed at
+    /// its 512Mi limit") instead of generic ("the service is down").
+    pub image: Option<String>,
+    /// Image of the deploy before the current one, if it differs.
+    pub previous_image: Option<String>,
+    pub last_deploy_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// Where the service runs: an agent's address, or "master".
+    pub node: Option<String>,
+    pub memory_usage: Option<String>,
+    pub memory_limit: Option<String>,
+    pub cpu_percent: Option<f64>,
+    /// One-line description of the readiness/liveness checks.
+    pub health_check: Option<String>,
+    /// Why the service last failed, as the reconciler or heartbeat saw it.
+    pub last_failure: Option<FailureInfo>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -80,29 +100,7 @@ impl ClusterContext {
         out.push_str("You have access to real-time cluster state. Diagnose issues, suggest fixes as `orca` CLI commands, and explain your reasoning.\n");
         out.push_str("When suggesting fixes, output the exact command. When unsure, say so.\n\n");
 
-        // Authoritative command surface. The LLM otherwise invents plausible
-        // but non-existent commands like `orca service restart` (this CLI is
-        // flat — verbs are top-level, not nested under `service`).
-        out.push_str("## Available `orca` commands\n");
-        out.push_str("Use ONLY these. Do NOT invent subcommands.\n\n");
-        out.push_str("- `orca status` — cluster + service overview\n");
-        out.push_str("- `orca logs <service> [--tail N] [--summarize]` — tail logs; `--summarize` runs them through the AI\n");
-        out.push_str("- `orca redeploy <service>` — force fresh image pull + container recreate (this is the 'restart' verb)\n");
-        out.push_str("- `orca rollback <service>` — roll back to the previous successful deploy\n");
-        out.push_str("- `orca scale <service> --replicas N` — change replica count\n");
-        out.push_str("- `orca stop <service>` — stop a service (omit for all)\n");
-        out.push_str("- `orca promote <service>` — promote canary instances to stable\n");
-        out.push_str("- `orca exec <service> [cmd]` — interactive shell or one-shot command inside a running container\n");
-        out.push_str("- `orca secrets set <KEY> <VALUE>` — set a secret referenced as `${secrets.KEY}` in service.toml env\n");
-        out.push_str("- `orca secrets list` / `orca secrets get <KEY>` / `orca secrets remove <KEY>` — read/remove secrets\n");
-        out.push_str(
-            "- `orca deploy [service…]` — (re)apply service definitions from `services/`\n",
-        );
-        out.push_str("- `orca alerts list` / `orca alerts view <id>` / `orca alerts reply <id> <msg>` / `orca alerts dismiss|resolve <id>` — alert triage\n");
-        out.push_str("- `orca backup` / `orca cleanup` / `orca nodes` — operational utilities\n\n");
-        out.push_str("**Not supported (do not suggest):** `orca service <verb>` (the CLI is flat — there is no `service` subcommand). ");
-        out.push_str("There is also no `set-env` / `update --cmd` / `update --image` / `update --port` — env vars, image tag, command, and ports live in `services/<project>/service.toml` and apply on `orca deploy`. ");
-        out.push_str("If a fix requires editing a service definition, say so plainly (e.g. 'edit services/<project>/service.toml: change `image = ...`, then `orca deploy`').\n\n");
+        push_command_reference(&mut out);
 
         out.push_str("## Nodes\n");
         for n in &self.nodes {
@@ -166,6 +164,32 @@ impl ClusterContext {
     }
 }
 
+/// The authoritative command surface, shared by every prompt.
+pub(crate) fn push_command_reference(out: &mut String) {
+    // Authoritative command surface. The LLM otherwise invents plausible
+    // but non-existent commands like `orca service restart` (this CLI is
+    // flat — verbs are top-level, not nested under `service`).
+    out.push_str("## Available `orca` commands\n");
+    out.push_str("Use ONLY these. Do NOT invent subcommands.\n\n");
+    out.push_str("- `orca status` — cluster + service overview\n");
+    out.push_str("- `orca logs <service> [--tail N] [--summarize]` — tail logs; `--summarize` runs them through the AI\n");
+    out.push_str("- `orca redeploy <service>` — force fresh image pull + container recreate (this is the 'restart' verb)\n");
+    out.push_str("- `orca rollback <service>` — roll back to the previous successful deploy\n");
+    out.push_str("- `orca scale <service> <N>` — change replica count (N is positional, there is no `--replicas`)\n");
+    out.push_str("- `orca stop <service>` — pause a service until `orca start` (omit for all)\n");
+    out.push_str("- `orca start <service>` — resume a paused service\n");
+    out.push_str("- `orca promote <service>` — promote canary instances to stable\n");
+    out.push_str("- `orca exec <service> [cmd]` — interactive shell or one-shot command inside a running container\n");
+    out.push_str("- `orca secrets set <KEY> <VALUE>` — set a secret referenced as `${secrets.KEY}` in service.toml env\n");
+    out.push_str("- `orca secrets list` / `orca secrets get <KEY>` / `orca secrets remove <KEY>` — read/remove secrets\n");
+    out.push_str("- `orca deploy [service…]` — (re)apply service definitions from `services/`\n");
+    out.push_str("- `orca alerts list` / `orca alerts view <id>` / `orca alerts reply <id> <msg>` / `orca alerts dismiss|resolve <id>` — alert triage\n");
+    out.push_str("- `orca backup` / `orca cleanup` / `orca nodes` — operational utilities\n\n");
+    out.push_str("**Not supported (do not suggest):** `orca service <verb>` (the CLI is flat — there is no `service` subcommand). ");
+    out.push_str("There is also no `set-env` / `update --cmd` / `update --image` / `update --port` — env vars, image tag, command, and ports live in `services/<project>/service.toml` and apply on `orca deploy`. ");
+    out.push_str("If a fix requires editing a service definition, say so plainly (e.g. 'edit services/<project>/service.toml: change `image = ...`, then `orca deploy`').\n\n");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,7 +222,7 @@ mod tests {
                 status: "healthy".to_string(),
                 cpu_percent: 42.0,
                 memory_percent: 60.0,
-                gpu_summary: vec![],
+                ..Default::default()
             }],
             services: vec![ServiceSummary {
                 name: "api".to_string(),
@@ -210,6 +234,7 @@ mod tests {
                 recent_logs: vec![],
                 error_count_1h: 5,
                 restart_count_24h: 1,
+                ..Default::default()
             }],
             recent_events: vec!["node-1 joined".to_string()],
             active_alerts: vec![],

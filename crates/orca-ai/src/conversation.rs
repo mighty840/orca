@@ -43,7 +43,8 @@ impl<B: LlmBackend> ConversationEngine<B> {
         Arc::clone(&self.dispatcher)
     }
 
-    /// The prompt that asks the model to diagnose a new alert.
+    /// The prompt that asks the model to diagnose a new alert: the affected
+    /// service's evidence in full, and a fixed answer structure.
     pub fn open_prompt(
         service: &str,
         trigger_event: &str,
@@ -52,14 +53,13 @@ impl<B: LlmBackend> ConversationEngine<B> {
         vec![
             ChatMessage {
                 role: Role::System,
-                content: context.to_system_prompt(),
+                content: context.alert_prompt(service),
             },
             ChatMessage {
                 role: Role::User,
                 content: format!(
-                    "Alert triggered for service '{service}': {trigger_event}\n\n\
-                     Investigate this issue. Explain what's happening, the likely root cause, \
-                     and suggest a fix as an `orca` command. If the issue might resolve itself, say so."
+                    "Alert for service '{service}': {trigger_event}\n\n{}",
+                    crate::alert_prompt::ANSWER_FORMAT
                 ),
             },
         ]
