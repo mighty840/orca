@@ -4,6 +4,11 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
+mod cluster;
+mod events;
+
+pub use cluster::BackupTriggerTarget;
+
 pub use orca_core::api_types::{
     ClusterBackupsResponse, ClusterNetworksResponse, DockerNetwork, DomainRoute, FailureInfo,
     LastBackupResult, NetworkService, NodeBackupStatus, NodeNetworks, NodeRole, SecretRef,
@@ -99,6 +104,26 @@ pub struct NodeInfo {
 #[derive(Debug, Clone, Deserialize)]
 pub struct SecretListResponse {
     pub keys: Vec<String>,
+}
+
+/// A one-shot action on a service; the CLI's verb of the same name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ServiceAction {
+    Start,
+    Redeploy,
+    Rollback,
+    Promote,
+}
+
+impl ServiceAction {
+    pub fn verb(self) -> &'static str {
+        match self {
+            ServiceAction::Start => "start",
+            ServiceAction::Redeploy => "redeploy",
+            ServiceAction::Rollback => "rollback",
+            ServiceAction::Promote => "promote",
+        }
+    }
 }
 
 impl ApiClient {
@@ -207,6 +232,20 @@ impl ApiClient {
         Ok(())
     }
 
+    /// `POST /api/v1/services/{service}/{action}` for `start` (resume a
+    /// paused service), `redeploy`, `rollback` and `promote`.
+    pub async fn service_action(&self, service: &str, action: ServiceAction) -> anyhow::Result<()> {
+        let verb = action.verb();
+        self.auth(self.client.post(format!(
+            "{}/api/v1/services/{service}/{verb}",
+            self.base_url
+        )))
+        .send()
+        .await?
+        .error_for_status()?;
+        Ok(())
+    }
+
     pub async fn scale(&self, service: &str, replicas: u32) -> anyhow::Result<()> {
         self.auth(
             self.client
@@ -250,8 +289,6 @@ impl ApiClient {
         Ok(())
     }
 
-    /// Fetch the cluster networks dashboard: per-node `orca-*` Docker bridge
-    /// listing plus the master's public-edge route table.
     /// POST a chat turn to `/api/v1/ask`. Returns `Ok(None)` when the server
     /// has no `[ai]` configured (503), so the caller renders a placeholder
     /// rather than treating it as a hard error.
@@ -280,209 +317,5 @@ impl ApiClient {
         }
         let body: AskResp = resp.json().await?;
         Ok(Some(body.response))
-    }
-
-    pub async fn cluster_networks(&self) -> anyhow::Result<ClusterNetworksResponse> {
-        let resp = self
-            .auth(
-                self.client
-                    .get(format!("{}/api/v1/cluster/networks", self.base_url)),
-            )
-            .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp.json().await?)
-    }
-
-    /// Fetch the secrets organizer view: every key + the services that
-    /// reference it. Computed server-side from `state.services` so the TUI
-    /// doesn't need to fetch full service configs.
-    pub async fn secrets_usage(&self) -> anyhow::Result<SecretsUsageResponse> {
-        let resp = self
-            .auth(
-                self.client
-                    .get(format!("{}/api/v1/secrets/usage", self.base_url)),
-            )
-            .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp.json().await?)
-    }
-
-    pub async fn list_secrets(&self) -> anyhow::Result<Vec<String>> {
-        let resp = self
-            .auth(self.client.get(format!("{}/api/v1/secrets", self.base_url)))
-            .send()
-            .await?
-            .error_for_status()?;
-        let body: SecretListResponse = resp.json().await?;
-        Ok(body.keys)
-    }
-
-    pub async fn set_secret(&self, key: &str, value: &str) -> anyhow::Result<()> {
-        self.auth(
-            self.client
-                .post(format!("{}/api/v1/secrets/{key}", self.base_url))
-                .json(&serde_json::json!({"value": value})),
-        )
-        .send()
-        .await?
-        .error_for_status()?;
-        Ok(())
-    }
-
-    pub async fn remove_secret(&self, key: &str) -> anyhow::Result<()> {
-        self.auth(
-            self.client
-                .delete(format!("{}/api/v1/secrets/{key}", self.base_url)),
-        )
-        .send()
-        .await?
-        .error_for_status()?;
-        Ok(())
-    }
-
-    /// Fetch the per-node backup status for the cluster dashboard.
-    pub async fn cluster_backups(&self) -> anyhow::Result<ClusterBackupsResponse> {
-        let resp = self
-            .auth(
-                self.client
-                    .get(format!("{}/api/v1/cluster/backups", self.base_url)),
-            )
-            .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp.json().await?)
-    }
-
-    /// Trigger an immediate backup on a single target. `Master` runs the
-    /// master's own `orca backup all` subprocess; `Agent(id)` dispatches a
-    /// `BackupRequest` via WS to that agent.
-    pub async fn trigger_backup(
-        &self,
-        target: BackupTriggerTarget,
-    ) -> anyhow::Result<TriggerBackupResponse> {
-        let query = match target {
-            BackupTriggerTarget::Master => "master=true".to_string(),
-            BackupTriggerTarget::Agent(id) => format!("node_id={id}"),
-        };
-        let resp = self
-            .auth(self.client.post(format!(
-                "{}/api/v1/cluster/backups/trigger?{query}",
-                self.base_url
-            )))
-            .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp.json().await?)
-    }
-}
-
-/// Per-row trigger target for the backups dashboard.
-#[derive(Debug, Clone, Copy)]
-pub enum BackupTriggerTarget {
-    Master,
-    Agent(u64),
-}
-
-impl ApiClient {
-    pub async fn list_webhooks(&self) -> anyhow::Result<WebhookListResponse> {
-        let resp = self
-            .auth(
-                self.client
-                    .get(format!("{}/api/v1/webhooks", self.base_url)),
-            )
-            .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp.json().await?)
-    }
-
-    pub async fn webhook_invocations(
-        &self,
-        service: &str,
-    ) -> anyhow::Result<WebhookInvocationsResponse> {
-        let resp = self
-            .auth(self.client.get(format!(
-                "{}/api/v1/webhooks/{service}/invocations",
-                self.base_url
-            )))
-            .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp.json().await?)
-    }
-
-    pub async fn add_webhook(&self, body: serde_json::Value) -> anyhow::Result<()> {
-        self.auth(
-            self.client
-                .post(format!("{}/api/v1/webhooks", self.base_url))
-                .json(&body),
-        )
-        .send()
-        .await?
-        .error_for_status()?;
-        Ok(())
-    }
-
-    pub async fn remove_webhook(&self, service: &str) -> anyhow::Result<()> {
-        self.auth(
-            self.client
-                .delete(format!("{}/api/v1/webhooks/{service}", self.base_url)),
-        )
-        .send()
-        .await?
-        .error_for_status()?;
-        Ok(())
-    }
-
-    /// Fetch alert conversations. Returns `Ok(None)` when the server has no
-    /// `[ai]` configured (HTTP 503) so the caller can render a friendly
-    /// "not configured" state instead of treating it as an error.
-    pub async fn alerts_list(&self, all: bool) -> anyhow::Result<Option<Vec<AlertConversation>>> {
-        let url = format!("{}/api/v1/alerts?all={}", self.base_url, all);
-        let resp = self.auth(self.client.get(&url)).send().await?;
-        if resp.status().as_u16() == 503 {
-            return Ok(None);
-        }
-        let resp = resp.error_for_status()?;
-        #[derive(Deserialize)]
-        struct ListResp {
-            alerts: Vec<AlertConversation>,
-        }
-        let body: ListResp = resp.json().await?;
-        Ok(Some(body.alerts))
-    }
-
-    pub async fn alerts_reply(&self, id: &str, message: &str) -> anyhow::Result<AlertConversation> {
-        let url = format!("{}/api/v1/alerts/{}/reply", self.base_url, id);
-        let body = serde_json::json!({ "message": message });
-        let resp = self
-            .auth(self.client.post(&url))
-            .json(&body)
-            .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp.json().await?)
-    }
-
-    pub async fn alerts_dismiss(&self, id: &str) -> anyhow::Result<AlertConversation> {
-        let url = format!("{}/api/v1/alerts/{}/dismiss", self.base_url, id);
-        let resp = self
-            .auth(self.client.post(&url))
-            .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp.json().await?)
-    }
-
-    pub async fn alerts_resolve(&self, id: &str) -> anyhow::Result<AlertConversation> {
-        let url = format!("{}/api/v1/alerts/{}/resolve", self.base_url, id);
-        let resp = self
-            .auth(self.client.post(&url))
-            .send()
-            .await?
-            .error_for_status()?;
-        Ok(resp.json().await?)
     }
 }

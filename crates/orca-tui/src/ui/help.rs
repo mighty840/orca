@@ -93,6 +93,12 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
     for (k, d) in [
         ("s", "Scale service (opens :scale prompt)"),
         ("x", "Stop selected service (asks y/N)"),
+        (
+            "u",
+            "Start (resume) a stopped service; undrain the node in Nodes",
+        ),
+        ("d", "Redeploy the service (asks y/N)"),
+        ("x (nodes)", "Drain the selected node (asks y/N)"),
         ("c", "Collapse / expand the selected project"),
         ("p", "Filter by project of selected"),
         ("r", "Refresh immediately"),
@@ -113,6 +119,19 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
     for (k, d) in [
         (":scale <svc> <n>", "Scale service to n replicas"),
         (":stop <svc>", "Stop a service (asks y/N)"),
+        (":start <svc>", "Start (resume) a stopped service"),
+        (
+            ":redeploy <svc>",
+            "Pull the image and recreate the containers (asks y/N)",
+        ),
+        (
+            ":rollback <svc>",
+            "Roll back to the previous deploy (asks y/N)",
+        ),
+        (
+            ":promote <svc>",
+            "Promote canary instances to stable (asks y/N)",
+        ),
         (":stop-project <p>", "Stop entire project (asks y/N)"),
         (":logs <svc>", "Open a service's logs"),
         (":chat / :nodes / :help", "Open those views"),

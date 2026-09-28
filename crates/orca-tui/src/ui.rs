@@ -301,11 +301,11 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
         // project of the currently selected row (was SPC, but space
         // collides with paging in list scrolling).
         View::Services => {
-            "0-7:views ↵:detail l:logs /filter s:scale x:stop p:project c:collapse :sh ?:help"
+            "0-7:views ↵:detail l:logs /filter s:scale x:stop u:start d:redeploy p:project c:collapse ?:help"
         }
-        View::Nodes => "Esc:back :drain/:undrain ?:help",
+        View::Nodes => "Esc:back j/k:select x:drain u:undrain ?:help",
         View::Logs { .. } => "Esc:back w:wrap PgUp/PgDn:scroll ?:help",
-        View::Detail { .. } => "Esc:back s:scale x:stop l:logs :sh ?:help",
+        View::Detail { .. } => "Esc:back s:scale x:stop u:start d:redeploy l:logs :sh ?:help",
         View::Help => "Esc:back j/k:scroll",
         View::Secrets => {
             "Esc:back j/k:select ↵:refs a:add e:edit x:delete p:scope r:refresh ?:help"

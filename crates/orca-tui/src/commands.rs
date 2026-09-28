@@ -1,6 +1,6 @@
 //! Command-mode handlers for `:` commands.
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, ServiceAction};
 use crate::confirm::Confirm;
 use crate::state::{AppState, View};
 
@@ -26,6 +26,15 @@ pub async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str
         Some("help") => state.push_view(View::Help),
         Some("scale") => cmd_scale(state, client, &parts).await,
         Some("stop") => cmd_stop(state, &parts),
+        Some(verb @ ("start" | "redeploy" | "rollback" | "promote")) => {
+            let action = match verb {
+                "start" => ServiceAction::Start,
+                "redeploy" => ServiceAction::Redeploy,
+                "rollback" => ServiceAction::Rollback,
+                _ => ServiceAction::Promote,
+            };
+            crate::service_actions::request(client, state, action, parts.get(1).copied()).await;
+        }
         Some("stop-project") => cmd_stop_project(state, &parts),
         Some("deploy") => {
             state.flash("Use `orca deploy` from CLI to redeploy all services".into());
@@ -60,9 +69,13 @@ pub async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str
         Some("reply") => cmd_alert_reply(state, client, &parts).await,
         Some("dismiss") => cmd_alert_action(state, client, "dismiss").await,
         Some("resolve") => cmd_alert_action(state, client, "resolve").await,
-        Some("webhook-add") => cmd_webhook_add(state, client, &parts).await,
-        Some("webhook-edit") => cmd_webhook_edit(state, client, &parts).await,
-        Some("webhook-rm") => cmd_webhook_rm(state, client, &parts).await,
+        Some("webhook-add") => {
+            crate::webhook_commands::cmd_webhook_add(state, client, &parts).await
+        }
+        Some("webhook-edit") => {
+            crate::webhook_commands::cmd_webhook_edit(state, client, &parts).await
+        }
+        Some("webhook-rm") => crate::webhook_commands::cmd_webhook_rm(state, client, &parts).await,
         Some(other) => state.flash(format!("Unknown command: {other}")),
         None => {}
     }
@@ -290,102 +303,15 @@ async fn cmd_undrain(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
             return;
         }
     };
+    undrain(client, state, node_id).await;
+}
+
+/// Undrain a node: it takes new work again. Not destructive, so no y/N.
+pub(crate) async fn undrain(client: &ApiClient, state: &mut AppState, node_id: u64) {
     match client.undrain(node_id).await {
         Ok(()) => state.flash(format!("Undrained node {node_id}")),
         Err(e) => state.error = Some(format!("Undrain failed: {e}")),
     }
-}
-
-/// `:webhook-add <repo> <branch> <service> [--secret X] [--infra]` — register
-/// a new webhook. Pre-filled from the `a` keybind on the Webhooks view; can
-/// also be typed manually.
-async fn cmd_webhook_add(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
-    if parts.len() < 4 {
-        state.flash("Usage: :webhook-add <repo> <branch> <service> [--secret X] [--infra]".into());
-        return;
-    }
-    let body = build_webhook_body(parts[1], parts[2], parts[3], &parts[4..]);
-    match client.add_webhook(body).await {
-        Ok(()) => {
-            state.flash(format!("Registered webhook for {}", parts[3]));
-            crate::refresh_webhooks(client, state).await;
-        }
-        Err(e) => state.error = Some(format!("Add failed: {e}")),
-    }
-}
-
-/// `:webhook-edit <repo> <branch> <service> [--secret X] [--infra]` — re-runs
-/// `:webhook-add` which dedupes by (repo, branch, service) and replaces the
-/// matching entry. The TUI's `e` keybind pre-fills the identity fields so
-/// the user only types the new optional flags.
-async fn cmd_webhook_edit(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
-    if parts.len() < 4 {
-        state.flash("Usage: :webhook-edit <repo> <branch> <service> [--secret X] [--infra]".into());
-        return;
-    }
-    let body = build_webhook_body(parts[1], parts[2], parts[3], &parts[4..]);
-    match client.add_webhook(body).await {
-        Ok(()) => {
-            state.flash(format!("Updated webhook for {}", parts[3]));
-            crate::refresh_webhooks(client, state).await;
-        }
-        Err(e) => state.error = Some(format!("Edit failed: {e}")),
-    }
-}
-
-async fn cmd_webhook_rm(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
-    if parts.len() < 2 {
-        state.flash("Usage: :webhook-rm <service>".into());
-        return;
-    }
-    let service = parts[1];
-    match client.remove_webhook(service).await {
-        Ok(()) => {
-            state.flash(format!("Removed webhook for {service}"));
-            crate::refresh_webhooks(client, state).await;
-        }
-        Err(e) => state.error = Some(format!("Remove failed: {e}")),
-    }
-}
-
-/// Build the `WebhookConfig` JSON body the server expects from positional +
-/// flag CLI arguments. Centralized so `add` and `edit` share the same parser.
-fn build_webhook_body(
-    repo: &str,
-    branch: &str,
-    service: &str,
-    flags: &[&str],
-) -> serde_json::Value {
-    let mut infra = false;
-    let mut secret: Option<String> = None;
-    let mut i = 0;
-    while i < flags.len() {
-        match flags[i] {
-            "--infra" => {
-                infra = true;
-                i += 1;
-            }
-            "--secret" => {
-                if i + 1 < flags.len() {
-                    secret = Some(flags[i + 1].to_string());
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-            }
-            _ => i += 1,
-        }
-    }
-    let mut body = serde_json::json!({
-        "repo": repo,
-        "branch": branch,
-        "service_name": service,
-        "infra": infra,
-    });
-    if let Some(s) = secret {
-        body["secret"] = serde_json::Value::String(s);
-    }
-    body
 }
 
 /// `set KEY VALUE...` -> (KEY, VALUE) with the value exactly as typed after
@@ -402,6 +328,7 @@ pub(crate) fn split_set(cmd: &str) -> Option<(&str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::webhook_commands::build_webhook_body;
 
     #[test]
     fn set_keeps_the_value_exactly_as_typed() {

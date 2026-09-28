@@ -56,3 +56,37 @@ fn a_removed_selection_clamps_to_the_last_row() {
     state.update_status(status(&["api", "db"]));
     assert_eq!(state.selected_service_name(), Some("db"));
 }
+
+fn node(id: u64) -> crate::api::NodeInfo {
+    serde_json::from_value(serde_json::json!({
+        "node_id": id,
+        "address": format!("10.0.0.{id}:6880"),
+        "labels": {},
+        "last_heartbeat": "2026-09-28T07:00:00Z",
+        "drain": false,
+    }))
+    .expect("node info")
+}
+
+fn cluster(ids: &[u64]) -> ClusterInfo {
+    ClusterInfo {
+        cluster_name: "c".into(),
+        node_count: ids.len() as u64,
+        nodes: ids.iter().map(|&id| node(id)).collect(),
+        version: None,
+        commit: None,
+    }
+}
+
+#[test]
+fn the_node_selection_follows_its_node() {
+    // `x` drains the selected node: it must not shift to a neighbour when
+    // a node joins above it.
+    let mut state = AppState::new();
+    state.update_cluster(cluster(&[2, 3]));
+    state.selected_node = 1;
+    state.update_cluster(cluster(&[1, 2, 3]));
+    assert_eq!(state.nodes[state.selected_node].node_id, 3);
+    state.update_cluster(cluster(&[1]));
+    assert_eq!(state.selected_node, 0);
+}
