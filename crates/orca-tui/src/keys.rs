@@ -35,7 +35,7 @@ pub async fn handle_normal_key(
             state.command_input.clear();
         }
         KeyCode::Char('/') => {
-            if matches!(state.view, View::Services) {
+            if matches!(state.view, View::Services | View::Logs { .. }) {
                 state.input_mode = InputMode::Filter;
             }
         }
@@ -82,6 +82,7 @@ pub async fn handle_normal_key(
                 View::Alerts | View::AlertDetail { .. } => {
                     super::refresh_alerts(client, state).await;
                 }
+                View::Token => crate::token_actions::refresh(client, state).await,
                 _ => {}
             }
             *last_refresh = tokio::time::Instant::now();
@@ -131,6 +132,20 @@ pub async fn handle_normal_key(
             state.push_view(View::Alerts);
         }
         KeyCode::Char('7') => {}
+        KeyCode::Char('8') if !matches!(state.view, View::Token) => {
+            crate::token_actions::refresh(client, state).await;
+            state.push_view(View::Token);
+        }
+        KeyCode::Char('8') => {}
+        KeyCode::Char('s') if matches!(state.view, View::Token) => {
+            crate::confirm::arm(state, Confirm::TokenRotate);
+        }
+        KeyCode::Char('f') if matches!(state.view, View::Token) => {
+            crate::confirm::arm(state, Confirm::TokenFinish { force: false });
+        }
+        KeyCode::Char('F') if matches!(state.view, View::Token) => {
+            crate::confirm::arm(state, Confirm::TokenFinish { force: true });
+        }
         // Toggle active vs all in the Alerts view. The `a` key is already
         // used by Webhooks for "add"; the matches!() guard keeps them apart.
         KeyCode::Char('a') if matches!(state.view, View::Alerts) => {

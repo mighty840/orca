@@ -26,6 +26,8 @@ pub struct AppState {
     pub error: Option<String>,
     pub should_quit: bool,
     pub filter: String,
+    /// `/` search in the Logs view: shows matching lines only (#265).
+    pub log_search: String,
     pub input_mode: InputMode,
     pub command_input: String,
     pub status_msg: Option<String>,
@@ -123,6 +125,8 @@ pub struct AppState {
     /// True when the alerts API returned 503 (no `[ai]` configured). Lets
     /// the view show a friendly message instead of an empty table.
     pub alerts_unavailable: bool,
+    /// Last fetched cluster-token rotation status (the Token view).
+    pub rotation: Option<crate::api::RotationStatus>,
     /// Fetches running off the event loop (#263).
     pub bg: crate::background::Background,
 }
@@ -171,6 +175,7 @@ impl AppState {
             error: None,
             should_quit: false,
             filter: String::new(),
+            log_search: String::new(),
             input_mode: InputMode::Normal,
             command_input: String::new(),
             status_msg: None,
@@ -215,6 +220,7 @@ impl AppState {
             alert_detail_max: Default::default(),
             alerts_show_all: false,
             alerts_unavailable: false,
+            rotation: None,
             bg: Default::default(),
         }
     }
@@ -426,6 +432,7 @@ impl AppState {
             View::SecretRefs { .. } => "Secret Refs",
             View::Networks => "Networks",
             View::Alerts => "Alerts",
+            View::Token => "Token",
             View::AlertDetail { .. } => "Alert Detail",
         }
     }

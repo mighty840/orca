@@ -18,6 +18,13 @@ pub enum Confirm {
     DeleteSecret(String),
     /// Redeploy, rollback or promote: each replaces running containers.
     Service(ServiceAction, String),
+    /// Start a cluster-token rotation.
+    TokenRotate,
+    /// Retire the old cluster token; `force` even if agents aren't on the
+    /// new one for good.
+    TokenFinish {
+        force: bool,
+    },
 }
 
 impl Confirm {
@@ -39,6 +46,13 @@ impl Confirm {
                 format!("Promote the canary of '{s}' to stable")
             }
             Confirm::Service(ServiceAction::Start, s) => format!("Start '{s}'"),
+            Confirm::TokenRotate => {
+                "Rotate the cluster token (the old one keeps working until you finish)".into()
+            }
+            Confirm::TokenFinish { force: false } => "Retire the old cluster token".into(),
+            Confirm::TokenFinish { force: true } => {
+                "Retire the old cluster token even though some agents aren't on the new one".into()
+            }
         };
         format!("{what}? y:confirm  any other key:cancel")
     }
@@ -86,6 +100,8 @@ async fn run(client: &ApiClient, state: &mut AppState, action: Confirm) {
         Confirm::Service(action, name) => {
             crate::service_actions::run(client, state, action, &name).await
         }
+        Confirm::TokenRotate => crate::token_actions::start(client, state).await,
+        Confirm::TokenFinish { force } => crate::token_actions::finish(client, state, force).await,
     }
 }
 

@@ -10,7 +10,9 @@ use crate::state::AppState;
 
 /// Draw full-screen logs view for the given service.
 pub fn draw_logs(f: &mut Frame, area: Rect, state: &AppState, service: &str) {
-    let log_lines: Vec<&str> = state.logs.lines().collect();
+    // (line number, text), narrowed to matches while `/` searches.
+    let log_lines = matching_lines(&state.logs, &state.log_search);
+    let all = state.logs.lines().count();
     let total = log_lines.len();
     let wrap_indicator = if state.word_wrap { " [wrap]" } else { "" };
 
@@ -19,7 +21,12 @@ pub fn draw_logs(f: &mut Frame, area: Rect, state: &AppState, service: &str) {
     } else {
         " [polling]"
     };
-    let title = format!(" Logs: {service} ({total} lines){mode}{wrap_indicator} ");
+    let count = if state.log_search.is_empty() {
+        format!("{total} lines")
+    } else {
+        format!("/{}: {total} of {all} lines", state.log_search)
+    };
+    let title = format!(" Logs: {service} ({count}){mode}{wrap_indicator} ");
 
     let block = Block::default()
         .title(title)
@@ -39,13 +46,11 @@ pub fn draw_logs(f: &mut Frame, area: Rect, state: &AppState, service: &str) {
 
     // Scroll offset: 0 = bottom (auto-scroll), N = N lines up from bottom.
     let start = total.saturating_sub(inner_h + state.service_scroll);
-    let line_num_width = format!("{total}").len();
+    let line_num_width = format!("{all}").len();
 
     let lines: Vec<Line> = log_lines[start..]
         .iter()
-        .enumerate()
-        .map(|(i, text)| {
-            let num = start + i + 1;
+        .map(|&(num, text)| {
             let num_str = format!("{:>width$} ", num, width = line_num_width);
 
             let max_text = if !state.word_wrap && inner_w > num_str.len() {
@@ -78,6 +83,17 @@ pub fn draw_logs(f: &mut Frame, area: Rect, state: &AppState, service: &str) {
         para = para.wrap(Wrap { trim: false });
     }
     f.render_widget(para, area);
+}
+
+/// Lines of `logs` with their 1-based numbers, only those containing
+/// `search` (case-insensitive) when it isn't empty.
+fn matching_lines<'a>(logs: &'a str, search: &str) -> Vec<(usize, &'a str)> {
+    let needle = search.to_lowercase();
+    logs.lines()
+        .enumerate()
+        .map(|(i, l)| (i + 1, l))
+        .filter(|(_, l)| needle.is_empty() || l.to_lowercase().contains(&needle))
+        .collect()
 }
 
 /// Apply syntax highlighting to a log line.
@@ -158,4 +174,19 @@ fn split_timestamp(text: &str) -> (Option<String>, &str) {
     }
 
     (None, text)
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::matching_lines;
+
+    #[test]
+    fn search_keeps_matching_lines_with_their_numbers() {
+        let logs = "GET / 200\nERROR db down\nGET /a 200\nerror again\n";
+        assert_eq!(
+            matching_lines(logs, "error"),
+            vec![(2, "ERROR db down"), (4, "error again")]
+        );
+        assert_eq!(matching_lines(logs, "").len(), 4);
+    }
 }

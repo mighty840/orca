@@ -67,6 +67,15 @@ pub async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str
             state.push_view(View::Alerts);
         }
         Some("reply") => cmd_alert_reply(state, client, &parts).await,
+        Some("token") => {
+            crate::token_actions::refresh(client, state).await;
+            state.push_view(View::Token);
+        }
+        Some("token-rotate") => crate::confirm::arm(state, Confirm::TokenRotate),
+        Some("token-finish") => {
+            let force = parts.get(1) == Some(&"--force");
+            crate::confirm::arm(state, Confirm::TokenFinish { force });
+        }
         Some("dismiss") => cmd_alert_action(state, client, "dismiss").await,
         Some("resolve") => cmd_alert_action(state, client, "resolve").await,
         Some("webhook-add") => {

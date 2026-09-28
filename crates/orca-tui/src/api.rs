@@ -6,8 +6,10 @@ use serde::Deserialize;
 
 mod cluster;
 mod events;
+mod token;
 
 pub use cluster::BackupTriggerTarget;
+pub use token::{RotationNode, RotationStatus};
 
 pub use orca_core::api_types::{
     ClusterBackupsResponse, ClusterNetworksResponse, DockerNetwork, DomainRoute, FailureInfo,
@@ -27,7 +29,11 @@ pub struct ApiClient {
     /// For long-lived log streams: no overall timeout, which would cut a
     /// followed log off after 10 s.
     stream_client: reqwest::Client,
-    token: Option<String>,
+    /// Shared by clones, so reloading it after a rotation (#265) reaches
+    /// the background tasks' copies too.
+    token: std::sync::Arc<std::sync::RwLock<Option<String>>>,
+    /// The token came from `~/.orca/cluster.token`, which a rotation rewrites.
+    token_from_file: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -109,6 +115,14 @@ pub struct SecretListResponse {
     pub keys: Vec<String>,
 }
 
+fn read_token_file() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    std::fs::read_to_string(format!("{home}/.orca/cluster.token"))
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+}
+
 /// A one-shot action on a service; the CLI's verb of the same name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServiceAction {
@@ -136,13 +150,9 @@ impl ApiClient {
     }
 
     pub fn new(base_url: &str) -> Self {
-        let token = std::env::var("ORCA_TOKEN").ok().or_else(|| {
-            let home = std::env::var("HOME").ok()?;
-            std::fs::read_to_string(format!("{home}/.orca/cluster.token"))
-                .ok()
-                .map(|t| t.trim().to_string())
-                .filter(|t| !t.is_empty())
-        });
+        let env_token = std::env::var("ORCA_TOKEN").ok();
+        let token_from_file = env_token.is_none();
+        let token = env_token.or_else(read_token_file);
         // Aggressive timeouts: every TUI call runs inside the event loop,
         // so a slow/dead server can hang the whole UI (no key handling, no
         // Ctrl+C). Original symptom was "TUI stuck after pressing 7 and
@@ -162,15 +172,30 @@ impl ApiClient {
             base_url: base_url.trim_end_matches('/').to_string(),
             client,
             stream_client,
-            token,
+            token: std::sync::Arc::new(std::sync::RwLock::new(token)),
+            token_from_file,
+        }
+    }
+
+    /// Re-read `~/.orca/cluster.token` after a rotation rewrote it. Without
+    /// this, a TUI on the master keeps the old token and is locked out once
+    /// the rotation is finished. A token from `ORCA_TOKEN` is left alone.
+    pub fn reload_token(&self) {
+        if !self.token_from_file {
+            return;
+        }
+        if let Some(t) = read_token_file()
+            && let Ok(mut token) = self.token.write()
+        {
+            *token = Some(t);
         }
     }
 
     fn auth(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        if let Some(t) = &self.token {
-            req.bearer_auth(t)
-        } else {
-            req
+        let token = self.token.read().ok().and_then(|t| t.clone());
+        match token {
+            Some(t) => req.bearer_auth(t),
+            None => req,
         }
     }
 

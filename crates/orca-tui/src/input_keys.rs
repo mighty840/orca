@@ -4,27 +4,30 @@
 use crossterm::event::KeyCode;
 
 use crate::api::ApiClient;
-use crate::state::{AppState, InputMode};
+use crate::state::{AppState, InputMode, View};
 
 pub fn handle_filter_key(state: &mut AppState, code: KeyCode) {
+    // In the Logs view `/` searches the log; elsewhere it filters services.
+    let logs = matches!(state.view, View::Logs { .. });
+    let text = if logs {
+        &mut state.log_search
+    } else {
+        &mut state.filter
+    };
     match code {
         KeyCode::Esc => {
-            state.filter.clear();
-            state.input_mode = InputMode::Normal;
-            state.selected_service = 0;
-        }
-        KeyCode::Enter => {
+            text.clear();
             state.input_mode = InputMode::Normal;
         }
+        KeyCode::Enter => state.input_mode = InputMode::Normal,
         KeyCode::Backspace => {
-            state.filter.pop();
-            state.selected_service = 0;
+            text.pop();
         }
-        KeyCode::Char(c) => {
-            state.filter.push(c);
-            state.selected_service = 0;
-        }
-        _ => {}
+        KeyCode::Char(c) => text.push(c),
+        _ => return,
+    }
+    if !logs {
+        state.selected_service = 0;
     }
 }
 

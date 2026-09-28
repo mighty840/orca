@@ -25,6 +25,7 @@ fn poll(status: anyhow::Result<StatusResponse>, cluster: anyhow::Result<ClusterI
         status,
         cluster,
         alerts: None,
+        rotation: None,
     }
 }
 
@@ -88,6 +89,7 @@ fn polled_alerts_are_applied() {
         status: status(),
         cluster: cluster(),
         alerts: Some(Ok(None)),
+        rotation: None,
     };
     apply(&mut state, fetched);
     assert!(state.alerts_unavailable);
