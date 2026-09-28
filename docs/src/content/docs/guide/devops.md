@@ -82,15 +82,14 @@ POSTGRES_DB = "keycloak"
 POSTGRES_USER = "${secrets.KEYCLOAK_DB_USER}"
 POSTGRES_PASSWORD = "${secrets.KEYCLOAK_DB_PASSWORD}"
 
-[[service.volumes]]
-source = "keycloak-db-data"
-target = "/var/lib/postgresql/data"
+[service.volume]
+path = "/var/lib/postgresql/data"
 
 [[service]]
 name = "keycloak"
 image = "quay.io/keycloak/keycloak:25.0"
 runtime = "docker"
-command = ["start", "--optimized", "--http-enabled=true", "--hostname-strict=false"]
+cmd = ["start", "--optimized", "--http-enabled=true", "--hostname-strict=false"]
 domain = "auth.example.com"
 port = 8080
 depends_on = ["keycloak-db"]
@@ -105,10 +104,7 @@ KC_PROXY_HEADERS = "xforwarded"
 KEYCLOAK_ADMIN = "${secrets.KEYCLOAK_ADMIN_USERNAME}"
 KEYCLOAK_ADMIN_PASSWORD = "${secrets.KEYCLOAK_BOOTSTRAP_PASSWORD}"
 
-[[service.mounts]]
-source = "./services/keycloak/config/custom-theme"
-target = "/opt/keycloak/themes/custom-theme"
-read_only = true
+mounts = ["./services/keycloak/config/custom-theme:/opt/keycloak/themes/custom-theme:ro"]
 
 [service.liveness]
 path = "/realms/master"
@@ -141,18 +137,12 @@ Here's what the cluster config looks like:
 name = "my-cluster"
 domain = "example.com"
 
-[acme]
-email = "ops@example.com"
-directory = "https://acme-v02.api.letsencrypt.org/directory"
-
-[proxy]
-http_port = 80
-https_port = 443
+acme_email = "ops@example.com"
 
 [backup]
-enabled = true
 schedule = "0 0 3 * * *"   # daily at 03:00
 retention_days = 14
+age_recipients = ["age1..."]   # encrypt backups; see Backups below
 
 [[backup.targets]]
 type = "local"
@@ -168,12 +158,16 @@ secret_key = "${secrets.HETZNER_S3_SECRET_KEY}"
 ```
 
 ::: warning Pitfall: cluster.toml is only read on startup
-Changes to `cluster.toml` — including backup schedules, ACME email, and proxy ports — are loaded exactly once, when the orca server boots. Editing the file does nothing until you restart:
+Changes to `cluster.toml` — including backup schedules and the ACME email — are loaded exactly once, when the orca server boots. Editing the file does nothing until you restart:
 
 ```bash
+sudo systemctl restart orca
+# or, without systemd:
 orca shutdown
 cd ~/orca && orca server -d
 ```
+
+Restarting orca leaves the containers running; the new process re-attaches to them.
 
 Don't forget to `cd ~/orca` before restarting — otherwise orca will come back up pointing at the wrong (empty) services directory.
 :::
@@ -207,7 +201,7 @@ KEYCLOAK_ADMIN_PASSWORD = "${secrets.KEYCLOAK_BOOTSTRAP_PASSWORD}"
 ```bash
 orca secrets list               # names only, never values
 orca secrets set KEY new-value  # overwrite
-orca secrets rm KEY
+orca secrets remove KEY
 ```
 
 After rotating a secret, redeploy the consuming service: `orca deploy keycloak`.
@@ -333,8 +327,9 @@ curl -X POST http://127.0.0.1:6880/api/v1/webhooks \
   -H "Content-Type: application/json" \
   -d '{
     "repo": "myorg/orca-infra",
-    "service_name": "__infra__",
+    "service_name": "infra",
     "branch": "main",
+    "infra": true,
     "secret": "your-infra-webhook-secret"
   }'
 ```
@@ -397,9 +392,9 @@ Orca has a built-in backup scheduler configured via `cluster.toml`. It snapshots
 
 ```toml
 [backup]
-enabled = true
 schedule = "0 0 3 * * *"   # six-field cron: sec min hour dom mon dow — daily at 03:00:00
 retention_days = 14
+age_recipients = ["age1..."]   # public key from age-keygen; keep the private key off the cluster
 
 [[backup.targets]]
 type = "local"
@@ -413,6 +408,8 @@ region = "nbg1"
 access_key = "${secrets.HETZNER_S3_ACCESS_KEY}"
 secret_key = "${secrets.HETZNER_S3_SECRET_KEY}"
 ```
+
+Set `age_recipients` before the first run: without it, key material (`master.key`, TLS keys, `webhooks.json`) is skipped and volume tarballs are stored in clear. See [Configuration](/guide/configuration#backups) for encryption, retention (`keep_min`, `prune_s3`) and the restore commands.
 
 Hetzner Object Storage works as a drop-in S3 target — just point `endpoint` at the region-specific hostname and set `region` to match. Same pattern works for Backblaze B2, MinIO, Wasabi, etc.
 
@@ -447,7 +444,7 @@ Make sure `/var/backups` is a mounted volume so the dump is actually included in
 grep "Backup scheduler started" ~/.orca/orca.log
 ```
 
-If you don't see that line, either `[backup]` is missing from `cluster.toml`, `enabled = false`, or the cron expression failed to parse (remember: six fields, including seconds).
+If you don't see that line, either `[backup]` is missing from `cluster.toml` or the cron expression failed to parse (remember: six fields, including seconds). A failed run makes `orca backup` exit non-zero and raises a critical alert.
 
 ## 7. Health checks for slow-starting services
 
@@ -515,7 +512,7 @@ port = 3000
 extra_ports = ["22222:22"]
 ```
 
-This publishes container port 22 on host port 22222. That's how Gitea SSH (`ssh://git@git.example.com:22222`) works on this cluster.
+This publishes container port 22 on host port 22222 on all interfaces. That's how Gitea SSH (`ssh://git@git.example.com:22222`) works on this cluster. Prefix an entry with `127.0.0.1:` to keep it on the host; orca warns when a database port (5432, 3306, 27017, 6379, 9000, 6333) is published on all interfaces. The random host port behind `port` binds to `127.0.0.1` and is only used by the node's proxy.
 
 ### Strict-cookie clients: Keycloak, etc.
 
@@ -591,7 +588,7 @@ The `DROP SCHEMA` is important — `pg_restore` doesn't like pre-existing tables
 **7. Restart the app.**
 
 ```bash
-orca restart my-app
+orca redeploy my-app
 ```
 
 It should now pick up the restored data and pass its liveness check.
@@ -606,7 +603,7 @@ A skimmable list of every pitfall covered above:
 
 - **cwd matters for services/.** Use `orca install-service` (sets `WorkingDirectory` automatically) or always `cd ~/orca` before commands.
 - **cwd matters for secrets.json.** `orca secrets set` writes to `$PWD/secrets.json`. Always run from `~/orca`. (Being fixed.)
-- **cluster.toml is only read on startup.** Restart orca after editing: `sudo systemctl restart orca`.
+- **cluster.toml is only read on startup.** Restart orca after editing: `sudo systemctl restart orca`. Containers keep running across the restart.
 - **setcap is not needed with systemd.** `orca install-service` generates a unit with `AmbientCapabilities=CAP_NET_BIND_SERVICE`. Only use `setcap` if running without systemd.
 - **Agent nodes need `--leader` for systemd.** Use `orca install-service --leader <ip>:6880` on joined nodes — this creates `orca-agent.service` with the join command.
 - **`orca update` auto-restores setcap** via `sudo -n setcap`. If passwordless sudo isn't configured, run `sudo setcap` manually or use systemd (which doesn't need it).

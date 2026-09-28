@@ -9,7 +9,7 @@ Orca is a Cargo workspace with 8 crates:
 | `orca-core` | lib | Types, config parsing, `Runtime` trait, secrets, errors |
 | `orca-agent` | lib | Docker + Wasm runtime implementations |
 | `orca-control` | lib | API server (axum), reconciler, scheduler, Raft consensus |
-| `orca-proxy` | lib | Reverse proxy + TLS + Wasm routing (pingora) |
+| `orca-proxy` | lib | Reverse proxy + TLS + Wasm routing (hyper) |
 | `orca-ai` | lib | LLM backend, conversational alerts, GPU monitor |
 | `orca-cli` | bin | Single `orca` binary (all commands) |
 | `orca-tui` | bin | Terminal UI dashboard (ratatui) |
@@ -42,7 +42,7 @@ core <-- agent <-- control <-- cli
 │  │  Health Checker + AI Monitor   │  │
 │  └────────────────────────────────┘  │
 └───────────────┬──────────────────────┘
-                │ gRPC (mTLS)
+                │ WebSocket (agent channel)
      ┌──────────┼──────────┐
      ▼          ▼          ▼
 ┌─────────┐ ┌─────────┐ ┌─────────┐
@@ -80,10 +80,9 @@ Two implementations: `ContainerRuntime` (Docker via bollard) and `WasmRuntime` (
 | `openraft` | Raft consensus -- pure Rust, async |
 | `redb` | Embedded KV store -- zero-config, ACID |
 | `axum` | HTTP API -- Tokio ecosystem |
-| `tonic` | gRPC -- control-plane to agent |
 | `bollard` | Docker API client |
 | `wasmtime` | Wasm runtime -- WASI P2 |
-| `pingora` | Reverse proxy -- Cloudflare-proven |
+| `hyper` | Reverse proxy -- HTTP/1.1 and HTTP/2 |
 | `ratatui` | TUI framework |
 | `clap` | CLI parsing |
 | `tracing` | Structured logging + OpenTelemetry |

@@ -87,6 +87,61 @@ webhook = "https://my-pagerduty-webhook/..."
 
 When an alert fires, the AI investigates the root cause, suggests fixes, and tracks resolution.
 
+### What an alert diagnosis sees
+
+Each alert's prompt carries the evidence for the affected service:
+
+- The failure orca recorded: reason (`OOMKilled`, `ImagePullError`,
+  `CrashLoopBackOff`, ...), exit code, restart count and its log tail.
+- Its last 40 log lines, fetched from its node when the alert opens, also from
+  a crashed container.
+- Its image and the previous one, when it was deployed, memory use against its
+  limit, CPU, its health checks, and its node with heartbeat age. A node
+  without a heartbeat for 60 s shows as unreachable.
+
+The rest of the cluster is summarized as one line per service with a problem
+and a list of the healthy ones. The prompt also lists the valid `orca`
+commands and `service.toml` keys, so suggested fixes use real syntax (for
+example `orca scale <service> <N>`).
+
+### Redaction
+
+Secrets are masked in every log line before it leaves the cluster:
+`key=value` pairs whose name looks like a password, token or key, bearer
+tokens, passwords in URLs, and long opaque tokens. Digests and hashes are
+kept.
+
+### Answer format
+
+The model answers in fixed sections:
+
+| Section | Content |
+|---------|---------|
+| **What happened** | One or two concrete sentences |
+| **Evidence** | The log lines, exit codes and metrics it relies on |
+| **Likely cause** | With confidence (high, medium, low); names another service if that is the real cause |
+| **Other possible causes** | Only when confidence isn't high |
+| **Fix** | The exact `orca` commands or `service.toml` change |
+| **Verify** | How to confirm the fix worked |
+| **Resolves on its own?** | Yes or no, and why |
+
+The suggested command is taken from the Fix section. The model call has a 30 s
+timeout; when it fails, the alert is still delivered without a diagnosis.
+
+### Working with alerts
+
+```bash
+orca alerts list                 # Open alerts (--all includes resolved)
+orca alerts view <id>
+orca alerts reply <id> "did the database restart?"
+orca alerts fix <id>             # Print the suggested command
+orca alerts dismiss <id>
+orca alerts resolve <id>
+```
+
+`orca alerts fix` prints the command for review; it doesn't run it. In the
+TUI, open view `7`.
+
 `alert_grace_secs` (default 120) debounces transient outages: a service must stay down longer than the grace window before it pages, so a webhook deploy doesn't spam open/remediated notifications. Raise it for services whose image pulls or health checks routinely take longer than two minutes; a genuine sustained outage still opens exactly one alert.
 
 ## Auto-Remediation
