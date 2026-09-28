@@ -5,7 +5,7 @@
 //! stray key can never stop a service. The armed action names its target, so
 //! it can't drift to another row if the list refreshes in between.
 
-use crate::api::ApiClient;
+use crate::api::{ApiClient, ServiceAction};
 use crate::state::AppState;
 
 /// A destructive action waiting for y/N.
@@ -16,6 +16,8 @@ pub enum Confirm {
     DrainNode(u64),
     DeleteWebhook(String),
     DeleteSecret(String),
+    /// Redeploy, rollback or promote: each replaces running containers.
+    Service(ServiceAction, String),
 }
 
 impl Confirm {
@@ -27,6 +29,16 @@ impl Confirm {
             Confirm::DrainNode(id) => format!("Drain node {id}"),
             Confirm::DeleteWebhook(s) => format!("Delete the webhook for '{s}'"),
             Confirm::DeleteSecret(k) => format!("Delete secret '{k}'"),
+            Confirm::Service(ServiceAction::Redeploy, s) => {
+                format!("Redeploy '{s}' (pull its image and recreate its containers)")
+            }
+            Confirm::Service(ServiceAction::Rollback, s) => {
+                format!("Roll back '{s}' to its previous deploy")
+            }
+            Confirm::Service(ServiceAction::Promote, s) => {
+                format!("Promote the canary of '{s}' to stable")
+            }
+            Confirm::Service(ServiceAction::Start, s) => format!("Start '{s}'"),
         };
         format!("{what}? y:confirm  any other key:cancel")
     }
@@ -70,6 +82,9 @@ async fn run(client: &ApiClient, state: &mut AppState, action: Confirm) {
         }
         Confirm::DeleteSecret(key) => {
             crate::secrets_actions::delete_secret(client, state, &key).await
+        }
+        Confirm::Service(action, name) => {
+            crate::service_actions::run(client, state, action, &name).await
         }
     }
 }

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **TUI: start, redeploy, roll back and promote a service (#265).** `u`
+  starts (resumes) the selected service, `d` redeploys it; `:start`,
+  `:redeploy`, `:rollback` and `:promote` take a service name. Redeploy,
+  rollback and promote ask y/N. Before, `x` could pause a service and
+  nothing in the TUI could bring it back.
+- **TUI: the Nodes view has a selection (#265).** `x` drains the selected
+  node (y/N) and `u` undrains it; before, both needed `:drain <id>` typed
+  by hand. The selection stays on its node across refreshes.
+
 ### Fixed
 
 - **TUI: `x` could stop a service you never selected (#262).** The cursor

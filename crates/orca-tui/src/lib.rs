@@ -9,12 +9,16 @@ pub(crate) use chat_dispatch::{drain_chat_result, send_chat_message};
 mod input_keys;
 mod keys;
 mod metrics;
+mod nav;
 mod persist;
 mod secrets_actions;
+mod service_actions;
 mod shell;
 pub mod state;
 pub mod ui;
+mod view;
 mod webhook_actions;
+mod webhook_commands;
 
 // Re-export so `keys.rs` / `commands.rs` keep their existing
 // `super::refresh_webhooks(...)` / `crate::refresh_webhooks(...)` callsites.

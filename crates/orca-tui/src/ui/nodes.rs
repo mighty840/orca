@@ -53,7 +53,8 @@ fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
     let rows: Vec<Row> = state
         .nodes
         .iter()
-        .map(|n| {
+        .enumerate()
+        .map(|(i, n)| {
             let (relative, stale) = format_relative_heartbeat(&n.last_heartbeat);
             let drain_str = if n.drain { "draining" } else { "" };
             let labels_str = format_labels(&n.labels);
@@ -81,7 +82,14 @@ fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
                 relative,
                 labels_str,
             ])
-            .style(Style::default().fg(status_color))
+            .style(if i == state.selected_node {
+                Style::default()
+                    .fg(status_color)
+                    .bg(Color::DarkGray)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(status_color)
+            })
         })
         .collect();
 
