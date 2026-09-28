@@ -137,7 +137,6 @@ rotation, filters, and layouts that fit narrow terminals.
   mean score went from 0.14 to 0.86 before the service.toml reference. A
   test checks that each scenario's evidence reaches the prompt, without a
   model.
-||||||| parent of e852fbf (fix(tui): confirm destructive actions, keep the selection on its service, exec on the right cluster (#262))
 
 ## [0.3.0-rc.5] - 2026-09-28
 
