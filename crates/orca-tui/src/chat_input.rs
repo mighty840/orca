@@ -47,7 +47,7 @@ pub(crate) async fn handle_chat_key(state: &mut AppState, client: &ApiClient, co
             state.push_view(View::Secrets);
         }
         KeyCode::Char('4') if state.chat_input.is_empty() => {
-            crate::refresh_backups(client, state).await;
+            crate::refresh_backups(client, state);
             state.selected_backup_node = 0;
             state.push_view(View::Backups);
         }
@@ -129,7 +129,7 @@ async fn send_chat(state: &mut AppState, client: &ApiClient) {
                     state.push_view(View::Secrets);
                 }
                 View::Backups => {
-                    crate::refresh_backups(client, state).await;
+                    crate::refresh_backups(client, state);
                     state.push_view(View::Backups);
                 }
                 View::Webhooks => {
@@ -143,7 +143,7 @@ async fn send_chat(state: &mut AppState, client: &ApiClient) {
                 other => state.push_view(other),
             },
             SlashAction::Logs(svc) => {
-                crate::refresh_logs_named(client, state, &svc).await;
+                crate::refresh_logs_named(client, state, &svc);
                 state.push_view(View::Logs { service: svc });
             }
             SlashAction::Clear => state.chat.clear(),

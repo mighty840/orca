@@ -1,4 +1,5 @@
 pub mod api;
+mod background;
 mod chat_dispatch;
 mod chat_input;
 mod commands;
@@ -77,23 +78,26 @@ async fn event_loop(
     let mut last_log_refresh = tokio::time::Instant::now() - Duration::from_secs(2);
 
     loop {
-        // Global data refresh every 2s.
+        // Global data refresh every 2s, in the background (#263).
         if last_refresh.elapsed() >= Duration::from_secs(2) {
-            refresh(client, state).await;
+            background::spawn_poll(client, state);
             last_refresh = tokio::time::Instant::now();
         }
 
         // Auto-refresh logs when in Logs view.
-        if matches!(state.view, View::Logs { .. })
+        if let View::Logs { service } = &state.view
             && state.auto_refresh_logs
             && last_log_refresh.elapsed() >= Duration::from_secs(2)
         {
-            refresh_logs_for_view(client, state).await;
+            let service = service.clone();
+            background::spawn_logs(client, state, &service);
             last_log_refresh = tokio::time::Instant::now();
         }
 
         state.tick = state.tick.wrapping_add(1);
         state.maybe_clear_flash();
+        background::drain(state);
+        background::expire_error(state, std::time::Instant::now());
         // Pick up any completed background chat request before we render
         // — so the assistant's reply shows up the same tick it lands.
         drain_chat_result(state);
@@ -163,23 +167,6 @@ pub(crate) fn current_service_name(state: &AppState) -> Option<String> {
     }
 }
 
-async fn refresh(client: &ApiClient, state: &mut AppState) {
-    state.error = None;
-    match client.status().await {
-        Ok(resp) => {
-            state.update_status(resp);
-            try_restore_project_filter(state);
-        }
-        Err(e) => {
-            state.mark_disconnected();
-            state.error = Some(format!("API error: {e}"));
-        }
-    }
-    if let Ok(info) = client.cluster_info().await {
-        state.update_cluster(info);
-    }
-}
-
 /// Validate the project loaded from disk against the freshly-fetched service
 /// list. Runs at most once per session (the pending value is consumed). If the
 /// project still exists, flash a confirmation. If it does not, drop the filter
@@ -203,26 +190,30 @@ pub(crate) fn try_restore_project_filter(state: &mut AppState) {
     }
 }
 
-async fn refresh_logs_for_view(client: &ApiClient, state: &mut AppState) {
-    if let View::Logs { service } = &state.view {
-        let name = service.clone();
-        refresh_logs_named(client, state, &name).await;
+/// Start fetching `name`'s log tail; the Logs/Detail view shows it when it
+/// lands. Switching services shows a placeholder, not the previous tail.
+fn refresh_logs_named(client: &ApiClient, state: &mut AppState, name: &str) {
+    let same = matches!(&state.view,
+        View::Logs { service } | View::Detail { service } if service == name);
+    if !same {
+        state.logs = format!("Loading logs of {name}…");
     }
+    background::spawn_logs(client, state, name);
 }
 
-async fn refresh_logs_named(client: &ApiClient, state: &mut AppState, name: &str) {
-    match client.logs(name, 50).await {
-        Ok(logs) => state.logs = logs,
-        Err(e) => state.logs = format!("Failed to fetch logs: {e}"),
-    }
+/// Start fetching the cluster-wide backup status. Called when entering the
+/// backups view and on explicit `r` refresh — not on every 2s tick, since
+/// the fan-out RPC to every agent is expensive and the data changes only
+/// when a backup actually runs. Runs in the background (#263).
+fn refresh_backups(client: &ApiClient, state: &mut AppState) {
+    background::spawn_backups(client, state);
 }
 
-/// Fetch the cluster-wide backup status and cache it on the state. Called
-/// when entering the backups view and on explicit `r` refresh — not on every
-/// 2s tick, since the fan-out RPC to every agent is expensive and the data
-/// changes only when a backup actually runs.
-async fn refresh_backups(client: &ApiClient, state: &mut AppState) {
-    match client.cluster_backups().await {
+pub(crate) fn apply_backups(
+    state: &mut AppState,
+    result: anyhow::Result<api::ClusterBackupsResponse>,
+) {
+    match result {
         Ok(resp) => {
             // Clamp the selection so a node removal doesn't leave us pointing
             // past the end of the list.
@@ -249,7 +240,15 @@ async fn refresh_networks(client: &ApiClient, state: &mut AppState) {
 /// `alerts_unavailable` flag so the view shows a friendly message. Selection
 /// is clamped to the new list size.
 pub(crate) async fn refresh_alerts(client: &ApiClient, state: &mut AppState) {
-    match client.alerts_list(state.alerts_show_all).await {
+    let result = client.alerts_list(state.alerts_show_all).await;
+    apply_alerts(state, result);
+}
+
+pub(crate) fn apply_alerts(
+    state: &mut AppState,
+    result: anyhow::Result<Option<Vec<api::AlertConversation>>>,
+) {
+    match result {
         Ok(Some(alerts)) => {
             state.alerts = alerts;
             state.alerts_unavailable = false;
