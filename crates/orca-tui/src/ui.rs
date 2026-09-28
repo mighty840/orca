@@ -223,6 +223,17 @@ fn draw_command_bar(f: &mut Frame, area: Rect, state: &AppState) {
 }
 
 fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
+    // A pending confirmation outranks everything: the next keypress answers
+    // it, so it must never hide behind an error or a flash (#262).
+    if let Some(confirm) = &state.pending_confirm {
+        let line = Line::from(Span::styled(
+            format!(" {}", confirm.prompt()),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        ));
+        f.render_widget(Paragraph::new(line), area);
+        return;
+    }
+
     // Error takes priority
     if let Some(err) = &state.error {
         let line = Line::from(Span::styled(
@@ -276,16 +287,6 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
 
     // Separator + key hints
     spans.push(Span::styled(" | ", dim));
-    // A pending delete confirmation replaces the key hints — the next
-    // keypress answers it, so nothing else is actionable right now.
-    if let Some(key) = &state.pending_secret_delete {
-        spans.push(Span::styled(
-            format!("Delete secret '{key}'? y:confirm  any other key:cancel"),
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        ));
-        f.render_widget(Paragraph::new(Line::from(spans)), area);
-        return;
-    }
     let keys = match &state.view {
         // Services: 1 services, 2 nodes, 3 secrets. `c` collapses the
         // project of the currently selected row (was SPC, but space

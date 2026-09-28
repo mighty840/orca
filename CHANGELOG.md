@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **TUI: `x` could stop a service you never selected (#262).** The cursor
+  was a row number, so when a service appeared or disappeared above it, it
+  landed on a neighbour, and `x` stopped that one at once. The selection now
+  follows the service by name, and every destructive action asks y/N first:
+  `x` on a service, webhook or secret, `:stop`, `:stop-project`, `:drain`
+  and `:rm`. The armed action names its target, and the prompt outranks
+  errors and messages in the footer, which used to hide the secret-delete
+  prompt.
+- **TUI: `:sh`/`:exec` on a remote service could open a shell in another
+  cluster (#262).** It ran whatever `orca` was on `PATH`, without `--api`, so
+  the shell went to the default cluster instead of the one on screen. It now
+  runs the TUI's own binary with `--api <the TUI's URL>`.
+- **TUI: the terminal was left broken (#262)** when the shell command
+  couldn't be started (raw mode and the TUI screen weren't restored), or
+  when the TUI panicked.
+
 ### Changed
 
 - **Alert diagnoses get the evidence, not just counts.** The model used to
@@ -44,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mean score went from 0.14 to 0.86 before the service.toml reference. A
   test checks that each scenario's evidence reaches the prompt, without a
   model.
+||||||| parent of e852fbf (fix(tui): confirm destructive actions, keep the selection on its service, exec on the right cluster (#262))
 
 ## [0.3.0-rc.5] - 2026-09-28
 

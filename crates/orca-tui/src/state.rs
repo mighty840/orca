@@ -116,10 +116,10 @@ pub struct AppState {
     /// so use `ui::secrets::selectable_indices` when navigating to skip
     /// non-selectable header rows.
     pub selected_secret: usize,
-    /// Pending y/N confirmation for deleting a secret (#69). Holds the full
-    /// stored key. Rendered in the footer; consumed by the next keypress
-    /// (`y` confirms, anything else cancels).
-    pub pending_secret_delete: Option<String>,
+    /// A destructive action waiting for y/N (#69, #262). Rendered in the
+    /// footer; consumed by the next keypress (`y` confirms, anything else
+    /// cancels).
+    pub pending_confirm: Option<crate::confirm::Confirm>,
     /// Scope filter for the secrets view (#69): `None` shows every group,
     /// `Some(label)` shows only that group (`global`, a project name, or
     /// `broken refs`). Cycled with `p`.
@@ -239,7 +239,7 @@ impl AppState {
             cluster_version: None,
             cluster_commit: None,
             selected_secret: 0,
-            pending_secret_delete: None,
+            pending_confirm: None,
             secrets_scope_filter: None,
             backups: None,
             selected_backup_node: 0,
@@ -316,14 +316,24 @@ impl AppState {
         }
     }
 
+    /// Apply a status refresh. The selection follows the service, not the
+    /// row: when services are added or removed above it, the cursor must
+    /// not silently land on a neighbour that `x` would then stop (#262).
     pub fn update_status(&mut self, resp: StatusResponse) {
+        let selected = self.selected_service_name().map(str::to_string);
         self.cluster_name = resp.cluster_name;
         self.services = resp.services;
         self.connection = ConnectionStatus::Connected;
         self.record_service_samples();
-        let visible_len = self.visible_services().len();
-        if self.selected_service >= visible_len && visible_len > 0 {
-            self.selected_service = visible_len - 1;
+        let visible = self.visible_services();
+        let kept = selected.and_then(|name| visible.iter().position(|s| s.name == name));
+        let visible_len = visible.len();
+        match kept {
+            Some(i) => self.selected_service = i,
+            None if self.selected_service >= visible_len && visible_len > 0 => {
+                self.selected_service = visible_len - 1;
+            }
+            None => {}
         }
     }
 
@@ -460,3 +470,7 @@ impl AppState {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "state_tests.rs"]
+mod tests;

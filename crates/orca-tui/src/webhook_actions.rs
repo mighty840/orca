@@ -31,15 +31,10 @@ pub(crate) async fn refresh_webhook_invocations(
     }
 }
 
-/// Delete the webhook on the currently-selected row. No interactive confirm
-/// dialog — this matches `x` on the services view (immediate stop). If we
-/// later add an `Are you sure?` flow it should apply to both.
-pub(crate) async fn delete_selected_webhook(client: &ApiClient, state: &mut AppState) {
-    let Some(w) = state.webhooks.get(state.selected_webhook) else {
-        return;
-    };
-    let service = w.service_name.clone();
-    match client.remove_webhook(&service).await {
+/// Delete the webhook for `service`. Reached only through a y/N
+/// confirmation (`crate::confirm`).
+pub(crate) async fn delete_webhook(client: &ApiClient, state: &mut AppState, service: &str) {
+    match client.remove_webhook(service).await {
         Ok(()) => {
             state.flash(format!("Removed webhook for {service}"));
             refresh_webhooks(client, state).await;

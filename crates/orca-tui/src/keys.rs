@@ -3,6 +3,7 @@
 use crossterm::event::KeyCode;
 
 use crate::api::ApiClient;
+use crate::confirm::Confirm;
 use crate::state::{AppState, InputMode, View};
 
 pub use crate::input_keys::{handle_command_key, handle_filter_key};
@@ -17,15 +18,11 @@ pub async fn handle_normal_key(
         crate::chat_input::handle_chat_key(state, client, code).await;
         return;
     }
-    // Pending delete confirmation (#69): the next keypress resolves it —
-    // `y` deletes, anything else cancels. Intercepted before normal
+    // A pending confirmation (#69, #262): the next keypress resolves it —
+    // `y` confirms, anything else cancels. Intercepted before normal
     // dispatch so no other binding can fire mid-confirmation.
-    if let Some(key) = state.pending_secret_delete.take() {
-        if matches!(code, KeyCode::Char('y') | KeyCode::Char('Y')) {
-            crate::secrets_actions::delete_secret(client, state, &key).await;
-        } else {
-            state.flash("Delete cancelled".into());
-        }
+    let yes = matches!(code, KeyCode::Char('y') | KeyCode::Char('Y'));
+    if crate::confirm::answer(client, state, yes).await {
         return;
     }
     match code {
@@ -305,22 +302,29 @@ pub async fn handle_normal_key(
         KeyCode::Char('d') => {
             state.flash("Use `orca deploy` from CLI to redeploy".into());
         }
+        // `x` arms a y/N confirmation everywhere (#262): it stops, deletes
+        // or drains, and the armed action names its target.
         KeyCode::Char('x') if matches!(state.view, View::Webhooks) => {
-            super::delete_selected_webhook(client, state).await;
+            if let Some(w) = state.webhooks.get(state.selected_webhook) {
+                let service = w.service_name.clone();
+                crate::confirm::arm(state, Confirm::DeleteWebhook(service));
+            }
         }
-        // `x` on a secret arms a y/N confirmation instead of deleting
-        // immediately — a mistyped delete here loses a credential, unlike
-        // stopping a service which is reversible.
         KeyCode::Char('x') if matches!(state.view, View::Secrets) => {
             if let Some(u) = crate::ui::secrets::selected_key(state) {
                 if u.in_store {
-                    state.pending_secret_delete = Some(u.key.clone());
+                    let key = u.key.clone();
+                    crate::confirm::arm(state, Confirm::DeleteSecret(key));
                 } else {
                     state.flash("Not in store (broken ref) — nothing to delete".into());
                 }
             }
         }
-        KeyCode::Char('x') => super::handle_stop(client, state).await,
+        KeyCode::Char('x') => {
+            if let Some(name) = super::current_service_name(state) {
+                crate::confirm::arm(state, Confirm::StopService(name));
+            }
+        }
         KeyCode::Char('s') => handle_scale_prompt(state),
         // `p` in the secrets view cycles the scope filter (#69); everywhere
         // else it keeps its services-project-filter meaning.

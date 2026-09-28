@@ -2,6 +2,7 @@ pub mod api;
 mod chat_dispatch;
 mod chat_input;
 mod commands;
+pub mod confirm;
 
 pub(crate) use chat_dispatch::{drain_chat_result, send_chat_message};
 mod input_keys;
@@ -9,15 +10,14 @@ mod keys;
 mod metrics;
 mod persist;
 mod secrets_actions;
+mod shell;
 pub mod state;
 pub mod ui;
 mod webhook_actions;
 
 // Re-export so `keys.rs` / `commands.rs` keep their existing
 // `super::refresh_webhooks(...)` / `crate::refresh_webhooks(...)` callsites.
-pub(crate) use webhook_actions::{
-    delete_selected_webhook, refresh_webhook_invocations, refresh_webhooks,
-};
+pub(crate) use webhook_actions::{refresh_webhook_invocations, refresh_webhooks};
 
 use std::io;
 use std::time::Duration;
@@ -52,6 +52,7 @@ pub async fn run_tui(api_url: &str) -> anyhow::Result<()> {
         state.pending_restore_project = Some(p);
     }
 
+    shell::install_panic_hook();
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
@@ -137,7 +138,10 @@ async fn event_loop(
         // state, suspend the ratatui alternate-screen, run the child
         // command with inherited stdio, then rebuild the screen.
         if let Some((service, node, cmd)) = state.pending_shell.take() {
-            if let Err(e) = run_container_shell(terminal, &service, node.as_deref(), &cmd) {
+            let api = state.api_url.clone();
+            if let Err(e) =
+                shell::run_container_shell(terminal, &api, &service, node.as_deref(), &cmd)
+            {
                 state.error = Some(format!("Exec failed: {e}"));
             } else {
                 state.flash(format!("Shell in {service} exited"));
@@ -150,50 +154,8 @@ async fn event_loop(
     }
 }
 
-/// Suspend ratatui and run `docker exec -it` (or `ssh <node> docker exec`
-/// for remote services), blocking until the child exits.
-fn run_container_shell(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    service: &str,
-    node: Option<&str>,
-    cmd: &[String],
-) -> anyhow::Result<()> {
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    terminal.show_cursor()?;
-
-    // Remote services: delegate to `orca exec` which connects via the master WS exec channel.
-    // Local services: direct docker exec.
-    let mut child = if node.is_some() {
-        let mut c = std::process::Command::new("orca");
-        c.arg("exec").arg(service);
-        for a in cmd {
-            c.arg(a);
-        }
-        c
-    } else {
-        let container = format!("orca-{service}");
-        let mut c = std::process::Command::new("docker");
-        c.args(["exec", "-it", &container]);
-        for a in cmd {
-            c.arg(a);
-        }
-        c
-    };
-    let status = child.status()?;
-
-    enable_raw_mode()?;
-    execute!(io::stdout(), EnterAlternateScreen)?;
-    terminal.clear()?;
-    terminal.hide_cursor()?;
-    if !status.success() {
-        anyhow::bail!("exit status {status}");
-    }
-    Ok(())
-}
-
 /// Get the service name from the current view context or selection.
-fn current_service_name(state: &AppState) -> Option<String> {
+pub(crate) fn current_service_name(state: &AppState) -> Option<String> {
     match &state.view {
         View::Detail { service } | View::Logs { service } => Some(service.clone()),
         View::Services => state.selected_service_name().map(|s| s.to_string()),
@@ -252,15 +214,6 @@ async fn refresh_logs_named(client: &ApiClient, state: &mut AppState, name: &str
     match client.logs(name, 50).await {
         Ok(logs) => state.logs = logs,
         Err(e) => state.logs = format!("Failed to fetch logs: {e}"),
-    }
-}
-
-async fn handle_stop(client: &ApiClient, state: &mut AppState) {
-    if let Some(name) = current_service_name(state) {
-        match client.stop(&name).await {
-            Ok(()) => state.flash(format!("Stopped {name}")),
-            Err(e) => state.error = Some(format!("Stop failed: {e}")),
-        }
     }
 }
 
