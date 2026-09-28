@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.5] - 2026-09-28
+
+Hardening from the rc.4 production run: deploys that replace containers
+gracefully and keep the old one when the new one fails, a proxy that
+survives slow uploads, failing certificate orders and unknown TLS names, a
+master that refuses an unusable store, and zero-downtime cluster token
+rotation.
+
+### Upgrade notes
+
+- **Stopping `orca server` no longer removes containers (#178).** Workloads
+  keep running across `systemctl stop|restart`. Use
+  `orca server --teardown-on-exit` if you relied on the old cleanup.
+- **Random backend host ports bind to `127.0.0.1` (#211).** Anything that
+  reached a backend on its random host port from another machine must use
+  the proxy or an explicit `host_port`. Containers switch on their next
+  recreate.
+- **The master refuses to start with an unreadable `cluster.db` (#179)**
+  instead of starting empty. Fix or restore the store before starting.
+- **`orca deploy` exits 1 when a service fails to deploy (#174).** Scripts
+  that ignored failures will now see them.
+- Agents need rc.5 to take part in `orca token rotate`; upgrade every agent
+  before `--finish`.
+
 ### Added
 
 - **`orca token rotate`: rotate the cluster token without locking agents out
