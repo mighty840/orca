@@ -16,6 +16,7 @@ mod secrets_actions;
 mod service_actions;
 mod shell;
 pub mod state;
+mod token_actions;
 pub mod ui;
 mod view;
 mod webhook_actions;

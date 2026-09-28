@@ -12,6 +12,7 @@ pub mod nodes;
 pub mod secret_refs;
 pub mod secrets;
 pub mod table;
+pub mod token;
 pub mod webhook_invocations;
 pub mod webhooks;
 
@@ -80,6 +81,7 @@ fn draw_content(f: &mut Frame, area: Rect, state: &AppState) {
         View::Networks => networks::draw_networks(f, area, state),
         View::Chat => chat::draw_chat(f, area, state),
         View::Alerts => alerts::draw_alerts(f, area, state),
+        View::Token => token::draw_token(f, area, state),
         View::AlertDetail { id } => alerts::draw_alert_detail(f, area, state, id),
     }
 }
@@ -191,6 +193,7 @@ fn draw_breadcrumb(f: &mut Frame, area: Rect, state: &AppState) {
         View::Networks => "Networks".to_string(),
         View::Chat => "Chat".to_string(),
         View::Alerts => "Alerts".to_string(),
+        View::Token => "Token".to_string(),
         View::AlertDetail { id } => format!("Alerts > {}", &id[..8.min(id.len())]),
     };
     let line = Line::from(vec![
@@ -223,7 +226,11 @@ fn draw_command_bar(f: &mut Frame, area: Rect, state: &AppState) {
     } else {
         Line::from(vec![
             Span::styled(" /", Style::default().fg(Color::Yellow)),
-            Span::raw(state.filter.clone()),
+            Span::raw(if matches!(state.view, View::Logs { .. }) {
+                state.log_search.clone()
+            } else {
+                state.filter.clone()
+            }),
             Span::styled("_", Style::default().fg(Color::Yellow)),
             Span::styled("  (Esc to clear)", Style::default().fg(Color::DarkGray)),
         ])
@@ -301,10 +308,10 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
         // project of the currently selected row (was SPC, but space
         // collides with paging in list scrolling).
         View::Services => {
-            "0-7:views ↵:detail l:logs /filter s:scale x:stop u:start d:redeploy p:project c:collapse ?:help"
+            "0-8:views ↵:detail l:logs /filter s:scale x:stop u:start d:redeploy p:project c:collapse ?:help"
         }
         View::Nodes => "Esc:back j/k:select x:drain u:undrain ?:help",
-        View::Logs { .. } => "Esc:back w:wrap PgUp/PgDn:scroll ?:help",
+        View::Logs { .. } => "Esc:back /search w:wrap PgUp/PgDn:scroll ?:help",
         View::Detail { .. } => "Esc:back s:scale x:stop u:start d:redeploy l:logs :sh ?:help",
         View::Help => "Esc:back j/k:scroll",
         View::Secrets => {
@@ -321,6 +328,7 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
         View::Chat => "type:ask Enter:send PgUp/PgDn:scroll /cmd:jump 1-7:views Esc:clear ?:help",
         View::Alerts => "Esc:back j/k:select ↵:detail a:all r:refresh d:dismiss R:resolve ?:help",
         View::AlertDetail { .. } => "Esc:back j/k:scroll d:dismiss R:resolve :reply ?:help",
+        View::Token => "Esc:back s:start rotation f:finish F:force finish r:refresh ?:help",
     };
     spans.push(Span::styled(keys, dim));
 

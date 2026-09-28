@@ -41,6 +41,7 @@ pub(crate) fn sync(client: &ApiClient, state: &mut AppState) {
     if !matches!(state.view, View::Logs { .. }) {
         // Next time, try streaming again: the container may be back.
         state.bg.follow.polled.clear();
+        state.log_search.clear();
     }
     let wanted = match &state.view {
         View::Logs { service } if is_followed(state, service) => Some(service.clone()),

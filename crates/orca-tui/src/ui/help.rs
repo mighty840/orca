@@ -78,6 +78,10 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
         ),
         ("7", "Alerts view (AI alert conversations)"),
         (
+            "8",
+            "Cluster-token rotation: s start, f finish, F force finish (each asks y/N)",
+        ),
+        (
             "a / d / R (alerts)",
             "Show all incl. resolved / dismiss / resolve the selected alert",
         ),
@@ -110,7 +114,10 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
             "a / e / x",
             "Add / edit / delete webhook (Webhooks view; x asks y/N)",
         ),
-        ("/", "Filter services by name"),
+        (
+            "/",
+            "Filter services by name; search the log in the Logs view",
+        ),
         ("w", "Toggle word wrap (in logs)"),
     ] {
         lines.push(bind(k, d, ks, ds));
@@ -145,6 +152,11 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
         (":webhooks", "Open the webhooks dashboard"),
         (":networks", "Open the cluster networks view"),
         (":alerts", "Open the alerts view"),
+        (":token", "Open the cluster-token rotation view"),
+        (
+            ":token-rotate / :token-finish [--force]",
+            "Start or finish a rotation (asks y/N)",
+        ),
         (":reply <msg>", "Answer the AI in the open alert"),
         (":dismiss / :resolve", "Dismiss or resolve the open alert"),
         (

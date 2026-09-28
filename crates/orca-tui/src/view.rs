@@ -38,6 +38,8 @@ pub enum View {
     /// AI alert conversations (`/api/v1/alerts`). Acts as a list view; press
     /// Enter on a row to drill down to [`View::AlertDetail`].
     Alerts,
+    /// Cluster-token rotation: start, per-agent progress, finish (#265).
+    Token,
     /// Drill-down: the full transcript for one alert conversation.
     AlertDetail {
         id: String,

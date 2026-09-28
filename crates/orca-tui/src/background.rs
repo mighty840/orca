@@ -41,6 +41,8 @@ pub(crate) enum Fetched {
         cluster: anyhow::Result<ClusterInfo>,
         /// `None` when alerts weren't asked for (no alert view open).
         alerts: Option<anyhow::Result<Option<Vec<AlertConversation>>>>,
+        /// `None` unless the Token view is open.
+        rotation: Option<anyhow::Result<crate::api::RotationStatus>>,
     },
     Logs {
         service: String,
@@ -95,6 +97,7 @@ impl Background {
 pub(crate) fn spawn_poll(client: &ApiClient, state: &mut AppState) {
     let alerts_all = matches!(state.view, View::Alerts | View::AlertDetail { .. })
         .then_some(state.alerts_show_all);
+    let rotation = matches!(state.view, View::Token);
     let Some(tx) = state.bg.start(Kind::Poll) else {
         return;
     };
@@ -106,12 +109,19 @@ pub(crate) fn spawn_poll(client: &ApiClient, state: &mut AppState) {
                 None => None,
             }
         };
-        let (status, cluster, alerts) =
-            tokio::join!(client.status(), client.cluster_info(), alerts);
+        let rotation = async {
+            match rotation {
+                true => Some(client.token_rotation().await),
+                false => None,
+            }
+        };
+        let (status, cluster, alerts, rotation) =
+            tokio::join!(client.status(), client.cluster_info(), alerts, rotation);
         let _ = tx.send(Fetched::Poll {
             status,
             cluster,
             alerts,
+            rotation,
         });
     });
 }
@@ -153,7 +163,11 @@ pub(crate) fn apply(state: &mut AppState, fetched: Fetched) {
             status,
             cluster,
             alerts,
+            rotation,
         } => {
+            if let Some(result) = rotation {
+                crate::token_actions::apply(state, result, None);
+            }
             state.bg.in_flight.remove(&Kind::Poll);
             match status {
                 Ok(resp) => {

@@ -14,6 +14,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `:redeploy`, `:rollback` and `:promote` take a service name. Redeploy,
   rollback and promote ask y/N. Before, `x` could pause a service and
   nothing in the TUI could bring it back.
+- **TUI: cluster-token rotation (#265).** Key `8` or `:token` opens a view
+  of the rotation and each agent's progress, refreshed every 2 s. `s`
+  starts a rotation, `f` finishes it and `F` forces the finish, each after
+  y/N; `:token-rotate` and `:token-finish [--force]` do the same. A refused
+  finish shows the master's reason. A TUI that authenticates with
+  `~/.orca/cluster.token` re-reads it after starting or finishing, so it
+  isn't locked out when the old token is retired.
+- **TUI: `/` searches the Logs view (#265)**, showing matching lines with
+  their original line numbers; Esc clears it.
 - **TUI: logs follow live (#265).** The Logs view polled the last 50 lines
   every 2 s and replaced them, so older lines vanished and bursts were
   missed. It now streams the log and keeps the last 5000 lines; scrolling
