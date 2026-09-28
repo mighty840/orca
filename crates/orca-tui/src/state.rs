@@ -28,6 +28,11 @@ pub struct AppState {
     pub filter: String,
     /// `/` search in the Logs view: shows matching lines only (#265).
     pub log_search: String,
+    /// `/` filters of the Secrets, Webhooks and Alerts lists (#265). The
+    /// selection and every action index the filtered list.
+    pub secret_filter: String,
+    pub webhook_filter: String,
+    pub alert_filter: String,
     pub input_mode: InputMode,
     pub command_input: String,
     pub status_msg: Option<String>,
@@ -176,6 +181,9 @@ impl AppState {
             should_quit: false,
             filter: String::new(),
             log_search: String::new(),
+            secret_filter: String::new(),
+            webhook_filter: String::new(),
+            alert_filter: String::new(),
             input_mode: InputMode::Normal,
             command_input: String::new(),
             status_msg: None,

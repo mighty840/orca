@@ -39,8 +39,7 @@ pub(crate) fn cycle_scope_filter(state: &mut AppState) {
         .as_deref()
         .unwrap_or("all scopes");
     state.flash(format!("Secrets filter: {shown}"));
-    let rows =
-        crate::ui::secrets::flatten(&state.secrets_usage, state.secrets_scope_filter.as_deref());
+    let rows = crate::ui::secrets::rows(state);
     state.selected_secret = crate::ui::secrets::selectable_indices(&rows)
         .first()
         .copied()
@@ -49,8 +48,7 @@ pub(crate) fn cycle_scope_filter(state: &mut AppState) {
 
 /// Clamp `selected_secret` into the current selectable set.
 pub(crate) fn clamp_secret_selection(state: &mut AppState) {
-    let rows =
-        crate::ui::secrets::flatten(&state.secrets_usage, state.secrets_scope_filter.as_deref());
+    let rows = crate::ui::secrets::rows(state);
     let sel = crate::ui::secrets::selectable_indices(&rows);
     if !sel.contains(&state.selected_secret) {
         state.selected_secret = sel.last().copied().unwrap_or(0);
@@ -60,24 +58,21 @@ pub(crate) fn clamp_secret_selection(state: &mut AppState) {
 /// j/k/g/G navigation over the flattened secrets list — skips group
 /// headers, honors the active scope filter.
 pub(crate) fn secret_nav_first(state: &mut AppState) {
-    let rows =
-        crate::ui::secrets::flatten(&state.secrets_usage, state.secrets_scope_filter.as_deref());
+    let rows = crate::ui::secrets::rows(state);
     if let Some(&i) = crate::ui::secrets::selectable_indices(&rows).first() {
         state.selected_secret = i;
     }
 }
 
 pub(crate) fn secret_nav_last(state: &mut AppState) {
-    let rows =
-        crate::ui::secrets::flatten(&state.secrets_usage, state.secrets_scope_filter.as_deref());
+    let rows = crate::ui::secrets::rows(state);
     if let Some(&i) = crate::ui::secrets::selectable_indices(&rows).last() {
         state.selected_secret = i;
     }
 }
 
 pub(crate) fn secret_nav_next(state: &mut AppState) {
-    let rows =
-        crate::ui::secrets::flatten(&state.secrets_usage, state.secrets_scope_filter.as_deref());
+    let rows = crate::ui::secrets::rows(state);
     let sel = crate::ui::secrets::selectable_indices(&rows);
     if let Some(next) = sel.iter().find(|&&i| i > state.selected_secret) {
         state.selected_secret = *next;
@@ -85,8 +80,7 @@ pub(crate) fn secret_nav_next(state: &mut AppState) {
 }
 
 pub(crate) fn secret_nav_prev(state: &mut AppState) {
-    let rows =
-        crate::ui::secrets::flatten(&state.secrets_usage, state.secrets_scope_filter.as_deref());
+    let rows = crate::ui::secrets::rows(state);
     let sel = crate::ui::secrets::selectable_indices(&rows);
     if let Some(prev) = sel.iter().rev().find(|&&i| i < state.selected_secret) {
         state.selected_secret = *prev;

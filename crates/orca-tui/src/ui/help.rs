@@ -116,7 +116,7 @@ pub fn draw_help(f: &mut Frame, area: Rect, state: &AppState) {
         ),
         (
             "/",
-            "Filter services by name; search the log in the Logs view",
+            "Filter the list (Services, Secrets, Webhooks, Alerts) or search the log (Logs)",
         ),
         ("w", "Toggle word wrap (in logs)"),
     ] {

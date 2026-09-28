@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   finish shows the master's reason. A TUI that authenticates with
   `~/.orca/cluster.token` re-reads it after starting or finishing, so it
   isn't locked out when the old token is retired.
+- **TUI: `/` filters the Secrets, Webhooks and Alerts lists (#265)**, not
+  only Services. Each list keeps its own filter; the title shows "n of m
+  matching". The selection and every action on the list (Enter, `e`, `x`,
+  dismiss, resolve) use the filtered rows, so a filter can't make an action
+  hit a different row.
 - **TUI: `/` searches the Logs view (#265)**, showing matching lines with
   their original line numbers; Esc clears it.
 - **TUI: logs follow live (#265).** The Logs view polled the last 50 lines

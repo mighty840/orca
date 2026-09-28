@@ -26,9 +26,9 @@ pub fn draw_webhooks(f: &mut Frame, area: Rect, state: &AppState) {
     ])
     .style(Style::default().add_modifier(Modifier::BOLD));
 
-    let (first, count) = super::table::window(state.selected_webhook, area, state.webhooks.len());
-    let rows: Vec<Row> = state
-        .webhooks
+    let visible = state.visible_webhooks();
+    let (first, count) = super::table::window(state.selected_webhook, area, visible.len());
+    let rows: Vec<Row> = visible
         .iter()
         .enumerate()
         .skip(first)
@@ -58,7 +58,14 @@ pub fn draw_webhooks(f: &mut Frame, area: Rect, state: &AppState) {
     ];
 
     let block = Block::default()
-        .title(format!(" Webhooks ({}) ", state.webhooks.len()))
+        .title(format!(
+            " Webhooks ({}) ",
+            super::table::filtered_count(
+                visible.len(),
+                state.webhooks.len(),
+                &state.webhook_filter
+            )
+        ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Cyan));
 

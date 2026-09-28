@@ -35,7 +35,7 @@ pub async fn handle_normal_key(
             state.command_input.clear();
         }
         KeyCode::Char('/') => {
-            if matches!(state.view, View::Services | View::Logs { .. }) {
+            if crate::input_keys::filter_text(state).is_some() {
                 state.input_mode = InputMode::Filter;
             }
         }
@@ -188,10 +188,13 @@ pub async fn handle_normal_key(
         // `e` edits — opens command mode pre-filled with the current row's
         // identity so the user only types the changed field(s).
         KeyCode::Char('e') if matches!(state.view, View::Webhooks) => {
-            if let Some(w) = state.webhooks.get(state.selected_webhook) {
+            let edit = state
+                .visible_webhooks()
+                .get(state.selected_webhook)
+                .map(|w| format!("webhook-edit {} {} {} ", w.repo, w.branch, w.service_name));
+            if let Some(cmd) = edit {
                 state.input_mode = InputMode::Command;
-                state.command_input =
-                    format!("webhook-edit {} {} {} ", w.repo, w.branch, w.service_name);
+                state.command_input = cmd;
             }
         }
         // `e` edits the selected secret: `:set` pre-filled with the full
@@ -234,8 +237,8 @@ pub async fn handle_normal_key(
         // `x` arms a y/N confirmation everywhere (#262): it stops, deletes
         // or drains, and the armed action names its target.
         KeyCode::Char('x') if matches!(state.view, View::Webhooks) => {
-            if let Some(w) = state.webhooks.get(state.selected_webhook) {
-                let service = w.service_name.clone();
+            let service = selected_webhook_service(state);
+            if let Some(service) = service {
                 crate::confirm::arm(state, Confirm::DeleteWebhook(service));
             }
         }
@@ -306,8 +309,7 @@ async fn handle_enter(state: &mut AppState, client: &ApiClient) {
             }
         }
         View::Webhooks => {
-            if let Some(w) = state.webhooks.get(state.selected_webhook) {
-                let service = w.service_name.clone();
+            if let Some(service) = selected_webhook_service(state) {
                 super::refresh_webhook_invocations(client, state, &service).await;
                 state.push_view(View::WebhookInvocations { service });
             }
@@ -319,8 +321,7 @@ async fn handle_enter(state: &mut AppState, client: &ApiClient) {
             }
         }
         View::Alerts => {
-            if let Some(a) = state.alerts.get(state.selected_alert) {
-                let id = a.id.to_string();
+            if let Some(id) = crate::ui::alerts::current_alert_id(state) {
                 state.alert_detail_scroll = 0;
                 state.push_view(View::AlertDetail { id });
             }
@@ -362,4 +363,12 @@ fn handle_project_filter(state: &mut AppState) {
             state.flash("Service has no project".into());
         }
     }
+}
+
+/// The service of the selected webhook row, in the filtered list.
+fn selected_webhook_service(state: &AppState) -> Option<String> {
+    state
+        .visible_webhooks()
+        .get(state.selected_webhook)
+        .map(|w| w.service_name.clone())
 }

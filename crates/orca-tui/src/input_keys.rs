@@ -6,13 +6,33 @@ use crossterm::event::KeyCode;
 use crate::api::ApiClient;
 use crate::state::{AppState, InputMode, View};
 
+/// The text `/` edits in the current view, if the view has one.
+pub fn filter_text(state: &mut AppState) -> Option<&mut String> {
+    match state.view {
+        View::Services => Some(&mut state.filter),
+        View::Logs { .. } => Some(&mut state.log_search),
+        View::Secrets => Some(&mut state.secret_filter),
+        View::Webhooks => Some(&mut state.webhook_filter),
+        View::Alerts => Some(&mut state.alert_filter),
+        _ => None,
+    }
+}
+
+/// Read-only [`filter_text`], for the command bar.
+pub fn filter_value(state: &AppState) -> &str {
+    match state.view {
+        View::Logs { .. } => &state.log_search,
+        View::Secrets => &state.secret_filter,
+        View::Webhooks => &state.webhook_filter,
+        View::Alerts => &state.alert_filter,
+        _ => &state.filter,
+    }
+}
+
 pub fn handle_filter_key(state: &mut AppState, code: KeyCode) {
-    // In the Logs view `/` searches the log; elsewhere it filters services.
-    let logs = matches!(state.view, View::Logs { .. });
-    let text = if logs {
-        &mut state.log_search
-    } else {
-        &mut state.filter
+    let Some(text) = filter_text(state) else {
+        state.input_mode = InputMode::Normal;
+        return;
     };
     match code {
         KeyCode::Esc => {
@@ -26,8 +46,13 @@ pub fn handle_filter_key(state: &mut AppState, code: KeyCode) {
         KeyCode::Char(c) => text.push(c),
         _ => return,
     }
-    if !logs {
-        state.selected_service = 0;
+    // The list changed under the cursor: start from its first row.
+    match state.view {
+        View::Services => state.selected_service = 0,
+        View::Secrets => crate::secrets_actions::secret_nav_first(state),
+        View::Webhooks => state.selected_webhook = 0,
+        View::Alerts => state.selected_alert = 0,
+        _ => {}
     }
 }
 

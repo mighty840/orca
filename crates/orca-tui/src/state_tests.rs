@@ -90,3 +90,48 @@ fn the_node_selection_follows_its_node() {
     state.update_cluster(cluster(&[1]));
     assert_eq!(state.selected_node, 0);
 }
+
+fn webhook(repo: &str, service: &str) -> crate::api::WebhookEntry {
+    serde_json::from_value(serde_json::json!({
+        "repo": repo,
+        "branch": "main",
+        "service_name": service,
+    }))
+    .expect("webhook entry")
+}
+
+#[test]
+fn a_webhook_filter_narrows_the_list_the_actions_index() {
+    // `x` deletes `visible_webhooks()[selected_webhook]`: with a filter set,
+    // row 0 must be the first match, not the first webhook overall.
+    let mut state = AppState::new();
+    state.webhooks = vec![
+        webhook("org/site", "site"),
+        webhook("org/api", "api"),
+        webhook("org/api-docs", "docs"),
+    ];
+    state.webhook_filter = "API".into();
+    let shown: Vec<_> = state
+        .visible_webhooks()
+        .iter()
+        .map(|w| w.service_name.clone())
+        .collect();
+    assert_eq!(shown, ["api", "docs"]);
+    state.webhook_filter.clear();
+    assert_eq!(state.visible_webhooks().len(), 3);
+}
+
+#[test]
+fn slash_edits_the_current_views_own_filter() {
+    use crossterm::event::KeyCode;
+    let mut state = AppState::new();
+    state.view = View::Webhooks;
+    state.selected_webhook = 4;
+    crate::input_keys::handle_filter_key(&mut state, KeyCode::Char('a'));
+    assert_eq!(state.webhook_filter, "a");
+    assert!(state.filter.is_empty(), "the services filter is untouched");
+    assert_eq!(
+        state.selected_webhook, 0,
+        "the cursor starts at the first match"
+    );
+}

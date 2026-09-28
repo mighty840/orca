@@ -226,11 +226,7 @@ fn draw_command_bar(f: &mut Frame, area: Rect, state: &AppState) {
     } else {
         Line::from(vec![
             Span::styled(" /", Style::default().fg(Color::Yellow)),
-            Span::raw(if matches!(state.view, View::Logs { .. }) {
-                state.log_search.clone()
-            } else {
-                state.filter.clone()
-            }),
+            Span::raw(crate::input_keys::filter_value(state).to_string()),
             Span::styled("_", Style::default().fg(Color::Yellow)),
             Span::styled("  (Esc to clear)", Style::default().fg(Color::DarkGray)),
         ])
@@ -315,18 +311,20 @@ fn draw_footer(f: &mut Frame, area: Rect, state: &AppState) {
         View::Detail { .. } => "Esc:back s:scale x:stop u:start d:redeploy l:logs :sh ?:help",
         View::Help => "Esc:back j/k:scroll",
         View::Secrets => {
-            "Esc:back j/k:select ↵:refs a:add e:edit x:delete p:scope r:refresh ?:help"
+            "Esc:back j/k:select /filter ↵:refs a:add e:edit x:delete p:scope r:refresh ?:help"
         }
         View::SecretRefs { .. } => "Esc:back r:refresh ?:help",
         View::Networks => "Esc:back r:refresh ?:help",
         View::Backups => "Esc:back j/k:select ↵:snapshots r:refresh b:trigger ?:help",
         View::BackupSnapshots { .. } => "Esc:back j/k:select ?:help",
         View::Webhooks => {
-            "Esc:back j/k:select ↵:invocations a:add e:edit x:delete r:refresh ?:help"
+            "Esc:back j/k:select /filter ↵:invocations a:add e:edit x:delete r:refresh ?:help"
         }
         View::WebhookInvocations { .. } => "Esc:back r:refresh ?:help",
         View::Chat => "type:ask Enter:send PgUp/PgDn:scroll /cmd:jump 1-7:views Esc:clear ?:help",
-        View::Alerts => "Esc:back j/k:select ↵:detail a:all r:refresh d:dismiss R:resolve ?:help",
+        View::Alerts => {
+            "Esc:back j/k:select /filter ↵:detail a:all r:refresh d:dismiss R:resolve ?:help"
+        }
         View::AlertDetail { .. } => "Esc:back j/k:scroll d:dismiss R:resolve :reply ?:help",
         View::Token => "Esc:back s:start rotation f:finish F:force finish r:refresh ?:help",
     };
