@@ -244,35 +244,36 @@ fn format_relative_heartbeat(ts: &str) -> (String, bool) {
     }
 }
 
-/// Minimal ISO 8601 parser -> unix seconds.
+/// RFC 3339 heartbeat timestamp -> unix seconds. The hand-rolled parser
+/// this replaces indexed a month table by the parsed month and panicked on
+/// month 13 or day 0 (#264).
 fn parse_iso_timestamp(ts: &str) -> Option<u64> {
-    let ts = ts.trim_end_matches('Z').trim();
-    if ts.len() < 19 {
-        return None;
-    }
-    let year: u64 = ts[0..4].parse().ok()?;
-    let month: u64 = ts[5..7].parse().ok()?;
-    let day: u64 = ts[8..10].parse().ok()?;
-    let hour: u64 = ts[11..13].parse().ok()?;
-    let min: u64 = ts[14..16].parse().ok()?;
-    let sec: u64 = ts[17..19].parse().ok()?;
-
-    let mut days: u64 = 0;
-    for y in 1970..year {
-        days += if is_leap(y) { 366 } else { 365 };
-    }
-    let month_days = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    for m in 1..month {
-        days += month_days[m as usize];
-        if m == 2 && is_leap(year) {
-            days += 1;
-        }
-    }
-    days += day - 1;
-
-    Some(days * 86400 + hour * 3600 + min * 60 + sec)
+    let t = chrono::DateTime::parse_from_rfc3339(ts.trim()).ok()?;
+    u64::try_from(t.timestamp()).ok()
 }
 
-fn is_leap(y: u64) -> bool {
-    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
+#[cfg(test)]
+mod tests {
+    use super::parse_iso_timestamp;
+
+    #[test]
+    fn heartbeat_timestamps_parse() {
+        assert_eq!(parse_iso_timestamp("1970-01-02T00:00:00Z"), Some(86_400));
+        assert!(parse_iso_timestamp("2026-09-28T07:14:03.123456789Z").is_some());
+    }
+
+    #[test]
+    fn malformed_timestamps_are_none_not_a_panic() {
+        // The old parser indexed a month table with month 13 and did
+        // `day - 1` on day 0.
+        for ts in [
+            "2026-13-01T00:00:00Z",
+            "2026-01-00T00:00:00Z",
+            "garbage",
+            "",
+            "2026-é1-01T00:00:00Z",
+        ] {
+            assert_eq!(parse_iso_timestamp(ts), None, "{ts}");
+        }
+    }
 }

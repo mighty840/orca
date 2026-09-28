@@ -26,10 +26,13 @@ pub fn draw_webhooks(f: &mut Frame, area: Rect, state: &AppState) {
     ])
     .style(Style::default().add_modifier(Modifier::BOLD));
 
+    let (first, count) = super::table::window(state.selected_webhook, area, state.webhooks.len());
     let rows: Vec<Row> = state
         .webhooks
         .iter()
         .enumerate()
+        .skip(first)
+        .take(count)
         .map(|(i, w)| {
             let selected = i == state.selected_webhook;
             let style = if selected {

@@ -201,8 +201,17 @@ fn build_title(state: &AppState, count: usize) -> String {
     }
 }
 
+/// The rows of a bordered table with a header in `area` that keep
+/// `selected` on screen: (first row, row count). Without it a table draws
+/// from the top and the cursor moves off-screen (#264).
+pub(crate) fn window(selected: usize, area: ratatui::layout::Rect, total: usize) -> (usize, usize) {
+    // Two border rows and the header row.
+    let visible = (area.height as usize).saturating_sub(3).max(1);
+    (compute_scroll(selected, visible, total), visible)
+}
+
 /// Compute the scroll offset to keep `selected` visible within `visible` rows.
-fn compute_scroll(selected: usize, visible: usize, total: usize) -> usize {
+pub(crate) fn compute_scroll(selected: usize, visible: usize, total: usize) -> usize {
     if total <= visible {
         return 0;
     }

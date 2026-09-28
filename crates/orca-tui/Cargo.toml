@@ -15,7 +15,8 @@ path = "src/lib.rs"
 orca-core = { workspace = true }
 tokio = { workspace = true }
 anyhow = { workspace = true }
-ratatui = { workspace = true }
+# line_count: scroll by wrapped rows, not source lines (#264).
+ratatui = { workspace = true, features = ["unstable-rendered-line-info"] }
 crossterm = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

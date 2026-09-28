@@ -37,6 +37,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Stop failed: ..." was gone before it could be read. An error now stays
   10 s; a connection error clears as soon as the master answers again.
   `cluster/info` failures are shown instead of dropped.
+- **TUI: smaller fixes (#264).**
+  - The Nodes view could crash on a malformed heartbeat time: the
+    hand-rolled parser indexed a month table by the parsed month. It uses
+    chrono now.
+  - `:set KEY value` collapsed spaces and tabs inside the value, and showed
+    the value in plain text in the command bar. The value is kept as typed
+    and shown as bullets.
+  - The Alerts, Webhooks, Backups and snapshot tables now scroll with the
+    selection; the cursor used to move off-screen.
+  - Chat and alert detail count wrapped rows, so a long reply's newest text
+    is no longer below the bottom edge, and `G` stops at the last page.
+  - Help lists `0`, `7`, the alert keys, `:sh`, `:logs`, `:alerts`,
+    `:reply`, `:dismiss` and `:resolve`, scrolls with `j`/`k`, and marks
+    what asks y/N. Footers show the real view keys. `/alerts` works in chat;
+    the chat hint no longer promises Tab.
+  - The Detail view's info box grows to show the whole failure, and its log
+    tail refreshes like the Logs view.
 
 ### Changed
 

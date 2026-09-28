@@ -41,7 +41,7 @@ pub async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str
             state.selected_secret = 0;
             state.push_view(View::Secrets);
         }
-        Some("set") => cmd_secret_set(state, client, &parts).await,
+        Some("set") => cmd_secret_set(state, client, cmd).await,
         Some("rm") => cmd_secret_rm(state, &parts),
         Some("webhooks") => {
             crate::refresh_webhooks(client, state).await;
@@ -112,15 +112,12 @@ async fn cmd_alert_action(state: &mut AppState, client: &ApiClient, action: &str
     }
 }
 
-async fn cmd_secret_set(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
-    // `:set KEY VALUE...` — value may contain spaces, so re-join the tail.
-    if parts.len() < 3 {
+async fn cmd_secret_set(state: &mut AppState, client: &ApiClient, cmd: &str) {
+    let Some((key, value)) = split_set(cmd) else {
         state.flash("Usage: :set <KEY> <value...>".into());
         return;
-    }
-    let key = parts[1];
-    let value = parts[2..].join(" ");
-    match client.set_secret(key, &value).await {
+    };
+    match client.set_secret(key, value).await {
         Ok(()) => {
             state.flash(format!("Secret {key} set"));
             crate::refresh_secrets_usage(client, state).await;
@@ -391,9 +388,30 @@ fn build_webhook_body(
     body
 }
 
+/// `set KEY VALUE...` -> (KEY, VALUE) with the value exactly as typed after
+/// the single separating space. Splitting on whitespace and re-joining
+/// collapsed runs of spaces and tabs inside secret values (#264).
+pub(crate) fn split_set(cmd: &str) -> Option<(&str, &str)> {
+    let rest = cmd.trim_start().strip_prefix("set")?;
+    let rest = rest.strip_prefix(char::is_whitespace)?.trim_start();
+    let (key, value) = rest.split_once(char::is_whitespace)?;
+    let value = value.strip_suffix('\n').unwrap_or(value);
+    (!key.is_empty() && !value.is_empty()).then_some((key, value))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn set_keeps_the_value_exactly_as_typed() {
+        // Splitting on whitespace and re-joining turned "a  b\tc" into "a b c".
+        assert_eq!(split_set("set KEY a  b\tc"), Some(("KEY", "a  b\tc")));
+        assert_eq!(split_set("set KEY  lead"), Some(("KEY", " lead")));
+        assert_eq!(split_set("set KEY"), None);
+        assert_eq!(split_set("set KEY "), None);
+        assert_eq!(split_set("setx KEY v"), None);
+    }
 
     /// Positional args land in their expected fields; flags default to off.
     /// Locks in the on-wire field names since the server's `WebhookConfig`
