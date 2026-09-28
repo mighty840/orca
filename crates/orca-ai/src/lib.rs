@@ -1,3 +1,4 @@
+pub mod alert_prompt;
 pub mod backend;
 pub mod channels;
 pub(crate) mod command_parser;
@@ -6,3 +7,4 @@ pub mod conversation;
 pub mod monitor;
 mod monitor_plan;
 pub mod ops;
+pub mod redact;
