@@ -369,3 +369,7 @@ mod tests {
         assert_eq!(mask_secret_value("scale api 3"), "scale api 3");
     }
 }
+
+#[cfg(test)]
+#[path = "ui/render_tests.rs"]
+mod render_tests;

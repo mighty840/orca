@@ -50,6 +50,7 @@ pub fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
     let scroll = compute_scroll(selected_pos, visible_rows, display.len());
     let end = (scroll + visible_rows).min(display.len());
 
+    let cols = columns_for(area.width);
     let rows: Vec<Row> = display[scroll..end]
         .iter()
         .enumerate()
@@ -59,16 +60,25 @@ pub fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
                 DisplayRow::ProjectHeader { name, count } => {
                     let collapsed = state.collapsed_projects.contains(*name);
                     let glyph = if collapsed { "▶" } else { "▼" };
-                    Row::new(vec![
-                        format!("  {glyph} {name}"),
-                        format!("{count} services"),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                        String::new(),
-                    ])
+                    // Without a PROJECT column the count joins the name.
+                    let label = if cols.contains(&Col::Project) {
+                        format!("  {glyph} {name}")
+                    } else {
+                        format!("  {glyph} {name} ({count})")
+                    };
+                    Row::new(pick(
+                        &cols,
+                        [
+                            label,
+                            format!("{count} services"),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                            String::new(),
+                        ],
+                    ))
                     .style(
                         Style::default()
                             .fg(Color::Yellow)
@@ -101,42 +111,34 @@ pub fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
                         Style::default().fg(s_color)
                     };
                     let pointer = if sel { ">" } else { " " };
-                    Row::new(vec![
-                        format!("{pointer}  {icon} {}", svc.name),
-                        project.to_string(),
-                        svc.image.clone(),
-                        svc.runtime.clone(),
-                        format!("{}/{}", svc.running_replicas, svc.desired_replicas),
-                        svc.status.clone(),
-                        node.to_string(),
-                        domain.to_string(),
-                    ])
+                    Row::new(pick(
+                        &cols,
+                        [
+                            format!("{pointer}  {icon} {}", svc.name),
+                            project.to_string(),
+                            svc.image.clone(),
+                            svc.runtime.clone(),
+                            format!("{}/{}", svc.running_replicas, svc.desired_replicas),
+                            svc.status.clone(),
+                            node.to_string(),
+                            domain.to_string(),
+                        ],
+                    ))
                     .style(style)
                 }
             }
         })
         .collect();
 
-    let header = Row::new(vec![
-        "  NAME", "PROJECT", "IMAGE", "RUNTIME", "REPLICAS", "STATUS", "NODE", "DOMAIN",
-    ])
-    .style(
-        Style::default()
-            .fg(Color::DarkGray)
-            .add_modifier(Modifier::BOLD),
-    )
-    .bottom_margin(0);
+    let header = Row::new(cols.iter().map(|c| c.spec().0))
+        .style(
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::BOLD),
+        )
+        .bottom_margin(0);
 
-    let widths = [
-        Constraint::Min(18),
-        Constraint::Min(12),
-        Constraint::Min(18),
-        Constraint::Length(10),
-        Constraint::Length(10),
-        Constraint::Length(10),
-        Constraint::Length(12),
-        Constraint::Min(14),
-    ];
+    let widths: Vec<Constraint> = cols.iter().map(|c| c.spec().1).collect();
 
     let scroll_indicator = if display.len() > visible_rows {
         format!(
@@ -157,6 +159,87 @@ pub fn draw_table(f: &mut Frame, area: Rect, state: &AppState) {
 
     let table = Table::new(rows, widths).header(header).block(block);
     f.render_widget(table, area);
+}
+
+/// A column of the services table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Col {
+    Name,
+    Project,
+    Image,
+    Runtime,
+    Replicas,
+    Status,
+    Node,
+    Domain,
+}
+
+/// All columns, in display order.
+const ALL_COLS: [Col; 8] = [
+    Col::Name,
+    Col::Project,
+    Col::Image,
+    Col::Runtime,
+    Col::Replicas,
+    Col::Status,
+    Col::Node,
+    Col::Domain,
+];
+
+/// Dropped first to last as the terminal narrows. NAME, REPLICAS and STATUS
+/// always stay; PROJECT goes early because the group headers show it.
+const DROP_ORDER: [Col; 5] = [
+    Col::Runtime,
+    Col::Project,
+    Col::Image,
+    Col::Domain,
+    Col::Node,
+];
+
+impl Col {
+    /// Header, width constraint, and the width it needs at least. Spare
+    /// width goes to the text columns, twice as much to NAME.
+    fn spec(self) -> (&'static str, Constraint, u16) {
+        match self {
+            Col::Name => ("  NAME", Constraint::Fill(2), 18),
+            Col::Project => ("PROJECT", Constraint::Fill(1), 12),
+            Col::Image => ("IMAGE", Constraint::Fill(1), 18),
+            Col::Runtime => ("RUNTIME", Constraint::Length(10), 10),
+            Col::Replicas => ("REPLICAS", Constraint::Length(9), 9),
+            Col::Status => ("STATUS", Constraint::Length(10), 10),
+            Col::Node => ("NODE", Constraint::Length(12), 12),
+            Col::Domain => ("DOMAIN", Constraint::Fill(1), 14),
+        }
+    }
+}
+
+/// The columns that fit `width` (the table's outer width). The full table
+/// needed ~113 columns; narrower terminals squeezed every column into
+/// unreadable slivers (#265).
+pub(crate) fn columns_for(width: u16) -> Vec<Col> {
+    let needed = |cols: &[Col]| -> u16 {
+        let min: u16 = cols.iter().map(|c| c.spec().2).sum();
+        // Borders, plus one space between columns.
+        min + 2 + cols.len().saturating_sub(1) as u16
+    };
+    let mut cols = ALL_COLS.to_vec();
+    for drop in DROP_ORDER {
+        if needed(&cols) <= width {
+            break;
+        }
+        cols.retain(|c| *c != drop);
+    }
+    cols
+}
+
+/// The cells of `cols`, from all eight in display order.
+fn pick(cols: &[Col], cells: [String; 8]) -> Vec<String> {
+    ALL_COLS
+        .iter()
+        .zip(cells)
+        .filter(|(c, _)| cols.contains(c))
+        .map(|(_, cell)| cell)
+        .collect()
 }
 
 /// Build the interleaved (project header, service row, project header, ...)
@@ -229,4 +312,34 @@ pub(crate) fn compute_scroll(selected: usize, visible: usize, total: usize) -> u
     }
     let ideal = selected.saturating_sub(visible / 2);
     ideal.min(total.saturating_sub(visible))
+}
+
+#[cfg(test)]
+mod column_tests {
+    use super::{Col, columns_for};
+
+    #[test]
+    fn a_wide_terminal_shows_every_column() {
+        assert_eq!(columns_for(112).len(), 8);
+    }
+
+    #[test]
+    fn columns_drop_in_order_as_it_narrows() {
+        use Col::*;
+        assert_eq!(
+            columns_for(111),
+            [Name, Project, Image, Replicas, Status, Node, Domain]
+        );
+        assert_eq!(
+            columns_for(100),
+            [Name, Image, Replicas, Status, Node, Domain]
+        );
+        assert_eq!(columns_for(80), [Name, Replicas, Status, Node, Domain]);
+        assert_eq!(columns_for(60), [Name, Replicas, Status, Node]);
+    }
+
+    #[test]
+    fn the_essentials_stay_on_a_tiny_terminal() {
+        assert_eq!(columns_for(20), vec![Col::Name, Col::Replicas, Col::Status]);
+    }
 }
