@@ -12,6 +12,24 @@ pub(crate) fn extract_command(content: &str) -> (Option<String>, String) {
     (first_command(content), content.to_string())
 }
 
+/// Remove citation markers like `【source】` or `【4†L1-L3】` that some
+/// models (gpt-oss) emit. They point at nothing the reader can see.
+pub(crate) fn strip_citations(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find('【') {
+        match rest[start..].find('】') {
+            Some(len) => {
+                out.push_str(&rest[..start]);
+                rest = &rest[start + len + '】'.len_utf8()..];
+            }
+            None => break,
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// The text from a "Fix" heading up to the next bold or `#` heading.
 fn fix_section(content: &str) -> Option<&str> {
     let start = content.find("**Fix**").or_else(|| content.find("## Fix"))?;
@@ -69,6 +87,15 @@ mod tests {
             **Verify**: `orca status`";
         let (cmd, _content) = extract_command(response);
         assert_eq!(cmd.unwrap(), "orca deploy api");
+    }
+
+    #[test]
+    fn test_strip_citations() {
+        assert_eq!(
+            strip_citations("db is down【source】.\nsee logs【4†L1-L3】 now"),
+            "db is down.\nsee logs now"
+        );
+        assert_eq!(strip_citations("unclosed 【 stays"), "unclosed 【 stays");
     }
 
     #[test]
