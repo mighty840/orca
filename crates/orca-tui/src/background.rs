@@ -17,7 +17,7 @@ use crate::api::{
 use crate::state::{AppState, View};
 
 /// Tail length for log views.
-const LOG_TAIL: u64 = 50;
+pub(crate) const LOG_TAIL: u64 = 200;
 
 /// An error stays in the footer this long, then clears. A failed poll
 /// replaces it, and a successful one clears a connection error at once.
@@ -47,15 +47,26 @@ pub(crate) enum Fetched {
         result: anyhow::Result<String>,
     },
     Backups(anyhow::Result<ClusterBackupsResponse>),
+    /// New text from a followed log (`crate::log_follow`).
+    LogChunk {
+        service: String,
+        text: String,
+    },
+    /// A followed log ended; `error` when it never started.
+    FollowEnded {
+        service: String,
+        error: Option<String>,
+    },
 }
 
 /// Channel and bookkeeping for background fetches; lives on `AppState`.
 pub struct Background {
-    tx: UnboundedSender<Fetched>,
+    pub(crate) tx: UnboundedSender<Fetched>,
     rx: UnboundedReceiver<Fetched>,
     in_flight: HashSet<Kind>,
     /// The error on screen and when it appeared, to expire it.
     shown_error: Option<(String, Instant)>,
+    pub(crate) follow: crate::log_follow::FollowState,
 }
 
 impl Default for Background {
@@ -66,6 +77,7 @@ impl Default for Background {
             rx,
             in_flight: HashSet::new(),
             shown_error: None,
+            follow: Default::default(),
         }
     }
 }
@@ -171,8 +183,13 @@ pub(crate) fn apply(state: &mut AppState, fetched: Fetched) {
         Fetched::Logs { service, result } => {
             state.bg.in_flight.remove(&Kind::Logs(service.clone()));
             // Drop a tail for a service the operator has since left.
+            // Also drop a polled tail while the log is followed live: it
+            // would replace what the stream appended.
             let showing = match &state.view {
-                View::Logs { service: s } | View::Detail { service: s } => s == &service,
+                View::Logs { service: s } => {
+                    s == &service && !crate::log_follow::is_followed(state, s)
+                }
+                View::Detail { service: s } => s == &service,
                 _ => false,
             };
             if showing {
@@ -185,6 +202,12 @@ pub(crate) fn apply(state: &mut AppState, fetched: Fetched) {
         Fetched::Backups(result) => {
             state.bg.in_flight.remove(&Kind::Backups);
             crate::apply_backups(state, result);
+        }
+        Fetched::LogChunk { service, text } => {
+            crate::log_follow::apply_chunk(state, &service, &text)
+        }
+        Fetched::FollowEnded { service, error } => {
+            crate::log_follow::apply_ended(state, &service, error)
         }
     }
 }

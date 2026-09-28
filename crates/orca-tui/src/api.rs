@@ -24,6 +24,9 @@ pub use orca_core::types::{AlertConversation, AlertSender, AlertSeverity, AlertS
 pub struct ApiClient {
     base_url: String,
     client: reqwest::Client,
+    /// For long-lived log streams: no overall timeout, which would cut a
+    /// followed log off after 10 s.
+    stream_client: reqwest::Client,
     token: Option<String>,
 }
 
@@ -150,9 +153,15 @@ impl ApiClient {
             .timeout(std::time::Duration::from_secs(10))
             .build()
             .expect("build reqwest client");
+        let stream_client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(3))
+            .tcp_keepalive(std::time::Duration::from_secs(30))
+            .build()
+            .expect("build reqwest stream client");
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             client,
+            stream_client,
             token,
         }
     }
@@ -208,6 +217,20 @@ impl ApiClient {
             .await?
             .error_for_status()?;
         Ok(resp.text().await?)
+    }
+
+    /// Follow a service's logs: the response body grows as the service
+    /// writes. For a service on an agent the master answers with one batch
+    /// and closes, so the caller falls back to polling when the body ends.
+    pub async fn logs_follow(&self, service: &str, tail: u64) -> anyhow::Result<reqwest::Response> {
+        Ok(self
+            .auth(self.stream_client.get(format!(
+                "{}/api/v1/services/{service}/logs?tail={tail}&follow=true",
+                self.base_url
+            )))
+            .send()
+            .await?
+            .error_for_status()?)
     }
 
     pub async fn stop(&self, service: &str) -> anyhow::Result<()> {

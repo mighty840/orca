@@ -14,7 +14,12 @@ pub fn draw_logs(f: &mut Frame, area: Rect, state: &AppState, service: &str) {
     let total = log_lines.len();
     let wrap_indicator = if state.word_wrap { " [wrap]" } else { "" };
 
-    let title = format!(" Logs: {service} ({total} lines){wrap_indicator} ");
+    let mode = if crate::log_follow::is_followed(state, service) {
+        " [live]"
+    } else {
+        " [polling]"
+    };
+    let title = format!(" Logs: {service} ({total} lines){mode}{wrap_indicator} ");
 
     let block = Block::default()
         .title(title)
