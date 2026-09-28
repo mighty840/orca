@@ -31,13 +31,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     passwords, and long opaque tokens. Digests and hashes are kept.
   - The command list in the prompt had `orca scale <service> --replicas N`,
     which fails; it is `orca scale <service> <N>`. `orca start` is listed.
+  - The prompt lists the service.toml keys a fix may use. Without them the
+    model invented `ports = [...]`, `env = ["K=V"]`, and collector settings
+    as service keys, and "moved" a service by scaling it to 0 and back.
+  - Citation markers some models emit (`【source】`) are removed.
 - **`examples/alert_eval` scores diagnoses against a real model.** Eight
   scenarios (OOM, image tag typo, crash loop on a missing variable, a failed
   database behind a failing service, a port clash, an unreachable agent,
   external API timeouts, a deploy in progress) run against any
   OpenAI-compatible endpoint set in `ORCA_AI_ENDPOINT` and `ORCA_AI_MODEL`.
-  `--old` sends the previous prompt for comparison. A test checks that each
-  scenario's evidence reaches the prompt, without a model.
+  `--old` sends the previous prompt for comparison. Against gpt-oss-120b the
+  mean score went from 0.14 to 0.86 before the service.toml reference. A
+  test checks that each scenario's evidence reaches the prompt, without a
+  model.
 
 ## [0.3.0-rc.5] - 2026-09-28
 

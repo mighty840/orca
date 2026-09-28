@@ -126,7 +126,7 @@ impl<B: LlmBackend> ConversationEngine<B> {
         };
         let (state, second) = match diagnosis {
             Ok(text) => {
-                let (suggested_command, content) = extract_command(&text);
+                let (suggested_command, content) = extract_command(&strip_citations(&text));
                 let state = if suggested_command.is_some() {
                     AlertState::AwaitingAction
                 } else {
@@ -306,7 +306,7 @@ impl<B: LlmBackend> ConversationEngine<B> {
         }
 
         let response = self.backend.chat(&messages).await?;
-        let (suggested_command, content) = extract_command(&response.content);
+        let (suggested_command, content) = extract_command(&strip_citations(&response.content));
 
         if suggested_command.is_some() {
             conv.state = AlertState::AwaitingAction;
@@ -388,4 +388,4 @@ impl<B: LlmBackend> ConversationEngine<B> {
     }
 }
 
-use crate::command_parser::extract_command;
+use crate::command_parser::{extract_command, strip_citations};

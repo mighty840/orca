@@ -17,10 +17,13 @@ pub struct Scenario {
     pub ctx: ClusterContext,
     /// Must appear in the prompt: the evidence the diagnosis depends on.
     pub evidence: &'static [&'static str],
-    /// A good answer mentions each of these (case-insensitive).
+    /// A good answer mentions each of these (case-insensitive); `a|b`
+    /// accepts either.
     pub answer_keywords: &'static [&'static str],
     /// A good answer mentions none of these.
     pub answer_forbidden: &'static [&'static str],
+    /// The right answer to "Resolves on its own?", when there is one.
+    pub self_resolving: Option<bool>,
 }
 
 const MASTER: &str = "46.225.100.82";
@@ -162,7 +165,8 @@ fn oom() -> Scenario {
             "Connection refused (signoz-clickhouse:9000)",
         ],
         answer_keywords: &["137", "memory", "512"],
-        answer_forbidden: &["orca service", "--replicas"],
+        answer_forbidden: &["orca service", "--replicas", "memory_limiter ="],
+        self_resolving: Some(false),
     }
 }
 
@@ -199,6 +203,7 @@ fn image_typo() -> Scenario {
         ],
         answer_keywords: &["v1.2.30", "v1.2.3", "tag"],
         answer_forbidden: &["orca service"],
+        self_resolving: Some(false),
     }
 }
 
@@ -239,8 +244,9 @@ fn missing_env() -> Scenario {
             "exit code: 1",
             "2026.09.20",
         ],
-        answer_keywords: &["DATABASE_URL", "rollback"],
-        answer_forbidden: &["memory", "orca service"],
+        answer_keywords: &["DATABASE_URL", "rollback|2026.09.20"],
+        answer_forbidden: &["memory", "orca service", "env = ["],
+        self_resolving: Some(false),
     }
 }
 
@@ -300,6 +306,7 @@ fn db_down() -> Scenario {
         ],
         answer_keywords: &["breakpilot-db"],
         answer_forbidden: &["orca service"],
+        self_resolving: Some(false),
     }
 }
 
@@ -330,6 +337,7 @@ fn port_in_use() -> Scenario {
         evidence: &["port is already allocated", "0.0.0.0:3478"],
         answer_keywords: &["3478"],
         answer_forbidden: &["memory", "orca service"],
+        self_resolving: Some(false),
     }
 }
 
@@ -376,7 +384,8 @@ fn agent_gone() -> Scenario {
             "jitsi-jvb: degraded",
         ],
         answer_keywords: &["178.105.159.224", "agent"],
-        answer_forbidden: &["memory limit", "orca service"],
+        answer_forbidden: &["memory limit", "orca service", "orca scale"],
+        self_resolving: Some(false),
     }
 }
 
@@ -413,6 +422,7 @@ fn upstream_errors() -> Scenario {
         ],
         answer_keywords: &["stripe", "external"],
         answer_forbidden: &["orca rollback", "orca service"],
+        self_resolving: None,
     }
 }
 
@@ -444,6 +454,7 @@ fn deploy_blip() -> Scenario {
         ctx,
         evidence: &["0.2.13", "Starting runner daemon", "deploy gitea-runner"],
         answer_keywords: &["deploy"],
-        answer_forbidden: &["orca rollback", "orca service"],
+        answer_forbidden: &["orca service"],
+        self_resolving: Some(true),
     }
 }

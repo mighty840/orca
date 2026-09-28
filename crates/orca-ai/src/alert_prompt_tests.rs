@@ -89,3 +89,12 @@ fn the_command_reference_has_the_real_scale_syntax() {
     assert!(p.contains("`orca scale <service> <N>`"));
     assert!(p.contains("`orca start <service>`"));
 }
+
+#[test]
+fn the_prompt_lists_the_real_service_toml_keys() {
+    let p = ctx(vec![]).alert_prompt("x");
+    assert!(p.contains("[service.env]"));
+    assert!(p.contains("extra_ports = ["));
+    assert!(p.contains("there is no move command"));
+    assert!(p.contains("NOT service.toml keys"));
+}

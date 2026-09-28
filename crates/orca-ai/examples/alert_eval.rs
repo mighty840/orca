@@ -94,22 +94,19 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 0..1: expected keywords present, forbidden ones absent, sections present.
-/// A rough guide for comparing prompts, not a verdict: read the answers.
+/// 0..1: expected keywords present, forbidden ones absent, sections present,
+/// and the right "resolves on its own?" answer. A rough guide for comparing
+/// prompts, not a verdict: read the answers.
 fn score(s: &Scenario, answer: &str) -> f64 {
     let lower = answer.to_lowercase();
-    let hits: Vec<&str> = s
-        .answer_keywords
-        .iter()
-        .copied()
-        .filter(|k| lower.contains(&k.to_lowercase()))
-        .collect();
+    let has = |k: &str| k.split('|').any(|alt| lower.contains(&alt.to_lowercase()));
     let misses: Vec<&str> = s
         .answer_keywords
         .iter()
         .copied()
-        .filter(|k| !hits.contains(k))
+        .filter(|k| !has(k))
         .collect();
+    let hits = s.answer_keywords.len() - misses.len();
     let bad: Vec<&str> = s
         .answer_forbidden
         .iter()
@@ -120,16 +117,41 @@ fn score(s: &Scenario, answer: &str) -> f64 {
         .iter()
         .filter(|h| lower.contains(&h.to_lowercase()))
         .count();
+    let resolves = self_resolving(&lower);
+    let resolves_ok = s.self_resolving.map(|want| resolves == Some(want));
     println!(
-        "keywords {}/{} (missing {misses:?}), forbidden found {bad:?}, sections {sections}/{}",
-        hits.len(),
+        "keywords {hits}/{} (missing {misses:?}), forbidden found {bad:?}, sections {sections}/{}, \
+         resolves on its own: said {resolves:?}, expected {:?}",
         s.answer_keywords.len(),
-        SECTIONS.len()
+        SECTIONS.len(),
+        s.self_resolving
     );
-    let kw = hits.len() as f64 / s.answer_keywords.len().max(1) as f64;
+    let kw = hits as f64 / s.answer_keywords.len().max(1) as f64;
     let sec = sections as f64 / SECTIONS.len() as f64;
+    let base = match resolves_ok {
+        Some(ok) => 0.5 * kw + 0.3 * sec + if ok { 0.2 } else { 0.0 },
+        None => 0.6 * kw + 0.4 * sec,
+    };
     let penalty = if bad.is_empty() { 1.0 } else { 0.5 };
-    (0.6 * kw + 0.4 * sec) * penalty
+    base * penalty
+}
+
+/// The first yes/no after the "resolves on its own" heading.
+fn self_resolving(lower: &str) -> Option<bool> {
+    let at = lower.find("resolves on its own")?;
+    let tail: String = lower[at..]
+        .chars()
+        .skip("resolves on its own".len())
+        .take(80)
+        .collect();
+    let yes = tail.find("yes");
+    let no = tail.find("no");
+    match (yes, no) {
+        (Some(y), Some(n)) => Some(y < n),
+        (Some(_), None) => Some(true),
+        (None, Some(_)) => Some(false),
+        (None, None) => None,
+    }
 }
 
 /// The prompt as the monitor built it before: the snapshot had counts only.

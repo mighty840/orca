@@ -188,7 +188,23 @@ pub(crate) fn push_command_reference(out: &mut String) {
     out.push_str("**Not supported (do not suggest):** `orca service <verb>` (the CLI is flat — there is no `service` subcommand). ");
     out.push_str("There is also no `set-env` / `update --cmd` / `update --image` / `update --port` — env vars, image tag, command, and ports live in `services/<project>/service.toml` and apply on `orca deploy`. ");
     out.push_str("If a fix requires editing a service definition, say so plainly (e.g. 'edit services/<project>/service.toml: change `image = ...`, then `orca deploy`').\n\n");
+    out.push_str(SERVICE_TOML_REFERENCE);
 }
+
+/// The service.toml keys a fix may touch. Without it the model invents
+/// syntax (`ports = [...]`, `env = ["K=V"]`, a collector setting as a
+/// service key).
+const SERVICE_TOML_REFERENCE: &str = "## service.toml keys (use ONLY these; each service is a `[[service]]` block)\n\
+- `image = \"repo/name:tag\"`, `cmd = [\"arg\", ...]`, `replicas = N`\n\
+- `port = 8080` (container port; its host port is picked automatically), `host_port = 3478` (fixed public host port for `port`), `extra_ports = [\"22222:22\", \"127.0.0.1:5432:5432\"]`\n\
+- `[service.env]` table: `KEY = \"value\"` or `KEY = \"${secrets.NAME}\"` (set NAME with `orca secrets set`)\n\
+- `[service.resources]`: `memory = \"1Gi\"`, `cpu = 1.0`\n\
+- `[service.placement]`: `node = \"<hostname>\"` pins the service to a node. This is the only way to move a service; there is no move command.\n\
+- `[service.readiness]` / `[service.liveness]`: `path = \"/healthz\"`, `port`, `interval_secs`, `timeout_secs`, `failure_threshold`, `initial_delay_secs`\n\
+- `restart_policy = \"unless-stopped\"`, `depends_on = [\"svc\"]`, `mounts = [\"/host:/container:ro\"]`, `domain = \"x.example.com\"`\n\
+Settings of the program inside the container (its own config file, e.g. an OTel collector pipeline) are NOT service.toml keys: name the file and the setting instead.\n\
+If the failure started right after a deploy that changed the image, `orca rollback <service>` restores the previous image: offer it as the fastest way back.\n\
+Refer to a node by its address as well as its id.\n\n";
 
 #[cfg(test)]
 mod tests {
