@@ -18,7 +18,7 @@ pub async fn execute_command(state: &mut AppState, client: &ApiClient, cmd: &str
         }
         Some("nodes") => state.push_view(View::Nodes),
         Some("backups") => {
-            crate::refresh_backups(client, state).await;
+            crate::refresh_backups(client, state);
             state.selected_backup_node = 0;
             state.push_view(View::Backups);
         }
@@ -199,7 +199,7 @@ async fn cmd_logs(state: &mut AppState, client: &ApiClient, parts: &[&str]) {
         state.flash("Usage: :logs <service>".into());
         return;
     };
-    crate::refresh_logs_named(client, state, &svc_name).await;
+    crate::refresh_logs_named(client, state, &svc_name);
     state.push_view(View::Logs { service: svc_name });
 }
 

@@ -24,6 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **TUI: the terminal was left broken (#262)** when the shell command
   couldn't be started (raw mode and the TUI screen weren't restored), or
   when the TUI panicked.
+- **TUI: a slow master froze the whole UI (#263).** The 2 s refresh
+  awaited `status` and then `cluster/info` inside the event loop, 10 s
+  timeout each, so keys and redraws stopped for up to ~20 s; opening
+  Backups awaited a fan-out to every agent the same way. Refresh, log tails
+  and backup status now run in the background, one of each at a time, and
+  land on the next tick.
+- **TUI: alerts never refreshed on their own (#263)**, so an answer to
+  `:reply` didn't appear until `r`. They are polled with the status while
+  an alert view is open.
+- **TUI: errors vanished within 2 s (#263).** Every refresh cleared them, so
+  "Stop failed: ..." was gone before it could be read. An error now stays
+  10 s; a connection error clears as soon as the master answers again.
+  `cluster/info` failures are shown instead of dropped.
 
 ### Changed
 

@@ -169,9 +169,9 @@ pub async fn handle_normal_key(
         // (we don't auto-refresh it every 2s since it's an expensive
         // fan-out RPC and the data changes infrequently).
         KeyCode::Char('r') => {
-            super::refresh(client, state).await;
+            crate::background::spawn_poll(client, state);
             match &state.view {
-                View::Backups => super::refresh_backups(client, state).await,
+                View::Backups => super::refresh_backups(client, state),
                 View::Webhooks => super::refresh_webhooks(client, state).await,
                 View::WebhookInvocations { service } => {
                     let s = service.clone();
@@ -187,7 +187,7 @@ pub async fn handle_normal_key(
                 _ => {}
             }
             *last_refresh = tokio::time::Instant::now();
-            state.flash("Refreshed".into());
+            state.flash("Refreshing…".into());
         }
 
         // View shortcuts
@@ -210,7 +210,7 @@ pub async fn handle_normal_key(
         }
         KeyCode::Char('3') => {}
         KeyCode::Char('4') if !matches!(state.view, View::Backups) => {
-            super::refresh_backups(client, state).await;
+            super::refresh_backups(client, state);
             state.selected_backup_node = 0;
             state.push_view(View::Backups);
         }
@@ -390,7 +390,7 @@ async fn handle_enter(state: &mut AppState, client: &ApiClient) {
         View::Services => {
             if let Some(name) = state.selected_service_name() {
                 let name = name.to_string();
-                super::refresh_logs_named(client, state, &name).await;
+                super::refresh_logs_named(client, state, &name);
                 state.push_view(View::Detail { service: name });
             }
         }
@@ -432,7 +432,7 @@ async fn handle_enter(state: &mut AppState, client: &ApiClient) {
 async fn handle_logs(state: &mut AppState, client: &ApiClient) {
     let svc_name = super::current_service_name(state);
     if let Some(name) = svc_name {
-        super::refresh_logs_named(client, state, &name).await;
+        super::refresh_logs_named(client, state, &name);
         state.service_scroll = 0;
         state.auto_refresh_logs = true;
         state.push_view(View::Logs { service: name });

@@ -174,6 +174,8 @@ pub struct AppState {
     /// True when the alerts API returned 503 (no `[ai]` configured). Lets
     /// the view show a friendly message instead of an empty table.
     pub alerts_unavailable: bool,
+    /// Fetches running off the event loop (#263).
+    pub bg: crate::background::Background,
 }
 
 /// Result of a background chat dispatch — handed back to the event loop
@@ -261,6 +263,7 @@ impl AppState {
             alert_detail_scroll: 0,
             alerts_show_all: false,
             alerts_unavailable: false,
+            bg: Default::default(),
         }
     }
 
