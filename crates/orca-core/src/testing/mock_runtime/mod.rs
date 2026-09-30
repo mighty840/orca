@@ -17,6 +17,7 @@ pub use ops::{MockOp, MockOpKind};
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use tokio::sync::Mutex;
 
@@ -38,6 +39,9 @@ pub struct MockRuntime {
     failures: Arc<Mutex<HashMap<MockOpKind, FailMode>>>,
     /// If set, the mock host port returned by `resolve_host_port`.
     pub mock_host_port: Option<u16>,
+    /// If set, `stats` sleeps this long first — models the Docker runtime,
+    /// which spends ~0.75s per container taking two samples.
+    pub stats_delay: Option<Duration>,
     /// Spec fingerprint per container name (`orca-<service>`), as the Docker
     /// runtime keeps it in a label. Set by `create`, or by
     /// [`MockRuntime::set_fingerprint`] to model an older container.
@@ -53,6 +57,7 @@ impl MockRuntime {
             counter: Arc::new(Mutex::new(0)),
             failures: Arc::new(Mutex::new(HashMap::new())),
             mock_host_port: None,
+            stats_delay: None,
             fingerprints: Arc::new(Mutex::new(HashMap::new())),
         }
     }
