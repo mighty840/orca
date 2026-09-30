@@ -1,5 +1,6 @@
 //! Workload status reporting and per-container stats collection for the agent.
 
+use futures_util::stream::{self, StreamExt};
 use tokio::io::AsyncReadExt;
 
 use orca_core::runtime::{LogOpts, Runtime, WorkloadHandle};
@@ -10,6 +11,12 @@ use super::WorkloadInfo;
 
 /// Max bytes of log tail to ship in a heartbeat for a crashed container.
 const LOG_TAIL_LIMIT: usize = 4096;
+
+/// Workloads queried at once when building a heartbeat. Each running
+/// container costs ~0.75s on Docker (two stats samples 500ms apart); one at a
+/// time, 45 containers took ~35s — past the master's 30s idle deadline, so it
+/// dropped the node's control session on every heartbeat.
+const REPORT_CONCURRENCY: usize = 16;
 
 /// Fetch the last few log lines of a (typically crashed) container so the
 /// master can explain the failure K8s-style. Returns `None` on error/empty.
@@ -74,62 +81,66 @@ impl AgentClient {
             .map(|(id, info)| (id.clone(), info.service_name.clone()))
             .collect();
 
-        let mut reports = Vec::with_capacity(snapshot.len());
-        let mut observed: Vec<(String, WorkloadStatus)> = Vec::with_capacity(snapshot.len());
-
-        for (id, service_name) in snapshot {
-            let handle = WorkloadHandle {
-                runtime_id: id.clone(),
-                name: format!("orca-{service_name}"),
-                metadata: Default::default(),
-            };
-            let status = runtime
-                .status(&handle)
-                .await
-                .unwrap_or(WorkloadStatus::Failed);
-            observed.push((id.clone(), status));
-
-            // Running: collect live stats. Not running: collect crash detail
-            // (exit code, restart count, log tail) so the master can explain
-            // *why* without a separate fetch.
-            let (cpu, mem, exit_code, restart_count, last_logs) =
-                if status == WorkloadStatus::Running {
-                    let (cpu, mem) = match runtime.stats(&handle).await {
-                        Ok(rs) => (rs.cpu_percent, rs.memory_bytes),
-                        Err(_) => (0.0, 0),
+        let results: Vec<(String, WorkloadStatus, orca_core::ws_types::WorkloadReport)> =
+            stream::iter(snapshot)
+                .map(|(id, service_name)| async move {
+                    let handle = WorkloadHandle {
+                        runtime_id: id.clone(),
+                        name: format!("orca-{service_name}"),
+                        metadata: Default::default(),
                     };
-                    (cpu, mem, None, 0, None)
-                } else {
-                    let exit = runtime.last_exit(&handle).await.unwrap_or_default();
-                    let logs = read_log_tail(runtime, &handle).await;
-                    (0.0, 0, exit.exit_code, exit.restart_count, logs)
-                };
+                    let status = runtime
+                        .status(&handle)
+                        .await
+                        .unwrap_or(WorkloadStatus::Failed);
 
-            reports.push(orca_core::ws_types::WorkloadReport {
-                service_name,
-                status: match status {
-                    WorkloadStatus::Running => "running",
-                    WorkloadStatus::Stopped | WorkloadStatus::Completed => "stopped",
-                    WorkloadStatus::Failed => "failed",
-                    WorkloadStatus::Pending | WorkloadStatus::Creating => "pending",
-                    WorkloadStatus::Stopping => "stopping",
-                }
-                .into(),
-                container_id: Some(id),
-                cpu_percent: cpu,
-                memory_bytes: mem,
-                exit_code,
-                restart_count,
-                last_logs,
-            });
-        }
+                    // Running: collect live stats. Not running: collect crash detail
+                    // (exit code, restart count, log tail) so the master can explain
+                    // *why* without a separate fetch.
+                    let (cpu, mem, exit_code, restart_count, last_logs) =
+                        if status == WorkloadStatus::Running {
+                            let (cpu, mem) = match runtime.stats(&handle).await {
+                                Ok(rs) => (rs.cpu_percent, rs.memory_bytes),
+                                Err(_) => (0.0, 0),
+                            };
+                            (cpu, mem, None, 0, None)
+                        } else {
+                            let exit = runtime.last_exit(&handle).await.unwrap_or_default();
+                            let logs = read_log_tail(runtime, &handle).await;
+                            (0.0, 0, exit.exit_code, exit.restart_count, logs)
+                        };
+
+                    let report = orca_core::ws_types::WorkloadReport {
+                        service_name,
+                        status: match status {
+                            WorkloadStatus::Running => "running",
+                            WorkloadStatus::Stopped | WorkloadStatus::Completed => "stopped",
+                            WorkloadStatus::Failed => "failed",
+                            WorkloadStatus::Pending | WorkloadStatus::Creating => "pending",
+                            WorkloadStatus::Stopping => "stopping",
+                        }
+                        .into(),
+                        container_id: Some(id.clone()),
+                        cpu_percent: cpu,
+                        memory_bytes: mem,
+                        exit_code,
+                        restart_count,
+                        last_logs,
+                    };
+                    (id, status, report)
+                })
+                .buffered(REPORT_CONCURRENCY)
+                .collect()
+                .await;
 
         // Converge the cache to what was observed.
         let mut workloads = self.workloads.write().await;
-        for (id, status) in observed {
+        let mut reports = Vec::with_capacity(results.len());
+        for (id, status, report) in results {
             if let Some(info) = workloads.get_mut(&id) {
                 info.status = status;
             }
+            reports.push(report);
         }
 
         reports
