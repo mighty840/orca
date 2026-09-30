@@ -28,6 +28,8 @@ pub struct OrcaServer {
     _config_path: PathBuf,
     #[allow(dead_code)]
     pub api_port: u16,
+    /// This server's HOME (holds its `~/.orca`); removed on drop.
+    home: PathBuf,
     pub api_url: String,
 }
 
@@ -77,6 +79,11 @@ api_port = {api_port}
             .arg(config_path.to_str().unwrap())
             .arg("--proxy-port")
             .arg(proxy_port.to_string())
+            // Each server gets its own HOME, so its ~/.orca (cluster.db,
+            // secrets, master key) is its own. Tests run in parallel, and
+            // since #179 a second server on a shared cluster.db refuses to
+            // start instead of silently running with empty state.
+            .env("HOME", &config_dir)
             .env("RUST_LOG", "info")
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -87,6 +94,7 @@ api_port = {api_port}
 
         let mut server = Self {
             child,
+            home: config_dir.clone(),
             _config_path: config_path,
             api_port,
             api_url: api_url.clone(),
@@ -170,6 +178,9 @@ api_port = {api_port}
             .arg("--api")
             .arg(&self.api_url)
             .env("ORCA_TOKEN", E2E_TOKEN)
+            // The server's HOME: commands that read ~/.orca locally
+            // (`orca secrets list`) see this server's files.
+            .env("HOME", &self.home)
             .output()
             .await
             .unwrap_or_else(|e| panic!("failed to spawn {}: {e}", binary.display()))

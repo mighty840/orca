@@ -1,9 +1,8 @@
 //! E2E test: `orca secrets list` shows secrets configured via the API.
 //!
 //! Set a unique secret via the API, run `orca secrets list`, assert the key
-//! appears in stdout. Cleanup via DELETE at the end so the developer's
-//! `~/.orca/secrets.json` isn't polluted permanently — same pattern as the
-//! existing in-process secret-env interpolation E2E.
+//! appears in stdout. The server and the CLI share the test server's own
+//! HOME (see the harness), so nothing touches the developer's `~/.orca`.
 
 use serde_json::json;
 
