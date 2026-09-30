@@ -164,21 +164,20 @@ async fn spawn_blackhole_upstream() -> SocketAddr {
 /// Regression test for the missing-timeouts bug that required restarting the
 /// proxy to recover from a hung upstream. Routes an unmatched-host request
 /// through `fallback.http` to a black-hole backend and asserts the proxy
-/// returns an error once the inactivity window elapses, instead of parking
-/// the request indefinitely.
+/// gives up and answers instead of parking the request indefinitely.
 ///
-/// The recovery bound is the client's `read_timeout` (120s): #49 introduced
-/// a 300s total request timeout, #102 replaced it with the inactivity
-/// timeout so large blob transfers that keep making progress are never
-/// capped. A black-holed upstream sends no bytes, so it must surface as
-/// 502 at ~120s — much earlier means some other error path fired, later
-/// means the timeout is miswired.
+/// The bound is the proxy's response wait (#187): the request is sent, and
+/// the backend gets 10 minutes to start answering (long computations and
+/// reports are allowed to think). A black-holed upstream never answers, so
+/// it must surface as 504 Gateway Timeout (#192) at ~600s. Much earlier
+/// means another error path fired; later means the timeout is miswired.
+/// The old 120s read timeout, and its 502, are gone on purpose.
 ///
-/// Long-running by design: ~2 minutes. Marked `#[ignore]` so it only runs
+/// Long-running by design: ~10 minutes. Marked `#[ignore]` so it only runs
 /// in the nightly E2E suite.
 #[tokio::test]
 #[ignore]
-async fn e2e_hung_fallback_recovers_within_read_timeout() {
+async fn e2e_hung_fallback_gives_up_after_the_response_wait() {
     let blackhole = spawn_blackhole_upstream().await;
     let route_table = Arc::new(RwLock::new(HashMap::new()));
     let fallback = FallbackConfig {
@@ -190,26 +189,26 @@ async fn e2e_hung_fallback_recovers_within_read_timeout() {
     let client = reqwest::Client::builder().no_proxy().build().unwrap();
     let start = std::time::Instant::now();
     let resp = tokio::time::timeout(
-        Duration::from_secs(150),
+        Duration::from_secs(660),
         client
             .get(format!("http://127.0.0.1:{proxy_port}/anything"))
             .header("Host", "unknown-host.example.com")
             .send(),
     )
     .await
-    .expect("proxy must return within 150s, not hang forever")
+    .expect("proxy must return within 660s, not hang forever")
     .expect("the proxy itself must respond");
     let elapsed = start.elapsed();
 
     assert_eq!(
         resp.status(),
-        StatusCode::BAD_GATEWAY,
-        "hung upstream should surface as 502, got {}",
+        StatusCode::GATEWAY_TIMEOUT,
+        "a silent upstream should surface as 504, got {}",
         resp.status()
     );
     assert!(
-        elapsed >= Duration::from_secs(110),
-        "expected ~120s wait (read_timeout inactivity window), got {elapsed:?} — \
-         the 502 fired too early to have come from the read_timeout"
+        elapsed >= Duration::from_secs(590),
+        "expected ~600s wait (the response wait), got {elapsed:?}: \
+         the answer came too early to have come from that timeout"
     );
 }
