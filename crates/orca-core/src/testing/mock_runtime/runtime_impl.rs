@@ -136,6 +136,9 @@ impl Runtime for MockRuntime {
     }
 
     async fn stats(&self, _handle: &WorkloadHandle) -> Result<ResourceStats> {
+        if let Some(delay) = self.stats_delay {
+            tokio::time::sleep(delay).await;
+        }
         Ok(ResourceStats {
             cpu_percent: 0.0,
             memory_bytes: 0,
