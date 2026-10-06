@@ -19,6 +19,9 @@ use crate::state::AppState;
 const DEFAULT_FAILURES: u32 = 3;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(3);
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(10);
+/// Without a `[service.liveness]` block, how long a new instance boots before
+/// it is probed. 5 s failed services that migrate a database at start (#279).
+const DEFAULT_STARTUP_GRACE: Duration = Duration::from_secs(30);
 
 /// Spawn the health checker as a background tokio task.
 pub fn spawn_health_checker(state: Arc<AppState>) {
@@ -64,6 +67,10 @@ impl HealthChecker {
             let services = self.state.services.read().await;
             services
                 .values()
+                // A deploy, redeploy or reconcile owns it right now; probing
+                // a container it is replacing counts failures against the old
+                // one and "restarts" it into a third container (#279).
+                .filter(|svc| !crate::in_flight::is_in_flight(&self.state, &svc.config.name))
                 .filter_map(|svc| {
                     // Use liveness probe path, fall back to health path.
                     // Services with neither get runtime-only checks (no HTTP probe).
@@ -77,7 +84,7 @@ impl HealthChecker {
                     let initial_delay = probe
                         .as_ref()
                         .map(|p| Duration::from_secs(p.initial_delay_secs))
-                        .unwrap_or(Duration::from_secs(5));
+                        .unwrap_or(DEFAULT_STARTUP_GRACE);
                     let targets: Vec<InstanceTarget> = svc
                         .instances
                         .iter()
@@ -102,6 +109,14 @@ impl HealthChecker {
                 })
                 .collect()
         };
+
+        // Forget counts for containers that are gone: a replaced container's
+        // stale count must never trigger a restart of its successor (#279).
+        let live: std::collections::HashSet<&str> = check_targets
+            .iter()
+            .flat_map(|t| t.targets.iter().map(|i| i.runtime_id.as_str()))
+            .collect();
+        failure_counts.retain(|id, _| live.contains(id.as_str()));
 
         for target in &check_targets {
             let threshold = target
@@ -248,6 +263,14 @@ impl HealthChecker {
             },
         };
 
+        // Keep reconciles and the watchdog off the service while we replace
+        // its container, and leave it alone if one of them is already on it.
+        if crate::in_flight::is_in_flight(&self.state, service_name) {
+            info!(service = %service_name, "Another operation is on this service — not restarting it");
+            return;
+        }
+        let _in_flight = crate::in_flight::InFlight::mark(&self.state, service_name);
+
         // Extract the old handle and config under a read lock, then drop it.
         let (old_handle, spec, port) = {
             let services = self.state.services.read().await;
@@ -270,6 +293,14 @@ impl HealthChecker {
             };
             (inst.handle.clone(), spec, svc.config.port)
         };
+
+        // The container may already be gone (replaced by a deploy since the
+        // probe). Creating one now would add a container nobody tracks; let
+        // the watchdog and reconciler sort out the instance list (#279).
+        if let Err(e) = runtime.status(&old_handle).await {
+            warn!(service = %service_name, "Not restarting: the instance's container is gone ({e})");
+            return;
+        }
 
         // Stop and remove the old container.
         if let Err(e) = runtime.stop(&old_handle, Duration::from_secs(10)).await {

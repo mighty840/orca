@@ -63,6 +63,12 @@ pub async fn restart_dependents(state: &AppState, changed: &[String]) {
         if !running {
             continue;
         }
+        // Being deployed right now (#279): that deploy recreates it with
+        // fresh connections, and a second one only races it.
+        if crate::in_flight::is_in_flight(state, &name) {
+            tracing::info!(service = %name, "dependent is being deployed — not restarting it");
+            continue;
+        }
         tracing::info!(
             service = %name,
             "dependency was recreated — restarting dependent to refresh its connections"

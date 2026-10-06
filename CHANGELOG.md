@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An image bump could replace a container two or three times, and deploys
+  failed with "container name already in use" (#279).** Two whole-tree
+  reconcile passes (the declarative loop and the infra webhook's "deploy
+  all") ran at once: one skipped a service the other was still deploying,
+  then restarted it as a dependent, or scaled up an instance a rolling
+  update had just replaced. The health checker also kept counting failures
+  against replaced containers and "restarted" one that no longer existed.
+  - Whole-tree passes now run one at a time; the second sees no changes.
+  - A pass, a dependents restart and the health checker leave a service
+    alone while another operation is working on it.
+  - The health checker forgets failure counts of replaced containers, does
+    not restart a container that is gone, and marks the service while it
+    restarts one.
+  - Without a `[service.liveness]` block, a new instance gets 30 s to boot
+    before it is probed (was 5 s), so services that migrate a database at
+    start aren't failed mid-migration.
+
+### Fixed
+
 - **The Networks view showed no domains for services on agents (#277).**
   Each node's domain list came from the master's proxy route table, which
   holds only the routes the master serves, so every agent row was empty.
