@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.7] - 2026-10-06
+
+One operation at a time per service, on the master and on the agents: an
+image bump replaces each container once, and deploys no longer fail with
+"container name already in use". Also: agent domains in the TUI Networks
+view.
+
 ### Fixed
 
 - **An image bump could replace a container two or three times, and deploys
