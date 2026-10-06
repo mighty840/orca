@@ -22,12 +22,27 @@ pub use crate::certs::load_byo_cert;
 /// For each service, creates or removes workloads to match the desired replica count,
 /// then updates the routing table (containers) or trigger table (wasm).
 pub async fn reconcile(state: &AppState, services: &[ServiceConfig]) -> (Vec<String>, Vec<String>) {
+    // One pass at a time (#279). Two overlapping passes (the declarative
+    // loop and the infra webhook's "deploy all") each saw the other's work
+    // half done: one skipped a service the other was still deploying, then
+    // restarted it as a dependent, or scaled up an instance a rolling update
+    // had just replaced. Waiting makes the second pass a no-op.
+    let _pass = state.reconcile_pass.lock().await;
     let mut deployed = Vec::new();
     let mut errors = Vec::new();
     let mut changed = Vec::new();
 
     let ordered = crate::topo_sort::topo_sort(services);
     for svc_config in &ordered {
+        // A redeploy, rollback or health restart is working on it: acting
+        // now would race it. The declarative loop retries on its next pass.
+        if crate::in_flight::is_in_flight(state, &svc_config.name) {
+            info!(
+                "Service {} has an operation under way — leaving it to that operation",
+                svc_config.name
+            );
+            continue;
+        }
         match reconcile_service(state, svc_config).await {
             Ok(outcome) => {
                 // Record successful deploy in history and clear any prior failure.

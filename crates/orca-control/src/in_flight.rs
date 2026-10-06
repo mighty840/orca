@@ -55,3 +55,7 @@ fn lock(state: &AppState) -> std::sync::MutexGuard<'_, HashMap<String, u32>> {
 #[cfg(test)]
 #[path = "in_flight_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "service_ops_tests.rs"]
+mod service_ops_tests;

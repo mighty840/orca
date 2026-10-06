@@ -44,6 +44,8 @@ pub struct AppState {
     pub token_rotation: RwLock<Option<crate::token_rotation::Rotation>>,
     /// Services being deployed or reconciled right now (#173); see `in_flight`.
     pub deploys_in_flight: std::sync::Mutex<HashMap<String, u32>>,
+    /// One whole-tree reconcile pass at a time (#279); see `reconciler::reconcile`.
+    pub reconcile_pass: tokio::sync::Mutex<()>,
     /// Declared configs whose deploy failed, and when (#174); see `config_diff`.
     pub failed_deploys: RwLock<HashMap<String, (ServiceConfig, std::time::Instant)>>,
     /// Pending commands for agent nodes, keyed by node_id.
@@ -278,6 +280,7 @@ impl AppState {
             api_tokens: std::sync::RwLock::new(api_tokens),
             token_rotation: RwLock::new(None),
             deploys_in_flight: std::sync::Mutex::new(HashMap::new()),
+            reconcile_pass: tokio::sync::Mutex::new(()),
             failed_deploys: RwLock::new(HashMap::new()),
             deploy_history: RwLock::new(crate::deploy_history::DeployHistory::new()),
             acme_manager: None,
