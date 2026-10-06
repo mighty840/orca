@@ -25,9 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Without a `[service.liveness]` block, a new instance gets 30 s to boot
     before it is probed (was 5 s), so services that migrate a database at
     start aren't failed mid-migration.
-
-### Fixed
-
+- **An agent ran two deploys of one service at once (#279).** Deploys ran as
+  independent tasks and stops inline, so a second deploy of a service could
+  start while the first was still creating its container (Docker: 409,
+  "container name already in use"), and nothing kept a stop from overtaking
+  a deploy sent before it. Each service now has a queue on the agent:
+  deploys and stops of one service run one at a time, in the order the
+  master sent them, while different services still deploy in parallel and a
+  long image pull no longer blocks the message loop.
 - **The Networks view showed no domains for services on agents (#277).**
   Each node's domain list came from the master's proxy route table, which
   holds only the routes the master serves, so every agent row was empty.
