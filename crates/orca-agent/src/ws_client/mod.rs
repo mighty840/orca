@@ -17,6 +17,7 @@ mod deploy;
 mod logs;
 pub mod network_status;
 mod reconcile;
+mod service_queue;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -36,7 +37,6 @@ use crate::grpc::AgentClient;
 use adoption::send_adoption_report;
 use backup::run_agent_backup;
 use backup_status::send_backup_status;
-use deploy::deploy_and_report;
 use logs::stream_logs;
 use network_status::send_network_status;
 use reconcile::reconcile_services;
@@ -126,6 +126,12 @@ async fn handle_ws_session(
 
     // Shared output channel — heartbeat + log/backup responses all funnel here.
     let (out_tx, mut out_rx) = mpsc::channel::<AgentMessage>(128);
+    let service_ops = service_queue::ServiceQueues::new(service_queue::OpContext {
+        runtime: runtime.clone(),
+        agent: agent.clone(),
+        domain_tx: domain_tx.clone(),
+        out_tx: out_tx.clone(),
+    });
 
     // Dedicated WS writer task.
     let write_task = tokio::spawn(async move {
@@ -199,6 +205,7 @@ async fn handle_ws_session(
                     &out_tx,
                     &exec_sessions,
                     &stats_collector,
+                    &service_ops,
                 )
                 .await
                 {
@@ -225,6 +232,7 @@ async fn handle_master_message(
     out_tx: &mpsc::Sender<AgentMessage>,
     exec_sessions: &ExecSessions,
     stats_collector: &crate::host_stats::HostStatsCollector,
+    service_ops: &service_queue::ServiceQueues,
 ) -> anyhow::Result<()> {
     let msg: MasterMessage = serde_json::from_str(text)?;
 
@@ -240,20 +248,15 @@ async fn handle_master_message(
                 })
                 .await;
 
-            // Spawn so a long pull doesn't head-of-line-block other
-            // master→agent commands (Stop, further Deploys), the same way
-            // Logs/Exec/Prune are handled.
-            let rt = runtime.clone();
-            let agent_c = agent.clone();
-            let domain_tx_c = domain_tx.clone();
-            let tx = out_tx.clone();
-            tokio::spawn(async move {
-                deploy_and_report(rt, agent_c, domain_tx_c, tx, spec).await;
-            });
+            // Queued per service (#279): a long pull doesn't block other
+            // commands, and deploys and stops of one service run one at a
+            // time, in the order they were sent.
+            let name = spec.name.clone();
+            service_ops.submit(&name, service_queue::ServiceOp::Deploy(spec));
         }
         MasterMessage::Stop { service_name } => {
             info!("WS: stopping {service_name}");
-            agent.stop_service(runtime.as_ref(), &service_name).await;
+            service_ops.submit(&service_name, service_queue::ServiceOp::Stop);
         }
         MasterMessage::LogRequest {
             request_id,
