@@ -108,16 +108,21 @@ async fn check_and_prune(state: &AppState, service_name: &str, runtime_kind: Run
     };
 
     // Collect handles under a read lock before any async calls.
-    let handles: Vec<(usize, orca_core::runtime::WorkloadHandle)> = {
+    let (handles, port): (
+        Vec<(usize, orca_core::runtime::WorkloadHandle)>,
+        Option<u16>,
+    ) = {
         let services = state.services.read().await;
         let Some(svc) = services.get(service_name) else {
             return false;
         };
-        svc.instances
+        let handles = svc
+            .instances
             .iter()
             .enumerate()
             .map(|(i, inst)| (i, inst.handle.clone()))
-            .collect()
+            .collect();
+        (handles, svc.config.port)
     };
 
     // Refresh live status from the runtime for every instance. This catches
@@ -125,7 +130,16 @@ async fn check_and_prune(state: &AppState, service_name: &str, runtime_kind: Run
     // in the cached status (e.g. after a disk-full recovery).
     // Remote placeholders are owned by the heartbeat handler — querying them
     // via the local Docker runtime always returns Failed and would prune them.
-    let mut live: Vec<(usize, WorkloadStatus)> = Vec::with_capacity(handles.len());
+    //
+    // Also re-read the host port of each running container (#286): when
+    // Docker restarts a container itself (restart policy, e.g. after an OOM
+    // kill), its `127.0.0.1:0` binding gets a new random port, and the route
+    // built from the port seen at deploy time sends every request to a
+    // closed port (502) until the next deploy. Agents rebuild their routes
+    // from Docker every 5 s; this is the master's equivalent, picked up by
+    // the route refresh in the same watchdog cycle.
+    let mut live: Vec<(usize, String, WorkloadStatus, Option<u16>)> =
+        Vec::with_capacity(handles.len());
     for (idx, handle) in &handles {
         if handle.runtime_id.starts_with("remote-") {
             continue;
@@ -134,7 +148,13 @@ async fn check_and_prune(state: &AppState, service_name: &str, runtime_kind: Run
             .status(handle)
             .await
             .unwrap_or(WorkloadStatus::Failed);
-        live.push((*idx, status));
+        let host_port = match (status, port) {
+            (WorkloadStatus::Running, Some(p)) => {
+                runtime.resolve_host_port(handle, p).await.ok().flatten()
+            }
+            _ => None,
+        };
+        live.push((*idx, handle.runtime_id.clone(), status, host_port));
     }
 
     // Write back live statuses and prune dead instances.
@@ -143,9 +163,24 @@ async fn check_and_prune(state: &AppState, service_name: &str, runtime_kind: Run
         return false;
     };
 
-    for (idx, status) in &live {
-        if let Some(inst) = svc.instances.get_mut(*idx) {
-            inst.status = *status;
+    for (idx, runtime_id, status, host_port) in &live {
+        let Some(inst) = svc.instances.get_mut(*idx) else {
+            continue;
+        };
+        inst.status = *status;
+        if let Some(new) = *host_port
+            && inst.handle.runtime_id == *runtime_id
+            && inst.host_port.is_some_and(|old| old != new)
+        {
+            warn!(
+                service = %service_name,
+                container = %inst.handle.name,
+                old_port = ?inst.host_port,
+                new_port = new,
+                "host port changed: the container was restarted outside orca \
+                 (Docker restart policy, e.g. after an OOM kill); re-routing"
+            );
+            inst.host_port = Some(new);
         }
     }
 

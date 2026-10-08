@@ -27,25 +27,34 @@ pub(crate) const GRACEFUL_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Try to load a fresh `ServiceConfig` from the on-disk `services/` tree so
 /// that `redeploy` picks up any edits to `service.toml` since the last deploy.
+///
+/// Loads the tree the way `orca deploy` and the infra webhook do
+/// (`load_dir`), so the service gets the project and default network of its
+/// directory (#287). Reading `services/<name>/service.toml` on its own lost
+/// both: `${secrets.KEY}` then resolved against the global scope only (the
+/// redeploy failed, or silently used a global secret of the same name) and
+/// the container fell back to the name-prefix network. Any load error falls
+/// back to the cached config.
 fn load_fresh_config(service_name: &str) -> Option<orca_core::config::ServiceConfig> {
-    // services/{name}/service.toml
-    let per_service = std::path::Path::new("services")
-        .join(service_name)
-        .join("service.toml");
-    if per_service.exists()
-        && let Ok(cfg) = orca_core::config::ServicesConfig::load(&per_service)
-        && let Some(svc) = cfg.service.into_iter().find(|s| s.name == service_name)
-    {
-        return Some(svc);
+    let dir = std::path::Path::new("services");
+    let loaded = if dir.is_dir() {
+        orca_core::config::ServicesConfig::load_dir(dir)
+    } else {
+        let mono = std::path::Path::new("services.toml");
+        if !mono.exists() {
+            return None;
+        }
+        orca_core::config::ServicesConfig::load(mono)
+    };
+    match loaded {
+        Ok(cfg) => cfg.service.into_iter().find(|s| s.name == service_name),
+        Err(e) => {
+            tracing::warn!(
+                "redeploy {service_name}: using the cached config, reloading failed: {e}"
+            );
+            None
+        }
     }
-    // Monolithic services.toml fallback
-    let mono = std::path::Path::new("services.toml");
-    if mono.exists()
-        && let Ok(cfg) = orca_core::config::ServicesConfig::load(mono)
-    {
-        return cfg.service.into_iter().find(|s| s.name == service_name);
-    }
-    None
 }
 
 /// Redeploy a service using a rolling update: start new instances before
@@ -247,6 +256,44 @@ mod tests {
             let result = load_fresh_config("myapp");
             assert!(result.is_some());
             assert_eq!(result.unwrap().name, "myapp");
+        });
+    }
+
+    #[test]
+    fn load_fresh_config_keeps_the_project_and_network_of_its_directory() {
+        // #287: `services/git-t0001-stage/service.toml` was read on its own,
+        // so a redeploy lost the project and resolved project-scoped secrets
+        // against the global scope.
+        let tmp = tempfile::tempdir().unwrap();
+        let svc_dir = tmp.path().join("services").join("git-t0001-stage");
+        std::fs::create_dir_all(&svc_dir).unwrap();
+        std::fs::write(
+            svc_dir.join("service.toml"),
+            "[[service]]\nname = \"git-t0001-stage\"\nimage = \"gitea:1\"\nport = 3000\n\
+             [service.env]\nDB_PASS = \"${secrets.GIT_DB_PASSWORD}\"\n",
+        )
+        .unwrap();
+        with_cwd(tmp.path(), || {
+            let cfg = load_fresh_config("git-t0001-stage").expect("found");
+            assert_eq!(cfg.project.as_deref(), Some("git-t0001-stage"));
+            assert_eq!(cfg.network.as_deref(), Some("git-t0001-stage"));
+        });
+    }
+
+    #[test]
+    fn load_fresh_config_finds_a_service_in_a_project_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let svc_dir = tmp.path().join("services").join("platform");
+        std::fs::create_dir_all(&svc_dir).unwrap();
+        std::fs::write(
+            svc_dir.join("service.toml"),
+            "[[service]]\nname = \"portal\"\nimage = \"portal:2\"\nport = 80\n",
+        )
+        .unwrap();
+        with_cwd(tmp.path(), || {
+            let cfg = load_fresh_config("portal").expect("found");
+            assert_eq!(cfg.image.as_deref(), Some("portal:2"));
+            assert_eq!(cfg.project.as_deref(), Some("platform"));
         });
     }
 
