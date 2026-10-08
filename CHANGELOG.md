@@ -7,8 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.9] - 2026-10-09
+
+One redeploy at a time per service, and agents with many containers stay
+connected.
+
 ### Fixed
 
+- **An agent with many containers kept losing its connection to the master
+  (#280, by @hauju).** A heartbeat queried the node's containers one at a
+  time, about 0.75 s each on Docker (status plus two stats samples), so 45
+  containers took about 35 s, past the master's 30 s idle deadline. The
+  master closed the session, the agent reconnected and reconciled, and the
+  cycle repeated: about 120 reconnects in 11 hours, every service on the
+  node shown as stopped, and deploys to it failing with "agent not
+  connected". Heartbeats now query up to 16 containers at once (about 2 s
+  for 45).
 - **Two redeploys of one service could still interleave (#291).** #279
   serialised whole-tree reconcile passes, but a redeploy (from a webhook,
   `orca redeploy` or a dependents restart) only marked its service and
