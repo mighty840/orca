@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.8] - 2026-10-08
+
+A master re-routes a container that Docker restarted on its own (no more
+502s after an OOM kill), and `orca redeploy` keeps a service's project, so
+project-scoped secrets resolve again. Failed operations report their whole
+error chain.
+
 ### Fixed
 
 - **A service on the master answered 502 after Docker restarted its
