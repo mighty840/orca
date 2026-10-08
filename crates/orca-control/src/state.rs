@@ -42,8 +42,8 @@ pub struct AppState {
     pub api_tokens: std::sync::RwLock<Vec<String>>,
     /// The cluster-token rotation in progress, if any (#210).
     pub token_rotation: RwLock<Option<crate::token_rotation::Rotation>>,
-    /// Services being deployed or reconciled right now (#173); see `in_flight`.
-    pub deploys_in_flight: std::sync::Mutex<HashMap<String, u32>>,
+    /// Services being worked on right now (#173, #291); see `in_flight`.
+    pub deploys_in_flight: std::sync::Mutex<crate::in_flight::Registry>,
     /// One whole-tree reconcile pass at a time (#279); see `reconciler::reconcile`.
     pub reconcile_pass: tokio::sync::Mutex<()>,
     /// Declared configs whose deploy failed, and when (#174); see `config_diff`.
@@ -279,7 +279,7 @@ impl AppState {
             webhooks: crate::webhook::new_store(),
             api_tokens: std::sync::RwLock::new(api_tokens),
             token_rotation: RwLock::new(None),
-            deploys_in_flight: std::sync::Mutex::new(HashMap::new()),
+            deploys_in_flight: std::sync::Mutex::default(),
             reconcile_pass: tokio::sync::Mutex::new(()),
             failed_deploys: RwLock::new(HashMap::new()),
             deploy_history: RwLock::new(crate::deploy_history::DeployHistory::new()),

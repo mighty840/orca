@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Two redeploys of one service could still interleave (#291).** #279
+  serialised whole-tree reconcile passes, but a redeploy (from a webhook,
+  `orca redeploy` or a dependents restart) only marked its service and
+  never waited for another redeploy of it. On 2026-10-08 two infra
+  webhooks redeployed the Prüfwerk stage images at once: one failed with
+  a 409 "container name already in use", and one removed the container
+  the other had just created, leaving the service without a container
+  until the watchdog recreated it. A redeploy now holds its service's lock,
+  so a second one waits and then runs. Different services still redeploy
+  in parallel.
+
 ## [0.3.0-rc.8] - 2026-10-08
 
 A master re-routes a container that Docker restarted on its own (no more

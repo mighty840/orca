@@ -177,3 +177,46 @@ async fn failure_counts_of_replaced_containers_are_dropped() {
     checker.check_all(&mut counts).await;
     assert!(counts.is_empty());
 }
+
+#[tokio::test]
+async fn a_second_redeploy_of_a_service_waits_for_the_first() {
+    // #291: two webhooks redeployed pruefwerk-mcp-stage at once; one removed
+    // the container the other had just created.
+    let runtime = Arc::new(MockRuntime::new());
+    let state = state(runtime.clone());
+    let web = config(serde_json::json!({"name": "web", "image": "nginx:1"}));
+    running(&state, web, "web-1").await;
+
+    // The first redeploy is still running.
+    let first = crate::in_flight::exclusive(&state, "web").await;
+    let s = state.clone();
+    let second = tokio::spawn(async move { crate::operations::redeploy(&s, "web").await });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(
+        runtime.recorded_ops().await.is_empty(),
+        "the second redeploy touched the containers while the first ran: {:?}",
+        runtime.recorded_ops().await
+    );
+
+    drop(first);
+    second.await.unwrap().unwrap();
+    assert_eq!(runtime.count(MockOpKind::Create).await, 1);
+}
+
+#[tokio::test]
+async fn redeploys_of_different_services_do_not_wait_for_each_other() {
+    let runtime = Arc::new(MockRuntime::new());
+    let state = state(runtime.clone());
+    let api = config(serde_json::json!({"name": "api", "image": "api:1"}));
+    running(&state, api, "api-1").await;
+
+    let _web = crate::in_flight::exclusive(&state, "web").await;
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        crate::operations::redeploy(&state, "api"),
+    )
+    .await
+    .expect("not blocked by web's operation")
+    .unwrap();
+    assert_eq!(runtime.count(MockOpKind::Create).await, 1);
+}
