@@ -22,10 +22,10 @@ fn ok_or_500(result: anyhow::Result<()>, op: &str) -> axum::response::Response {
     match result {
         Ok(()) => Json(serde_json::json!({"ok": op})).into_response(),
         Err(e) => {
-            error!("{op} failed: {e}");
+            error!("{op} failed: {e:#}");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("{op} failed: {e}"),
+                format!("{op} failed: {e:#}"),
             )
                 .into_response()
         }
@@ -269,6 +269,24 @@ mod tests {
         assert!(
             !state.log_listeners.read().await.contains_key(&request_id),
             "dangling listener must be cleaned up when agent is disconnected"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_op_reports_the_whole_error_chain() {
+        // #287: the 500 said "redeploy x failed: service x" and dropped the
+        // cause underneath that context.
+        use anyhow::Context;
+        use http_body_util::BodyExt;
+        let err: anyhow::Result<()> = Err(anyhow::anyhow!("secret 'GIT_DB_PASSWORD' not found"))
+            .context("service git-t0001-stage");
+        let resp = super::ok_or_500(err, "redeploy git-t0001-stage");
+        assert_eq!(resp.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(
+            String::from_utf8_lossy(&body),
+            "redeploy git-t0001-stage failed: service git-t0001-stage: \
+             secret 'GIT_DB_PASSWORD' not found"
         );
     }
 }

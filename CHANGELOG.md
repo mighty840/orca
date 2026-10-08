@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A service on the master answered 502 after Docker restarted its
+  container (#286).** A container publishes its port on `127.0.0.1:0`, so
+  when Docker's restart policy restarts it (for example after an OOM kill)
+  it gets a new random host port. The master kept routing to the old one
+  until the next deploy. The watchdog now re-reads each running
+  container's host port every cycle, logs "host port changed: the
+  container was restarted outside orca", and re-routes within 30 s. Agents
+  were not affected: they rebuild their routes from Docker every 5 s.
+- **`orca redeploy` lost the project of a service whose directory has its
+  own name (#287).** It read `services/<name>/service.toml` on its own, so
+  the service had no project and no default network. Project-scoped
+  `${secrets.KEY}` references failed to resolve (HTTP 500), or silently
+  took a global secret of the same name. This also hit the restart of a
+  dependent, which goes through the same path; on the platform cluster
+  that is both Gitea services (`git-t0001-stage`, `git-k00001-prod`). The
+  redeploy now loads the services tree the way `orca deploy` does.
+- **A failed operation reported only its outermost error (#287).** The
+  scale, stop and redeploy-style endpoints logged and returned `{e}`,
+  e.g. "redeploy x failed: service x". They now include the whole cause
+  chain.
+
 ## [0.3.0-rc.7] - 2026-10-06
 
 One operation at a time per service, on the master and on the agents: an

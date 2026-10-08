@@ -27,10 +27,10 @@ pub(crate) async fn scale(
         })
         .into_response(),
         Err(e) => {
-            error!("scale {name} failed: {e}");
+            error!("scale {name} failed: {e:#}");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("scale failed: {e}"),
+                format!("scale failed: {e:#}"),
             )
                 .into_response()
         }
@@ -113,7 +113,7 @@ pub(crate) async fn stop_project(
     };
     for name in &names {
         if let Err(e) = reconciler::stop(&state, name).await {
-            error!("stop {name} (project {project}) failed: {e}");
+            error!("stop {name} (project {project}) failed: {e:#}");
         }
     }
     Json(serde_json::json!({"ok": format!("stopped project {project}"), "stopped": names}))
