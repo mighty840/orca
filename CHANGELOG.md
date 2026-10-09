@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A container whose health check failed while it kept running was never
+  restarted (#294).** On 2026-10-08 the kernel OOM-killed clamd in
+  Prüfwerk's ClamAV container on stage. freshclam kept the container
+  running, so Docker's restart policy never fired, and Docker's own
+  `HEALTHCHECK` reported unhealthy for about 24 hours. orca only looked at
+  "running?" for a service without an HTTP probe, and agents don't run the
+  health checker at all. Now the master's health checker also counts a
+  failing Docker health check, for services without an HTTP probe, and
+  replaces the container after 3 failed checks. Agents look at their
+  containers' health checks every 30 s and restart an unhealthy one in place
+  (stop and start, same container), queued behind any deploy of the same
+  service.
+
 ## [0.3.0-rc.9] - 2026-10-09
 
 One redeploy at a time per service, and agents with many containers stay

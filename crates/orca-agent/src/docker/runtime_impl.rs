@@ -315,6 +315,22 @@ impl Runtime for ContainerRuntime {
         Ok(ws)
     }
 
+    async fn health(
+        &self,
+        handle: &WorkloadHandle,
+    ) -> Result<Option<orca_core::runtime::ContainerHealth>> {
+        let info = self
+            .docker
+            .inspect_container(&handle.runtime_id, None::<InspectContainerOptions>)
+            .await
+            .map_err(|e| OrcaError::Runtime(format!("inspect failed: {e}")))?;
+        Ok(info
+            .state
+            .and_then(|s| s.health)
+            .and_then(|h| h.status)
+            .and_then(container_health))
+    }
+
     async fn last_exit(
         &self,
         handle: &WorkloadHandle,
@@ -433,5 +449,19 @@ impl Runtime for ContainerRuntime {
         } else {
             Ok(None)
         }
+    }
+}
+
+/// Map Docker's `State.Health.Status`; `none` and empty mean no health check.
+fn container_health(
+    status: bollard::models::HealthStatusEnum,
+) -> Option<orca_core::runtime::ContainerHealth> {
+    use bollard::models::HealthStatusEnum as H;
+    use orca_core::runtime::ContainerHealth as C;
+    match status {
+        H::STARTING => Some(C::Starting),
+        H::HEALTHY => Some(C::Healthy),
+        H::UNHEALTHY => Some(C::Unhealthy),
+        H::NONE | H::EMPTY => None,
     }
 }

@@ -21,6 +21,7 @@ use std::time::Duration;
 
 use tokio::sync::Mutex;
 
+use crate::runtime::ContainerHealth;
 use crate::types::WorkloadStatus;
 
 /// A mock [`Runtime`](crate::runtime::Runtime) that tracks operations without
@@ -46,6 +47,9 @@ pub struct MockRuntime {
     /// runtime keeps it in a label. Set by `create`, or by
     /// [`MockRuntime::set_fingerprint`] to model an older container.
     fingerprints: Arc<Mutex<HashMap<String, Option<String>>>>,
+    /// Health check result per runtime_id; workloads without one have no
+    /// health check. See [`MockRuntime::set_health`].
+    healths: Arc<Mutex<HashMap<String, ContainerHealth>>>,
 }
 
 impl MockRuntime {
@@ -59,6 +63,7 @@ impl MockRuntime {
             mock_host_port: None,
             stats_delay: None,
             fingerprints: Arc::new(Mutex::new(HashMap::new())),
+            healths: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -173,6 +178,15 @@ impl MockRuntime {
             .lock()
             .await
             .insert(runtime_id.to_string(), status);
+    }
+
+    /// Give a workload a health check and set its result. Like Docker, a
+    /// `start` resets it to [`ContainerHealth::Starting`].
+    pub async fn set_health(&self, runtime_id: &str, health: ContainerHealth) {
+        self.healths
+            .lock()
+            .await
+            .insert(runtime_id.to_string(), health);
     }
 
     /// Append an operation record.

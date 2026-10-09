@@ -59,6 +59,16 @@ fn bounded_tail(text: &str, limit: usize) -> String {
 }
 
 impl AgentClient {
+    /// `(container id, service)` of every workload this agent runs.
+    pub(crate) async fn workload_ids(&self) -> Vec<(String, String)> {
+        self.workloads
+            .read()
+            .await
+            .iter()
+            .map(|(id, info)| (id.clone(), info.service_name.clone()))
+            .collect()
+    }
+
     /// Collect workload status reports with per-container stats for heartbeat.
     ///
     /// Queries the runtime for each workload's OBSERVED state instead of
@@ -73,13 +83,7 @@ impl AgentClient {
     ) -> Vec<orca_core::ws_types::WorkloadReport> {
         // Snapshot ids under the read lock, then query the runtime without
         // holding it (status/stats/log calls can be slow).
-        let snapshot: Vec<(String, String)> = self
-            .workloads
-            .read()
-            .await
-            .iter()
-            .map(|(id, info)| (id.clone(), info.service_name.clone()))
-            .collect();
+        let snapshot = self.workload_ids().await;
 
         let results: Vec<(String, WorkloadStatus, orca_core::ws_types::WorkloadReport)> =
             stream::iter(snapshot)
