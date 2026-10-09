@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.10] - 2026-10-09
+
+A container whose health check fails while it keeps running gets
+restarted, on the master and on agents.
+
 ### Fixed
 
 - **A container whose health check failed while it kept running was never
