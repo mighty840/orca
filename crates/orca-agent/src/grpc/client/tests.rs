@@ -107,3 +107,26 @@ async fn test_max_retries_exceeded() {
     assert_eq!(failed.len(), 1);
     assert_eq!(failed[0].1, MAX_COMMAND_RETRIES);
 }
+
+#[tokio::test]
+async fn a_redeploy_reports_only_the_new_container() {
+    // #297: the replaced container stayed in the workload map, so every
+    // heartbeat also reported it (as failed once Docker removed it), and the
+    // master showed the running service as stopped.
+    let runtime = orca_core::testing::MockRuntime::new();
+    let agent = AgentClient::new("http://127.0.0.1:9".into(), 1);
+    let other = make_test_spec("db");
+    agent.deploy_spec(&runtime, &other).await.unwrap();
+    let web = make_test_spec("web");
+    agent.deploy_spec(&runtime, &web).await.unwrap();
+    agent.deploy_spec(&runtime, &web).await.unwrap();
+
+    let reports = agent.collect_workload_reports(&runtime).await;
+    let web_reports: Vec<_> = reports.iter().filter(|r| r.service_name == "web").collect();
+    assert_eq!(web_reports.len(), 1, "{reports:?}");
+    assert_eq!(web_reports[0].container_id.as_deref(), Some("mock-3"));
+    assert!(
+        reports.iter().any(|r| r.service_name == "db"),
+        "other services are kept"
+    );
+}

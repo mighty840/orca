@@ -346,6 +346,14 @@ impl AgentClient {
     ) -> anyhow::Result<()> {
         let handle = runtime.create(spec).await?;
         runtime.start(&handle).await?;
+        // The container this one replaced is gone: forget it (#297). Kept,
+        // every heartbeat reported it as failed next to the new one, and the
+        // master, which keeps one status per service and node, showed the
+        // service as stopped and redeployed it on the next full pass.
+        self.workloads
+            .write()
+            .await
+            .retain(|id, info| info.service_name != spec.name || *id == handle.runtime_id);
         self.update_workload_status(&handle.runtime_id, &spec.name, WorkloadStatus::Running)
             .await;
         Ok(())

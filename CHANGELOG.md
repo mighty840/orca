@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **After a redeploy, an agent kept reporting the container it replaced
+  (#297).** The agent added the new container to its workload list but
+  never removed the old one, so every heartbeat also reported the removed
+  container as failed. The master keeps one status per service and node,
+  so a running service could show as stopped (a customer Gitea on
+  bp-platform-prod on 2026-10-09). The "same spec, already running" skip
+  then no longer applied, so the next full pass, such as any infra
+  webhook, recreated the service: two pushes 11 s apart replaced a ClamAV
+  container twice. A successful deploy now drops the other containers of
+  that service from the list. Until the agent runs this version,
+  restarting it clears the stale entries.
+
 ## [0.3.0-rc.10] - 2026-10-09
 
 A container whose health check fails while it keeps running gets
