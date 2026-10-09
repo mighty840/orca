@@ -23,6 +23,8 @@ use crate::grpc::AgentClient;
 pub(crate) enum ServiceOp {
     Deploy(Box<WorkloadSpec>),
     Stop,
+    /// Restart this container if its health check still fails (#294).
+    RestartIfUnhealthy(String),
 }
 
 /// What every operation needs: this session's runtime and channels.
@@ -80,6 +82,10 @@ fn spawn_worker(service: String, ctx: OpContext) -> mpsc::UnboundedSender<Servic
                     .await
                 }
                 ServiceOp::Stop => ctx.agent.stop_service(ctx.runtime.as_ref(), &service).await,
+                ServiceOp::RestartIfUnhealthy(id) => {
+                    super::health_watch::restart_if_unhealthy(ctx.runtime.as_ref(), &service, &id)
+                        .await
+                }
             }
         }
     });

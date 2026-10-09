@@ -10,7 +10,7 @@ use std::time::Duration;
 use tracing::{error, info, warn};
 
 use orca_core::config::ProbeConfig;
-use orca_core::runtime::{Runtime, WorkloadHandle};
+use orca_core::runtime::{ContainerHealth, Runtime, WorkloadHandle};
 use orca_core::types::{HealthState, RuntimeKind, WorkloadStatus};
 
 use crate::routes::{service_config_to_spec, update_container_routes};
@@ -29,6 +29,24 @@ pub fn spawn_health_checker(state: Arc<AppState>) {
         let checker = HealthChecker::new(state);
         checker.run(DEFAULT_INTERVAL).await;
     });
+}
+
+/// Health of an instance without an HTTP probe: it must be running, and its
+/// own health check (Docker `HEALTHCHECK`), if it has one, must not report
+/// unhealthy. A container whose main process died while another one keeps
+/// it running is still `running` to Docker (#294: clamd OOM-killed, freshclam
+/// alive); only its health check notices.
+async fn runtime_healthy(runtime: &dyn Runtime, handle: &WorkloadHandle) -> bool {
+    let running = runtime
+        .status(handle)
+        .await
+        .unwrap_or(WorkloadStatus::Failed)
+        == WorkloadStatus::Running;
+    running
+        && !matches!(
+            runtime.health(handle).await,
+            Ok(Some(ContainerHealth::Unhealthy))
+        )
 }
 
 /// Runs periodic health checks against service instances and restarts failed ones.
@@ -140,24 +158,11 @@ impl HealthChecker {
                 if inst.runtime_id.starts_with("remote-") {
                     continue;
                 }
-                let healthy = if let Some(path) = &target.health_path {
-                    if let Some(port) = inst.host_port {
-                        self.probe_with_timeout(port, path, timeout).await
-                    } else {
-                        runtime
-                            .status(&inst.handle)
-                            .await
-                            .unwrap_or(WorkloadStatus::Failed)
-                            == WorkloadStatus::Running
-                    }
-                } else {
+                let healthy = match (&target.health_path, inst.host_port) {
+                    (Some(path), Some(port)) => self.probe_with_timeout(port, path, timeout).await,
                     // No HTTP endpoint — runtime status is the health signal.
                     // Catches databases stuck after events like disk-full.
-                    runtime
-                        .status(&inst.handle)
-                        .await
-                        .unwrap_or(WorkloadStatus::Failed)
-                        == WorkloadStatus::Running
+                    _ => runtime_healthy(runtime, &inst.handle).await,
                 };
                 let count = failure_counts.entry(inst.runtime_id.clone()).or_insert(0);
 

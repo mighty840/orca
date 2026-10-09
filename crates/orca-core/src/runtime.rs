@@ -50,6 +50,17 @@ pub struct ContainerExit {
     pub oom_killed: bool,
 }
 
+/// The result of a workload's own health check (Docker `HEALTHCHECK`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContainerHealth {
+    /// Within the start period, or no check has finished yet.
+    Starting,
+    /// The last check passed.
+    Healthy,
+    /// The check failed `retries` times in a row.
+    Unhealthy,
+}
+
 /// Result of executing a command inside a workload.
 #[derive(Debug)]
 pub struct ExecResult {
@@ -109,6 +120,12 @@ pub trait Runtime: AsAny + Send + Sync + 'static {
     /// returns an empty record for runtimes that don't track this.
     async fn last_exit(&self, _handle: &WorkloadHandle) -> Result<ContainerExit> {
         Ok(ContainerExit::default())
+    }
+
+    /// The workload's own health check result (Docker `HEALTHCHECK`), or
+    /// `None` when it has none or the runtime has no such notion (#294).
+    async fn health(&self, _handle: &WorkloadHandle) -> Result<Option<ContainerHealth>> {
+        Ok(None)
     }
 
     /// The spec fingerprint a workload was created with (#213), read back

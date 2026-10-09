@@ -9,7 +9,9 @@ use chrono::Utc;
 
 use super::{MockOp, MockOpKind, MockRuntime};
 use crate::error::{OrcaError, Result};
-use crate::runtime::{AsAny, ExecResult, LogOpts, LogStream, Runtime, WorkloadHandle};
+use crate::runtime::{
+    AsAny, ContainerHealth, ExecResult, LogOpts, LogStream, Runtime, WorkloadHandle,
+};
 use crate::types::{ResourceStats, WorkloadSpec, WorkloadStatus};
 
 /// Build the error returned for an injected failure.
@@ -79,7 +81,14 @@ impl Runtime for MockRuntime {
             .lock()
             .await
             .insert(handle.runtime_id.clone(), WorkloadStatus::Running);
+        if let Some(h) = self.healths.lock().await.get_mut(&handle.runtime_id) {
+            *h = ContainerHealth::Starting;
+        }
         Ok(())
+    }
+
+    async fn health(&self, handle: &WorkloadHandle) -> Result<Option<ContainerHealth>> {
+        Ok(self.healths.lock().await.get(&handle.runtime_id).copied())
     }
 
     async fn stop(&self, handle: &WorkloadHandle, timeout: Duration) -> Result<()> {

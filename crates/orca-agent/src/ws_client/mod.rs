@@ -14,6 +14,7 @@ mod backup;
 mod backup_status;
 pub mod connect;
 mod deploy;
+mod health_watch;
 mod logs;
 pub mod network_status;
 mod reconcile;
@@ -126,12 +127,14 @@ async fn handle_ws_session(
 
     // Shared output channel — heartbeat + log/backup responses all funnel here.
     let (out_tx, mut out_rx) = mpsc::channel::<AgentMessage>(128);
-    let service_ops = service_queue::ServiceQueues::new(service_queue::OpContext {
-        runtime: runtime.clone(),
-        agent: agent.clone(),
-        domain_tx: domain_tx.clone(),
-        out_tx: out_tx.clone(),
-    });
+    let service_ops = Arc::new(service_queue::ServiceQueues::new(
+        service_queue::OpContext {
+            runtime: runtime.clone(),
+            agent: agent.clone(),
+            domain_tx: domain_tx.clone(),
+            out_tx: out_tx.clone(),
+        },
+    ));
 
     // Dedicated WS writer task.
     let write_task = tokio::spawn(async move {
@@ -166,6 +169,17 @@ async fn handle_ws_session(
             if hb_tx.send(msg).await.is_err() {
                 break;
             }
+        }
+    });
+
+    // Restart containers whose health check fails (#294), through the
+    // service queues so a restart never overlaps a deploy.
+    let (rt, agent_c, ops) = (runtime.clone(), agent.clone(), service_ops.clone());
+    let health_handle = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(health_watch::INTERVAL);
+        loop {
+            interval.tick().await;
+            health_watch::queue_unhealthy(rt.as_ref(), &agent_c, &ops).await;
         }
     });
 
@@ -219,6 +233,7 @@ async fn handle_ws_session(
 
     write_task.abort();
     heartbeat_handle.abort();
+    health_handle.abort();
     Ok(())
 }
 

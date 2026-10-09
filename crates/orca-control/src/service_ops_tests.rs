@@ -220,3 +220,59 @@ async fn redeploys_of_different_services_do_not_wait_for_each_other() {
     .unwrap();
     assert_eq!(runtime.count(MockOpKind::Create).await, 1);
 }
+
+#[tokio::test]
+async fn a_running_container_whose_health_check_fails_is_restarted() {
+    // #294: clamd was OOM-killed, freshclam kept the container running, and
+    // Docker's HEALTHCHECK said unhealthy for a day. With no HTTP probe the
+    // health checker only asked "running?" and never restarted it.
+    let runtime = Arc::new(MockRuntime::new());
+    let state = state(runtime.clone());
+    let clamav = config(serde_json::json!({"name": "clamav", "image": "clamav/clamav:1.4"}));
+    running(&state, clamav, "clamav-1").await;
+    runtime
+        .set_status("clamav-1", WorkloadStatus::Running)
+        .await;
+    runtime
+        .set_health("clamav-1", orca_core::runtime::ContainerHealth::Unhealthy)
+        .await;
+
+    let checker = crate::health::HealthChecker::new(state.clone());
+    let mut counts = HashMap::new();
+    for _ in 0..3 {
+        checker.check_all(&mut counts).await;
+    }
+    assert_eq!(
+        runtime.count(MockOpKind::Create).await,
+        1,
+        "replaced after 3 failed checks: {:?}",
+        runtime.recorded_ops().await
+    );
+}
+
+#[tokio::test]
+async fn a_container_whose_health_check_is_starting_or_passing_is_left_alone() {
+    let runtime = Arc::new(MockRuntime::new());
+    let state = state(runtime.clone());
+    for (name, health) in [
+        ("booting", orca_core::runtime::ContainerHealth::Starting),
+        ("fine", orca_core::runtime::ContainerHealth::Healthy),
+    ] {
+        let cfg = config(serde_json::json!({"name": name, "image": "clamav/clamav:1.4"}));
+        running(&state, cfg, name).await;
+        runtime.set_status(name, WorkloadStatus::Running).await;
+        runtime.set_health(name, health).await;
+    }
+
+    let checker = crate::health::HealthChecker::new(state.clone());
+    let mut counts = HashMap::new();
+    for _ in 0..3 {
+        checker.check_all(&mut counts).await;
+    }
+    assert!(
+        runtime.recorded_ops().await.is_empty(),
+        "{:?}",
+        runtime.recorded_ops().await
+    );
+    assert!(counts.values().all(|c| *c == 0), "{counts:?}");
+}
