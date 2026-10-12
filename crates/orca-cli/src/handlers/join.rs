@@ -214,14 +214,13 @@ async fn spawn_local_proxy(
     let acme = orca_proxy::acme::AcmeManager::new(acme_email, cache);
     acme.secure_key_material();
 
-    // Collect initial domains (may be empty on a fresh node).
-    let initial_domains: Vec<String> = runtime
-        .list_local_routes()
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .map(|r| r.domain)
-        .collect();
+    // Route the services already running here from the first request (may
+    // be none on a fresh node). The table used to be left empty until the
+    // refresher's first pass 5 s later, so every site answered 404 after an
+    // agent restart (#305).
+    let initial_routes = runtime.list_local_routes().await.unwrap_or_default();
+    let initial_domains: Vec<String> = initial_routes.iter().map(|r| r.domain.clone()).collect();
+    *route_table.write().await = route_table_from(&initial_routes);
 
     // The agent's local proxy serves node-local domains directly, so it also
     // injects the security-header policy. The agent has no cluster.toml, so it
@@ -287,30 +286,9 @@ async fn spawn_local_proxy(
                     continue;
                 }
             };
-            let mut new_table: HashMap<String, Vec<RouteTarget>> = HashMap::new();
-            let mut current: std::collections::HashSet<String> = std::collections::HashSet::new();
-            for r in routes {
-                current.insert(r.domain.clone());
-                // Emit one RouteTarget per declared path pattern; services
-                // without any `routes` entry get a single catch-all.
-                let patterns: Vec<Option<String>> = if r.routes.is_empty() {
-                    vec![None]
-                } else {
-                    r.routes.iter().map(|p| Some(p.clone())).collect()
-                };
-                for pattern in patterns {
-                    new_table
-                        .entry(r.domain.clone())
-                        .or_default()
-                        .push(RouteTarget {
-                            address: format!("127.0.0.1:{}", r.host_port),
-                            service_name: r.service.clone(),
-                            path_pattern: pattern,
-                            strip_prefix: r.strip_prefix.clone(),
-                            weight: 100,
-                        });
-                }
-            }
+            let new_table = route_table_from(&routes);
+            let current: std::collections::HashSet<String> =
+                routes.into_iter().map(|r| r.domain).collect();
             // New domains discovered since last refresh — hot-provision TLS certs.
             for d in current.difference(&known_domains) {
                 info!("Discovered new domain on this node: {d}");
@@ -331,4 +309,84 @@ async fn spawn_local_proxy(
     });
 
     (acme, resolver_out)
+}
+
+/// The proxy route table for the containers running on this node: one
+/// target per declared path pattern, a single catch-all for a service
+/// without `routes`.
+fn route_table_from(
+    routes: &[orca_agent::docker::LocalRoute],
+) -> HashMap<String, Vec<RouteTarget>> {
+    let mut table: HashMap<String, Vec<RouteTarget>> = HashMap::new();
+    for r in routes {
+        let patterns: Vec<Option<String>> = if r.routes.is_empty() {
+            vec![None]
+        } else {
+            r.routes.iter().map(|p| Some(p.clone())).collect()
+        };
+        for pattern in patterns {
+            table
+                .entry(r.domain.clone())
+                .or_default()
+                .push(RouteTarget {
+                    address: format!("127.0.0.1:{}", r.host_port),
+                    service_name: r.service.clone(),
+                    path_pattern: pattern,
+                    strip_prefix: r.strip_prefix.clone(),
+                    weight: 100,
+                });
+        }
+    }
+    table
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use orca_agent::docker::LocalRoute;
+
+    fn local(service: &str, domain: &str, port: u16, routes: &[&str]) -> LocalRoute {
+        LocalRoute {
+            service: service.into(),
+            domain: domain.into(),
+            host_port: port,
+            routes: routes.iter().map(|r| r.to_string()).collect(),
+            strip_prefix: None,
+        }
+    }
+
+    /// #305: the table built at startup must route every running service,
+    /// so the proxy has targets before the refresher's first pass.
+    #[test]
+    fn route_table_routes_every_running_service() {
+        let table = route_table_from(&[
+            local("portal", "app.example.com", 32880, &[]),
+            local("api", "api.example.com", 32881, &["/v1/*", "/health"]),
+            local("docs", "api.example.com", 32882, &["/docs/*"]),
+        ]);
+
+        let app = &table["app.example.com"];
+        assert_eq!(app.len(), 1);
+        assert_eq!(app[0].address, "127.0.0.1:32880");
+        assert_eq!(app[0].path_pattern, None);
+
+        let api = &table["api.example.com"];
+        let patterns: Vec<_> = api
+            .iter()
+            .map(|t| (t.service_name.as_str(), t.path_pattern.as_deref()))
+            .collect();
+        assert_eq!(
+            patterns,
+            [
+                ("api", Some("/v1/*")),
+                ("api", Some("/health")),
+                ("docs", Some("/docs/*")),
+            ]
+        );
+    }
+
+    #[test]
+    fn no_running_services_is_an_empty_table() {
+        assert!(route_table_from(&[]).is_empty());
+    }
 }
