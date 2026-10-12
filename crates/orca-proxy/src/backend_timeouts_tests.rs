@@ -110,4 +110,8 @@ async fn a_refused_connection_is_a_bad_gateway_with_its_cause() {
         chain.to_lowercase().contains("refused"),
         "the cause must be in the log line: {chain}"
     );
+    // #301: a backend that is down is not a stale pooled connection, so it
+    // is not retried.
+    assert!(!is_stale_connection(&e));
+    assert!(!is_stale_connection(&SendError::Idle("x".into())));
 }

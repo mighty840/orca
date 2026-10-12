@@ -220,3 +220,98 @@ async fn build_forward_request_sets_peer_when_client_sends_no_xff() {
         "203.0.113.7"
     );
 }
+
+/// A backend that answers the first request on a connection, then closes
+/// the connection under the second one, as an idle timeout does when the
+/// proxy reuses the pooled connection at that moment (#301). Every later
+/// connection is answered normally. Returns the address and a counter of
+/// accepted connections.
+async fn closes_reused_connection() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn read_request(sock: &mut tokio::net::TcpStream) -> bool {
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 1024];
+        while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            match sock.read(&mut chunk).await {
+                Ok(0) | Err(_) => return false,
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            }
+        }
+        true
+    }
+    const OK: &[u8] = b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok";
+
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap().to_string();
+    let accepted = std::sync::Arc::new(AtomicUsize::new(0));
+    let count = accepted.clone();
+    tokio::spawn(async move {
+        loop {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let first = count.fetch_add(1, Ordering::SeqCst) == 0;
+            tokio::spawn(async move {
+                if !read_request(&mut sock).await {
+                    return;
+                }
+                sock.write_all(OK).await.unwrap();
+                if first {
+                    // Read the reused request, then close without answering.
+                    read_request(&mut sock).await;
+                    return;
+                }
+                while read_request(&mut sock).await {
+                    if sock.write_all(OK).await.is_err() {
+                        return;
+                    }
+                }
+            });
+        }
+    });
+    (addr, accepted)
+}
+
+#[tokio::test]
+async fn a_get_on_a_connection_the_backend_closed_is_retried_once() {
+    let (addr, accepted) = closes_reused_connection().await;
+    let client = crate::backend_timeouts::client();
+    let url = format!("http://{addr}/healthz");
+    // Put a keep-alive connection in the pool.
+    assert_eq!(client.get(&url).send().await.unwrap().status(), 200);
+
+    let resp = send_bodyless(
+        client.get(&url),
+        || client.get(&url),
+        &reqwest::Method::GET,
+        &addr,
+        "/healthz",
+    )
+    .await
+    .expect("the retry on a fresh connection must succeed");
+
+    assert_eq!(resp.status(), 200);
+    assert_eq!(accepted.load(std::sync::atomic::Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn an_empty_post_on_a_connection_the_backend_closed_is_not_retried() {
+    let (addr, accepted) = closes_reused_connection().await;
+    let client = crate::backend_timeouts::client();
+    let url = format!("http://{addr}/session/refresh");
+    assert_eq!(client.get(&url).send().await.unwrap().status(), 200);
+
+    let err = send_bodyless(
+        client.post(&url),
+        || client.post(&url),
+        &reqwest::Method::POST,
+        &addr,
+        "/session/refresh",
+    )
+    .await
+    .expect_err("a POST must not be sent twice");
+
+    assert!(crate::backend_timeouts::is_stale_connection(&err), "{err}");
+    assert_eq!(err.status(), StatusCode::BAD_GATEWAY);
+    assert_eq!(accepted.load(std::sync::atomic::Ordering::SeqCst), 1);
+}

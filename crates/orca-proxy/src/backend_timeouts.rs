@@ -14,6 +14,14 @@
 //! - stream the response body with [`RESPONSE_IDLE`] per chunk.
 //!
 //! TCP keepalive on the client catches a backend that vanished.
+//!
+//! Pooled connections (#301): a backend closes an idle keep-alive connection
+//! after its own timeout (Go `IdleTimeout` as set by the app, Node and
+//! uvicorn 5 s, gunicorn 2 s). If the proxy reuses one just as the backend
+//! closes it, the request fails with "connection closed before message
+//! completed" or a reset. [`POOL_IDLE`] makes the proxy usually close first,
+//! but no single value is below every backend's timeout: the retry in
+//! `forward_streaming` (see [`is_stale_connection`]) is what fixes it.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -33,6 +41,9 @@ pub(crate) const RESPONSE_IDLE: Duration = Duration::from_secs(120);
 /// Log a still-pending request after this long. At 30 s, Gitea Actions'
 /// long polls produced ~15k warnings a week and buried real stalls.
 pub(crate) const SLOW_WARN: Duration = Duration::from_secs(120);
+/// How long an idle backend connection stays in the pool. Below Node's and
+/// uvicorn's 5 s default. Backends are local, so reconnecting is cheap.
+pub(crate) const POOL_IDLE: Duration = Duration::from_secs(4);
 
 /// The HTTP client for backend requests.
 pub(crate) fn client() -> reqwest::Client {
@@ -43,7 +54,7 @@ pub(crate) fn client() -> reqwest::Client {
         // No read_timeout: see the module docs. A backend that disappears
         // without closing the connection is caught by keepalive instead.
         .tcp_keepalive(Duration::from_secs(30))
-        .pool_idle_timeout(Duration::from_secs(90))
+        .pool_idle_timeout(POOL_IDLE)
         .build()
         .expect("failed to build HTTP client")
 }
@@ -187,6 +198,38 @@ fn error_chain(e: &dyn std::error::Error) -> String {
         next = cause.source();
     }
     out
+}
+
+/// Whether `e` means the backend closed the connection under the request,
+/// as when a pooled keep-alive connection is reused just as the backend's
+/// idle timeout closes it (#301). A refused connection or a timeout is not.
+pub(crate) fn is_stale_connection(e: &SendError) -> bool {
+    let SendError::Backend(e) = e else {
+        return false;
+    };
+    if e.is_connect() || e.is_timeout() {
+        return false;
+    }
+    let mut next: Option<&(dyn std::error::Error + 'static)> = Some(e);
+    while let Some(cause) = next {
+        if let Some(h) = cause.downcast_ref::<hyper::Error>()
+            && h.is_incomplete_message()
+        {
+            return true;
+        }
+        if let Some(io) = cause.downcast_ref::<std::io::Error>()
+            && matches!(
+                io.kind(),
+                std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::BrokenPipe
+            )
+        {
+            return true;
+        }
+        next = cause.source();
+    }
+    false
 }
 
 impl std::fmt::Display for SendError {
