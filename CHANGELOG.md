@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.13] - 2026-10-12
+
+An agent restart no longer makes its sites answer 404 for a few seconds.
+
 ### Fixed
 
 - **Every site on an agent answered 404 for about 5 s after the agent
