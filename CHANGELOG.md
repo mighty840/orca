@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0-rc.12] - 2026-10-12
+
+Dependents are restarted only once a redeployed dependency is ready, and the
+proxy no longer turns a backend's idle-connection close into a 502.
+
 ### Fixed
 
 - **After a dependency was redeployed on an agent, its dependents were
