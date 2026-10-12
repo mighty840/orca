@@ -32,20 +32,24 @@ pub async fn deploy_and_report(
     let result = agent.deploy_spec(runtime.as_ref(), &spec).await;
     let success = result.is_ok();
     let error = result.err().map(|e| e.to_string());
+    let handle = WorkloadHandle {
+        runtime_id: format!("orca-{}", spec.name),
+        name: format!("orca-{}", spec.name),
+        metadata: Default::default(),
+    };
+
+    // Report the deploy, and route to it, only once the container is ready:
+    // the master restarts its dependents when this deploy returns (#300).
+    if success {
+        super::readiness::wait_until_ready(runtime.as_ref(), &handle, &spec).await;
+    }
 
     // Notify the proxy of every domain for this service (each → same backend).
     let domains = spec.all_domains();
     if success
         && !domains.is_empty()
         && let Ok(Some(port)) = runtime
-            .resolve_host_port(
-                &WorkloadHandle {
-                    runtime_id: format!("orca-{}", spec.name),
-                    name: format!("orca-{}", spec.name),
-                    metadata: Default::default(),
-                },
-                spec.port.unwrap_or(80),
-            )
+            .resolve_host_port(&handle, spec.port.unwrap_or(80))
             .await
     {
         for domain in domains {

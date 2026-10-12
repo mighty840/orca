@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **After a dependency was redeployed on an agent, its dependents were
+  recreated while it was still starting (#300).** `orca redeploy` of an
+  agent-placed service returned as soon as the master had sent the deploy,
+  before the agent had created the new container, and
+  `restart_dependents` then recreated the dependents at once. A Go service
+  whose postgres was redeployed exited on its first failed connect and
+  stayed down; a SigNoz collector started against a ClickHouse that was
+  still loading reported itself ready and wrote nothing for 11 minutes.
+  The redeploy now waits for the agent's result, as the declarative path
+  already did. The agent reports a deploy only once the new container is
+  ready: its health check passes or, without one, its port accepts
+  connections on the service network. It waits at most 120 s and never
+  fails a deploy over it. Both halves need the new version: on an older
+  agent the redeploy waits only for the container to start.
+
 - **Sporadic 502 "connection closed before message completed" from a
   healthy backend (#301).** The proxy kept idle backend connections for
   90 s, but backends close them sooner: a Go service after its

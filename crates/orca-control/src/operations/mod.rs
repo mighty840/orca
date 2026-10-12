@@ -135,21 +135,20 @@ pub async fn redeploy(state: &AppState, service_name: &str) -> anyhow::Result<()
 
     if let Some(node_id) = remote_node {
         let spec = crate::routes::service_config_to_spec(&config)?;
-        let agents = state.ws_agents.read().await;
-        if let Some(tx) = agents.get(&node_id) {
-            let _ = tx
-                .send(MasterMessage::Stop {
-                    service_name: service_name.to_string(),
-                })
-                .await;
-            tx.send(MasterMessage::Deploy {
-                spec: Box::new(spec),
-            })
-            .await
-            .map_err(|_| anyhow::anyhow!("agent {node_id} channel closed"))?;
-        } else {
+        let tx = state.ws_agents.read().await.get(&node_id).cloned();
+        let Some(tx) = tx else {
             return Err(anyhow::Error::new(AgentOfflineError { node_id }));
-        }
+        };
+        let _ = tx
+            .send(MasterMessage::Stop {
+                service_name: service_name.to_string(),
+            })
+            .await;
+        // Wait for the agent's DeployResult, which it sends once the new
+        // container is ready. Returning on send let restart_dependents
+        // recreate the dependents while the dependency was still starting
+        // (#300).
+        crate::remote_deploy::queue_remote_deploy(state, node_id, &spec).await?;
         info!("Redeployed service {service_name} via agent {node_id}");
         return Ok(());
     }

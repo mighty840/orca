@@ -6,6 +6,7 @@ mod runtime;
 mod runtime_impl;
 mod stats;
 
+pub(crate) use config_builder::network_name;
 pub use runtime::ContainerRuntime;
 
 /// Label applied to all orca-managed containers for identification and cleanup.
