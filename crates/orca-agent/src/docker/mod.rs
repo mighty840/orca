@@ -7,7 +7,7 @@ mod runtime_impl;
 mod stats;
 
 pub(crate) use config_builder::network_name;
-pub use runtime::ContainerRuntime;
+pub use runtime::{ContainerRuntime, LocalRoute};
 
 /// Label applied to all orca-managed containers for identification and cleanup.
 pub(crate) const ORCA_LABEL: &str = "orca.managed";

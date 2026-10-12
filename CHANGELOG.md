@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Every site on an agent answered 404 for about 5 s after the agent
+  restarted (#305).** The agent started its proxy with the domains and
+  certificates of the running containers but an empty route table, which
+  the route refresher filled only after its first 5 s sleep. During an
+  upgrade on 2026-10-12, four production domains returned 404 until then.
+  The table is now built before the proxy starts.
+
 ## [0.3.0-rc.12] - 2026-10-12
 
 Dependents are restarted only once a redeployed dependency is ready, and the
