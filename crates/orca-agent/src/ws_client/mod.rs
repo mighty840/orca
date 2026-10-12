@@ -17,6 +17,7 @@ mod deploy;
 mod health_watch;
 mod logs;
 pub mod network_status;
+mod readiness;
 mod reconcile;
 mod service_queue;
 

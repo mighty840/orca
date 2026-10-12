@@ -279,3 +279,69 @@ async fn unchanged_remote_spec_is_not_redispatched() {
     drop(rx); // no agent to ack — let the deploy fail; not under test here
     let _ = handle.await;
 }
+
+/// #300: `orca redeploy` of an agent-placed service returned as soon as the
+/// Deploy was sent, before the agent had even created the new container, so
+/// restart_dependents recreated the dependents while the dependency was
+/// still starting. It must return only with the agent's DeployResult, which
+/// the agent sends once the container is ready.
+#[tokio::test]
+async fn a_manual_redeploy_of_a_remote_service_waits_for_the_agent() {
+    let state = make_state(ClusterConfig::default());
+    register_node(&state, 1).await;
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<MasterMessage>(8);
+    state
+        .ws_agents
+        .write()
+        .await
+        .insert(1, orca_control::state::AgentSession::new(tx));
+    state.services.write().await.insert(
+        "db".into(),
+        orca_control::state::ServiceState::from_config(config_placed_on("db", "node-1")),
+    );
+
+    let state_c = state.clone();
+    let redeploy =
+        tokio::spawn(async move { orca_control::reconciler::redeploy(&state_c, "db").await });
+
+    for expected in ["Stop", "Deploy"] {
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("master should send a message")
+            .expect("channel open");
+        let got = match msg {
+            MasterMessage::Stop { .. } => "Stop",
+            MasterMessage::Deploy { .. } => "Deploy",
+            _ => "other",
+        };
+        assert_eq!(got, expected);
+    }
+
+    // The agent got the command but is still starting the container.
+    state
+        .pending_deploy_acks
+        .write()
+        .await
+        .remove("db")
+        .expect("receipt waiter registered")
+        .send(())
+        .ok();
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(
+        !redeploy.is_finished(),
+        "the redeploy must not return before the agent reports the result"
+    );
+
+    state
+        .pending_deploys
+        .write()
+        .await
+        .remove("db")
+        .expect("result waiter registered")
+        .send(Ok(()))
+        .ok();
+    redeploy
+        .await
+        .unwrap()
+        .expect("redeploy succeeds once the agent reports");
+}
