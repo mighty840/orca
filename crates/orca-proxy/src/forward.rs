@@ -293,6 +293,8 @@ pub(crate) async fn forward_with_retry(
 /// routes with exactly one target, notably Docker registry blob *pushes*
 /// (100MB+ layers) which previously buffered fully in the proxy task and were a
 /// contributing factor in the accept-loop starvation seen in v0.2.9-rc.2.
+/// A bodyless GET/HEAD/OPTIONS is still sent once more when the backend
+/// closed a reused connection under it ([`send_bodyless`], #301).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn forward_streaming(
     client: &reqwest::Client,
@@ -326,25 +328,41 @@ pub(crate) async fn forward_streaming(
     // no `Content-Type` — which broke every empty-body POST through the proxy.
     // Only non-empty bodies are streamed (the large-blob case #102 targets).
     use hyper::body::Body as _;
-    // The upload is tracked chunk by chunk, so a long upload that keeps
-    // making progress is never cut off (#187).
-    let (forward_req, upload) = if body.size_hint().exact() == Some(0) {
-        (
-            forward_req.body(reqwest::Body::from(Vec::<u8>::new())),
-            crate::backend_timeouts::Upload::none(),
+    let sent = if body.size_hint().exact() == Some(0) {
+        let rebuild = || {
+            build_forward_request(
+                client,
+                target,
+                method,
+                headers,
+                path_and_query,
+                host,
+                is_tls,
+                &client_ip,
+            )
+            .0
+        };
+        send_bodyless(
+            forward_req,
+            rebuild,
+            method,
+            &target.address,
+            path_and_query,
         )
+        .await
     } else {
+        // The upload is tracked chunk by chunk, so a long upload that keeps
+        // making progress is never cut off (#187).
         let upload = crate::backend_timeouts::Upload::started();
         let tracked = upload.track(BodyDataStream::new(body));
-        (
-            forward_req.body(reqwest::Body::wrap_stream(tracked)),
-            upload,
+        crate::backend_timeouts::send(
+            forward_req.body(reqwest::Body::wrap_stream(tracked)).send(),
+            &upload,
+            &target.address,
+            path_and_query,
         )
+        .await
     };
-
-    let sent =
-        crate::backend_timeouts::send(forward_req.send(), &upload, &target.address, path_and_query)
-            .await;
     match sent {
         Ok(resp) => build_response(resp),
         Err(e) => {
@@ -352,6 +370,38 @@ pub(crate) async fn forward_streaming(
             super::handler::error_response(e.status(), e.client_message())
         }
     }
+}
+
+/// Send a request with an empty body. If the backend closed the connection
+/// under it, as when a pooled keep-alive connection is reused just as the
+/// backend's idle timeout closes it (#301), a GET/HEAD/OPTIONS is sent once
+/// more with a request from `rebuild`.
+pub(crate) async fn send_bodyless(
+    request: reqwest::RequestBuilder,
+    rebuild: impl FnOnce() -> reqwest::RequestBuilder,
+    method: &reqwest::Method,
+    backend: &str,
+    path: &str,
+) -> Result<reqwest::Response, crate::backend_timeouts::SendError> {
+    use crate::backend_timeouts::{Upload, is_stale_connection, send};
+    let empty = || reqwest::Body::from(Vec::<u8>::new());
+    let upload = Upload::none();
+    match send(request.body(empty()).send(), &upload, backend, path).await {
+        Err(e) if is_replayable(method) && is_stale_connection(&e) => {
+            debug!("Stale connection to {backend}: {e}, retrying once");
+            send(rebuild().body(empty()).send(), &upload, backend, path).await
+        }
+        other => other,
+    }
+}
+
+/// Methods a request may be sent twice with: safe ones only. An empty POST
+/// may already have taken effect before the connection dropped.
+fn is_replayable(method: &reqwest::Method) -> bool {
+    matches!(
+        *method,
+        reqwest::Method::GET | reqwest::Method::HEAD | reqwest::Method::OPTIONS
+    )
 }
 
 /// Build a `308 Permanent Redirect` to HTTPS. A 301 lets clients turn a

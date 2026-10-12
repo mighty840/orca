@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Sporadic 502 "connection closed before message completed" from a
+  healthy backend (#301).** The proxy kept idle backend connections for
+  90 s, but backends close them sooner: a Go service after its
+  `IdleTimeout` (60 s in this case), Node and uvicorn after 5 s by default.
+  When the proxy reused a connection just as the backend closed it, the
+  request failed, and single-target routes had no retry. On one prod agent
+  this happened 76 times in three days on a `GET /healthz`. A bodyless GET,
+  HEAD or OPTIONS request is now sent once more on a new connection when
+  the backend closed the connection under it. Other requests are not
+  repeated, since an empty POST may already have taken effect. Idle
+  connections now leave the pool after 4 s, so the proxy usually closes
+  first.
+
 ## [0.3.0-rc.11] - 2026-10-09
 
 After a redeploy an agent no longer reports the container it replaced, so
