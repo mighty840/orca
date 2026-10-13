@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-14
+
+0.3.0 hardens authentication, backups, deploys and the proxy. It is
+v0.3.0-rc.13 unchanged, after a soak on four production nodes. The rc sections
+below list every change.
+
+### Upgrade notes
+
+Read [Upgrading to 0.3.0](docs/src/content/docs/guide/upgrading.md) before
+upgrading from 0.2.x. In short:
+
+- **Upgrade the master before any agent.** A 0.3.0 agent can't register with
+  an older master, and agents join with the cluster token (rc.1).
+- **Deploys fail on an unresolved `${secrets.X}`** instead of passing the
+  literal text to the container (rc.2).
+- **Set `[backup] age_recipients` before the first nightly backup.** Volume
+  and config backups are encrypted, and backup failures are reported and
+  alerted (rc.2, rc.4).
+- **Stopping `orca server` no longer removes containers**, and random backend
+  host ports bind to `127.0.0.1` (rc.5).
+
+### Highlights
+
+- **Security:** the agent channel is admin-only, routes are deny-by-default,
+  webhooks fail closed without a valid signature, and `orca token rotate`
+  rotates the cluster token (rc.1, rc.5).
+- **Backups:** encrypted volume and config backups, bind-mount backups,
+  database pre-hooks that actually run, restore from S3, and retention
+  settings (rc.2, rc.4).
+- **Deploys:** one deploy per service at a time, an image bump replaces a
+  container once, a failed deploy keeps the healthy container, and dependents
+  restart only once a redeployed dependency is ready (rc.5 to rc.12).
+- **Proxy:** HTTP/2, 502s that carry their cause, no 120 s cut-off for
+  uploads, one retry for a GET on a closed pooled connection, and no 404
+  window after an agent restart (rc.2 to rc.13).
+- **Agents:** stay connected with many containers, restart containers whose
+  health check fails, and apply spec changes they missed while disconnected
+  (rc.2, rc.9, rc.10).
+- **TUI:** start, redeploy, roll back, token rotation, live logs, list filters,
+  and fixes for narrow terminals (rc.6).
+
 ## [0.3.0-rc.13] - 2026-10-12
 
 An agent restart no longer makes its sites answer 404 for a few seconds.
