@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.3.0] - 2026-10-14
+## [0.3.0] - 2026-10-16
 
 0.3.0 hardens authentication, backups, deploys and the proxy. It is
 v0.3.0-rc.13 unchanged, after a soak on four production nodes. The rc sections
