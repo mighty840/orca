@@ -34,7 +34,7 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - name: Install protoc
-        run: sudo apt-get install -y protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Format check
         run: cargo fmt --all -- --check
       - name: Clippy
@@ -71,7 +71,7 @@ jobs:
         with:
           key: arm64
       - name: Install cross-compiler and protoc
-        run: sudo apt-get install -y gcc-aarch64-linux-gnu protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu protobuf-compiler
       - name: Build release binary (ARM64)
         run: cargo build --release --target aarch64-unknown-linux-gnu
         env:
@@ -99,7 +99,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Install protoc
-        run: sudo apt-get install -y protobuf-compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Build
         run: cargo build
       - name: E2E tests
