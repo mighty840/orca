@@ -112,14 +112,17 @@ pub async fn update_container_routes(state: &AppState, config: &ServiceConfig) {
     // whole-path-trees 404ing after every deploy/health transition. Only
     // this service's own stale targets are dropped before extending; the
     // removal paths (remove/pause) already use the same retain semantics.
+    //
+    // An entry left empty stays: the service is still declared, just has no
+    // healthy instance (a redeploy's container swap, a failing health
+    // check). The proxy answers an empty entry 503 and an unknown host 404,
+    // and clients such as OTLP exporters retry the first but drop data on
+    // the second. remove/pause still delete the domain.
     let mut route_table = state.route_table.write().await;
     for domain in &domains {
         let entry = route_table.entry(domain.clone()).or_default();
         entry.retain(|t| t.service_name != config.name);
         entry.extend(targets.iter().cloned());
-        if entry.is_empty() {
-            route_table.remove(domain);
-        }
     }
 }
 

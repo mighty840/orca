@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Proxy: 503 instead of 404 while a service's containers are replaced.**
+  When a redeploy stopped a domain's only container, the route table lost
+  the domain and the proxy answered the unknown-host 404 until the new
+  container ran. Clients that treat 404 as final gave up; OTLP exporters
+  dropped telemetry. The master now keeps a declared service's domain as an
+  empty entry while it has no healthy instance, and agents keep a domain
+  whose last container stopped for up to 5 minutes. The proxy answers both
+  503. Removed or paused services, and domains gone longer, still give 404.
+
 ## [0.3.0] - 2026-10-16
 
 0.3.0 hardens authentication, backups, deploys and the proxy. It is

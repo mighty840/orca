@@ -88,3 +88,38 @@ async fn a_dead_backend_gives_a_502_without_leaking_its_address() {
         "internal address leaked: {body}"
     );
 }
+
+/// Starts a proxy over `routes` and returns the status of a GET for `host`.
+async fn status_for(routes: HashMap<String, Vec<RouteTarget>>, host: &str) -> u16 {
+    let routes = Arc::new(RwLock::new(routes));
+    let port = free_port().await;
+    let triggers = Arc::new(RwLock::new(Vec::new()));
+    tokio::spawn(async move {
+        let _ = run_proxy_with_fallback(routes, triggers, None, port, None, None, None).await;
+    });
+    while TcpStream::connect(("127.0.0.1", port)).await.is_err() {
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{port}/v1/logs"))
+        .header("host", host)
+        .send()
+        .await
+        .unwrap()
+        .status()
+        .as_u16()
+}
+
+/// A known host with no backend right now (a redeploy's container swap)
+/// answers 503, which clients retry; OTLP exporters drop data on a 404.
+#[tokio::test]
+async fn a_known_host_without_targets_answers_503() {
+    let routes = HashMap::from([("otel.test".to_string(), Vec::new())]);
+    assert_eq!(status_for(routes, "otel.test").await, 503);
+}
+
+#[tokio::test]
+async fn an_unknown_host_still_answers_404() {
+    let routes = HashMap::from([("otel.test".to_string(), Vec::new())]);
+    assert_eq!(status_for(routes, "other.test").await, 404);
+}

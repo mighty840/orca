@@ -12,6 +12,7 @@ pub mod import;
 pub mod install_service;
 pub mod join;
 pub(crate) mod join_control;
+pub(crate) mod join_routes;
 pub(crate) mod join_token;
 pub mod logs;
 pub mod ops;
