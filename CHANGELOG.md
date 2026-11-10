@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-10
+
+0.3.1 is 0.3.0 with one proxy fix. No config or upgrade steps.
+
 ### Fixed
 
 - **Proxy: 503 instead of 404 while a service's containers are replaced.**
@@ -1071,7 +1075,8 @@ reviewed and hardened before merge (see the release PR for the review notes).
 - Basic CLI: `orca server`, `orca deploy`, `orca status`, `orca logs`.
 - TOML-based service configuration.
 
-[Unreleased]: https://github.com/mighty840/orca/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/mighty840/orca/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/mighty840/orca/compare/v0.3.0...v0.3.1
 [0.2.3]: https://github.com/mighty840/orca/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/mighty840/orca/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/mighty840/orca/compare/v0.2.0...v0.2.1
