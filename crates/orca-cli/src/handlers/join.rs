@@ -7,6 +7,8 @@ use tracing::info;
 
 use orca_proxy::RouteTarget;
 
+use super::join_routes::{GONE_DOMAIN_GRACE, GoneDomains, route_table_from};
+
 /// Handle the `orca join` command — join this node to an existing cluster.
 pub async fn handle_join(
     leader_address: &str,
@@ -275,8 +277,11 @@ async fn spawn_local_proxy(
     let refresher = route_table.clone();
     let acme_for_refresh = acme.clone();
     tokio::spawn(async move {
+        // The domains of the last published table, including those kept
+        // empty while their container is being replaced (GoneDomains).
         let mut known_domains: std::collections::HashSet<String> =
             initial_domains.into_iter().collect();
+        let mut gone = GoneDomains::default();
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
             let routes = match runtime.list_local_routes().await {
@@ -286,7 +291,7 @@ async fn spawn_local_proxy(
                     continue;
                 }
             };
-            let new_table = route_table_from(&routes);
+            let mut new_table = route_table_from(&routes);
             let current: std::collections::HashSet<String> =
                 routes.into_iter().map(|r| r.domain).collect();
             // New domains discovered since last refresh — hot-provision TLS certs.
@@ -303,90 +308,16 @@ async fn spawn_local_proxy(
                     }
                 }
             }
-            known_domains = current;
+            gone.apply(
+                &known_domains,
+                &mut new_table,
+                std::time::Instant::now(),
+                GONE_DOMAIN_GRACE,
+            );
+            known_domains = new_table.keys().cloned().collect();
             *refresher.write().await = new_table;
         }
     });
 
     (acme, resolver_out)
-}
-
-/// The proxy route table for the containers running on this node: one
-/// target per declared path pattern, a single catch-all for a service
-/// without `routes`.
-fn route_table_from(
-    routes: &[orca_agent::docker::LocalRoute],
-) -> HashMap<String, Vec<RouteTarget>> {
-    let mut table: HashMap<String, Vec<RouteTarget>> = HashMap::new();
-    for r in routes {
-        let patterns: Vec<Option<String>> = if r.routes.is_empty() {
-            vec![None]
-        } else {
-            r.routes.iter().map(|p| Some(p.clone())).collect()
-        };
-        for pattern in patterns {
-            table
-                .entry(r.domain.clone())
-                .or_default()
-                .push(RouteTarget {
-                    address: format!("127.0.0.1:{}", r.host_port),
-                    service_name: r.service.clone(),
-                    path_pattern: pattern,
-                    strip_prefix: r.strip_prefix.clone(),
-                    weight: 100,
-                });
-        }
-    }
-    table
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use orca_agent::docker::LocalRoute;
-
-    fn local(service: &str, domain: &str, port: u16, routes: &[&str]) -> LocalRoute {
-        LocalRoute {
-            service: service.into(),
-            domain: domain.into(),
-            host_port: port,
-            routes: routes.iter().map(|r| r.to_string()).collect(),
-            strip_prefix: None,
-        }
-    }
-
-    /// #305: the table built at startup must route every running service,
-    /// so the proxy has targets before the refresher's first pass.
-    #[test]
-    fn route_table_routes_every_running_service() {
-        let table = route_table_from(&[
-            local("portal", "app.example.com", 32880, &[]),
-            local("api", "api.example.com", 32881, &["/v1/*", "/health"]),
-            local("docs", "api.example.com", 32882, &["/docs/*"]),
-        ]);
-
-        let app = &table["app.example.com"];
-        assert_eq!(app.len(), 1);
-        assert_eq!(app[0].address, "127.0.0.1:32880");
-        assert_eq!(app[0].path_pattern, None);
-
-        let api = &table["api.example.com"];
-        let patterns: Vec<_> = api
-            .iter()
-            .map(|t| (t.service_name.as_str(), t.path_pattern.as_deref()))
-            .collect();
-        assert_eq!(
-            patterns,
-            [
-                ("api", Some("/v1/*")),
-                ("api", Some("/health")),
-                ("docs", Some("/docs/*")),
-            ]
-        );
-    }
-
-    #[test]
-    fn no_running_services_is_an_empty_table() {
-        assert!(route_table_from(&[]).is_empty());
-    }
 }

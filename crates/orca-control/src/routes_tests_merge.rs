@@ -111,10 +111,11 @@ async fn reregistration_preserves_siblings_without_duplicates() {
     );
 }
 
-/// A service losing all healthy instances drops only its own targets; the
-/// domain entry disappears only once NO service holds targets on it.
+/// A service losing all healthy instances drops only its own targets. Once
+/// NO service holds targets the domain stays as an empty entry, which the
+/// proxy answers 503 (not the unknown-host 404) until an instance is back.
 #[tokio::test]
-async fn empty_targets_drop_own_entries_then_domain() {
+async fn empty_targets_drop_own_entries_then_leave_domain_empty() {
     let state = test_state();
     let storefront = svc_config("storefront", vec![]);
     let admin = svc_config("admin", vec!["/admin/*"]);
@@ -129,12 +130,22 @@ async fn empty_targets_drop_own_entries_then_domain() {
     }
 
     register(&state, &admin, &[]).await;
-    assert!(
-        !state
+    assert_eq!(
+        state
             .route_table
             .read()
             .await
-            .contains_key("shop.example.com"),
-        "domain entry must be removed once no service routes to it"
+            .get("shop.example.com")
+            .map(Vec::len),
+        Some(0),
+        "domain stays known, with no targets, while its services are down"
+    );
+
+    register(&state, &admin, &[8003]).await;
+    let routes = state.route_table.read().await;
+    assert_eq!(
+        routes["shop.example.com"].len(),
+        1,
+        "routes again once back"
     );
 }
