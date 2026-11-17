@@ -12,6 +12,9 @@ pub enum BackendError {
     /// The API could not be reached.
     #[error("cannot reach the orca API: {0}")]
     Transport(String),
+    /// `orca mcp`'s own read limit refused the call (see `limits`).
+    #[error("read limit: {per_minute} API reads per minute; retry in {retry_secs}s")]
+    Limited { per_minute: u32, retry_secs: u64 },
 }
 
 /// Read access to the orca API. PR 2 only reads.

@@ -200,6 +200,11 @@ pub enum Command {
         /// credential, so they are refused by default.
         #[arg(long)]
         allow_cluster_token: bool,
+        /// API reads per minute this server may make, for tools, resources
+        /// and prompts together. The master limits only changes, so a
+        /// model looping over logs is held back here.
+        #[arg(long, default_value_t = orca_mcp::READS_PER_MINUTE, value_parser = clap::value_parser!(u32).range(1..))]
+        reads_per_minute: u32,
     },
 
     /// Manage API tokens

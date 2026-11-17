@@ -12,6 +12,7 @@ pub async fn handle_mcp(
     api: &str,
     token: Option<&str>,
     allow_cluster_token: bool,
+    reads_per_minute: u32,
 ) -> anyhow::Result<()> {
     let api = crate::handlers::ops::resolve_api(api);
     let token = crate::handlers::server::read_token(token);
@@ -34,7 +35,7 @@ pub async fn handle_mcp(
         bail!(
             "refusing to serve MCP with '{}', a legacy api_tokens entry: it is admin, and the \
              cluster token is also the agents' join credential. Create a token for it with \
-             `orca token create --name mcp --role viewer` and pass --token, or pass \
+             `orca token create --name mcp --role viewer` and set ORCA_TOKEN, or pass \
              --allow-cluster-token",
             me.name
         );
@@ -45,6 +46,12 @@ pub async fn handle_mcp(
              inventory included"
         );
     }
-    tracing::info!(token = %me.name, role = ?me.role, "serving MCP on stdio for {api}");
-    orca_mcp::serve_stdio(backend, me).await
+    tracing::info!(
+        token = %me.name,
+        role = ?me.role,
+        reads_per_minute,
+        "serving MCP on stdio for {api}"
+    );
+    let limited: Arc<dyn ApiBackend> = Arc::new(orca_mcp::Limited::new(backend, reads_per_minute));
+    orca_mcp::serve_stdio(limited, me).await
 }

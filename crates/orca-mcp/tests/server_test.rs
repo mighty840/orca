@@ -230,3 +230,36 @@ async fn a_prompt_without_its_required_argument_is_an_error() {
         .unwrap_err();
     assert!(err.to_string().contains("service"), "{err}");
 }
+
+#[tokio::test]
+async fn reads_over_the_limit_fail_without_reaching_the_master() {
+    let api = Arc::new(api());
+    let limited = Arc::new(orca_mcp::Limited::new(api.clone(), 2));
+    let (server_io, client_io) = tokio::io::duplex(1 << 16);
+    tokio::spawn(async move {
+        if let Ok(running) = OrcaMcp::new(limited, me(Role::Viewer))
+            .serve(server_io)
+            .await
+        {
+            let _ = running.waiting().await;
+        }
+    });
+    let client = ().serve(client_io).await.unwrap();
+    let call = || {
+        client.call_tool(
+            CallToolRequestParams::new("get_service").with_arguments(args(&[("name", "web")])),
+        )
+    };
+
+    assert_eq!(call().await.unwrap().is_error, Some(false));
+    assert_eq!(call().await.unwrap().is_error, Some(false));
+    let third = call().await.unwrap();
+    assert_eq!(third.is_error, Some(true));
+    let text = &third.content[0].as_text().unwrap().text;
+    assert!(text.contains("2 API reads per minute"), "{text}");
+    assert_eq!(
+        api.seen.lock().unwrap().len(),
+        2,
+        "the refused call never reached the API"
+    );
+}

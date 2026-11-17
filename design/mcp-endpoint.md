@@ -463,9 +463,9 @@ New code goes in new files: `handlers/mod.rs` is already 253 lines, `api_types.r
 a new `orca-mcp` crate (Q1), its own small HTTP client (Q2), and `redact.rs` moved to
 `orca-core` with a re-export from `orca-ai` (Q6). rmcp is pinned to `=3.9.0` with
 `server` + `transport-io`. Differences from the plan above: one table (`catalog`)
-drives tools, resources and the `ROUTE_POLICY` test; no advisory client-side read
-limit yet, so MCP reads are neither rate-limited nor audited (both cover mutations and
-exec only): **open, for the maintainer to decide**; no
+drives tools, resources and the `ROUTE_POLICY` test; a client-side read limit in `orca mcp`
+(`limits.rs`, 60 API calls/min by default, `--reads-per-minute`), because the master's
+rate limit and audit cover mutations and exec only, so MCP reads are not audited; no
 `orca://services/{name}/metrics` (the numbers are in `get_status`/`get_service`).*
 
 **PR 3: `/mcp` Streamable HTTP on the master.**

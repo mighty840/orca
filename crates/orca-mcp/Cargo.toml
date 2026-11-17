@@ -20,4 +20,5 @@ reqwest = { workspace = true }
 async-trait = { workspace = true }
 
 [dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
 rmcp = { version = "=3.9.0", default-features = false, features = ["server", "client", "transport-io"] }

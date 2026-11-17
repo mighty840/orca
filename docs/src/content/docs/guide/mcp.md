@@ -44,6 +44,12 @@ secrets inventory needs an admin token. These are reads, so they are not in
 the [audit log](/reference/api) and not counted by `[api_rate_limit]`, which
 cover changes only.
 
+`orca mcp` limits its own reads instead: 60 API calls per minute by default
+(a burst of 60, then one per second), for tools, resources and prompts
+together; a prompt makes two or three. Over the limit a tool returns an
+error saying when to retry, and the call never reaches the master. Change
+it with `--reads-per-minute`.
+
 ## What the client sees
 
 | Tool | Resource | Reads |

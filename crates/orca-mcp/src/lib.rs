@@ -5,10 +5,12 @@
 //! is an `/api/v1` request made with the caller's token, so the master's
 //! role checks apply unchanged. (Its audit log and rate limit cover
 //! mutations and exec only, so these reads are neither audited nor
-//! limited.) See `design/mcp-endpoint.md`.
+//! limited there; `orca mcp` limits its own reads, see [`limits`].) See
+//! `design/mcp-endpoint.md`.
 
 pub mod backend;
 pub mod catalog;
+pub mod limits;
 pub mod output;
 pub mod prompts;
 pub mod server;
@@ -19,6 +21,7 @@ use orca_core::api_types::WhoAmI;
 use rmcp::ServiceExt;
 
 pub use backend::{ApiBackend, BackendError, HttpBackend};
+pub use limits::{Limited, READS_PER_MINUTE};
 pub use server::OrcaMcp;
 
 /// Ask the API who `backend`'s token belongs to.

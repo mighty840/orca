@@ -138,7 +138,16 @@ async fn main() -> anyhow::Result<()> {
         Command::Mcp {
             token,
             allow_cluster_token,
-        } => handlers::mcp::handle_mcp(&cli.api, token.as_deref(), allow_cluster_token).await?,
+            reads_per_minute,
+        } => {
+            handlers::mcp::handle_mcp(
+                &cli.api,
+                token.as_deref(),
+                allow_cluster_token,
+                reads_per_minute,
+            )
+            .await?
+        }
         Command::Rm { service, force } => {
             for s in service {
                 handlers::ops::handle_rm(&s, force, cli.api.clone()).await?;
