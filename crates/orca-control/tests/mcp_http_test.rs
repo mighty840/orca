@@ -14,6 +14,10 @@ const VIEWER: &str = "mcp-viewer-token";
 const DEPLOYER: &str = "mcp-deployer-token";
 
 async fn start(mcp: McpConfig, with_tokens: bool) -> u16 {
+    start_with(mcp, with_tokens, vec![]).await
+}
+
+async fn start_with(mcp: McpConfig, with_tokens: bool, api_tokens: Vec<String>) -> u16 {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let token = |name: &str, value: &str, role| ApiToken {
@@ -30,6 +34,7 @@ async fn start(mcp: McpConfig, with_tokens: bool) -> u16 {
         } else {
             vec![]
         },
+        api_tokens,
         mcp,
         ..Default::default()
     };
@@ -65,6 +70,7 @@ struct Session {
     port: u16,
     token: Option<&'static str>,
     host: Option<&'static str>,
+    origin: Option<&'static str>,
     id: Option<String>,
     next: u64,
 }
@@ -75,6 +81,7 @@ impl Session {
             port,
             token,
             host: None,
+            origin: None,
             id: None,
             next: 1,
         }
@@ -90,6 +97,9 @@ impl Session {
         }
         if let Some(h) = self.host {
             req = req.header("host", h);
+        }
+        if let Some(o) = self.origin {
+            req = req.header("origin", o);
         }
         if let Some(id) = &self.id {
             req = req.header("mcp-session-id", id);
@@ -189,6 +199,19 @@ async fn mcp_needs_a_valid_token_and_a_known_host() {
     foreign.host = Some("evil.example.com");
     let status = foreign.initialize().await;
     assert!((400..500).contains(&status), "DNS rebinding: {status}");
+
+    let mut page = Session::new(port, Some(VIEWER));
+    page.origin = Some("https://evil.example.com");
+    assert_eq!(page.initialize().await, 403, "a browser page");
+}
+
+#[tokio::test]
+async fn a_cluster_with_only_the_cluster_token_serves_mcp() {
+    let port = start_with(enabled(), false, vec!["cluster-token".into()]).await;
+    assert_eq!(
+        Session::new(port, Some("cluster-token")).initialize().await,
+        200
+    );
 }
 
 #[tokio::test]

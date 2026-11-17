@@ -70,7 +70,10 @@ called the API.
 
 - `/mcp` is never served on a cluster with no API tokens, even when enabled.
 - A request whose `Host` is not allowed is rejected (DNS-rebinding
-  protection).
+  protection), and so is one from a browser page: a request carrying an
+  `Origin` header is refused unless `[mcp] allowed_origins` lists it.
+- Reads are limited per token (`reads_per_minute`), but, as reads, they are
+  not in the audit log.
 - Port 6880 is plain HTTP. Reach it over your mesh network, or publish it
   through orca's proxy with TLS.
 

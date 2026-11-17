@@ -40,8 +40,14 @@ pub(crate) fn router(state: &Arc<AppState>, api: Router) -> Option<Router> {
     if !cfg.enabled {
         return None;
     }
-    let has_tokens =
-        !state.cluster_config.api_tokens.is_empty() || !state.cluster_config.token.is_empty();
+    // The lists auth_middleware reads: the runtime api_tokens (the cluster
+    // token among them) and [[token]].
+    let has_tokens = !state
+        .api_tokens
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .is_empty()
+        || !state.cluster_config.token.is_empty();
     if !has_tokens {
         tracing::warn!("[mcp] is enabled but no API tokens are configured: /mcp is not served");
         return None;
@@ -51,9 +57,14 @@ pub(crate) fn router(state: &Arc<AppState>, api: Router) -> Option<Router> {
         per_minute: cfg.reads_per_minute,
         budgets: Mutex::new(HashMap::new()),
     });
-    // Sessions (the default) keep clients on older protocol versions
-    // working; each request still carries, and is checked as, its token.
-    let config = StreamableHttpServerConfig::default().with_allowed_hosts(allowed_hosts(state));
+    // Sessions (the default; idle ones close after 5 minutes) keep clients
+    // on older protocol versions working; each request still carries, and
+    // is checked as, its token. A browser page must not drive /mcp: an
+    // Origin that is present and not in [mcp] allowed_origins is refused.
+    let config = StreamableHttpServerConfig::default()
+        .with_allowed_hosts(allowed_hosts(state))
+        .with_allowed_origins(cfg.allowed_origins.clone())
+        .enforce_origin_validation();
     let service = StreamableHttpService::new(
         move || Ok(OrcaMcp::per_request(connector.clone())),
         Arc::new(LocalSessionManager::default()),
