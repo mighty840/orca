@@ -31,6 +31,7 @@ pub mod reconciler;
 mod relocate;
 mod remote_deploy;
 mod remote_stop;
+pub mod removal;
 mod restore;
 pub mod routes;
 pub mod scheduler;

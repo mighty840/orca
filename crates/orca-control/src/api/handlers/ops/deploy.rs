@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use tracing::error;
@@ -84,6 +84,34 @@ pub(crate) async fn stop_service(
         reconciler::stop(&state, &name).await,
         &format!("stop {name}"),
     )
+}
+
+/// `?force=true` on [`remove_service`].
+#[derive(serde::Deserialize)]
+pub(crate) struct RemoveQuery {
+    #[serde(default)]
+    force: bool,
+}
+
+/// Remove a service for good (`orca rm`, #315): stop it, then drop it from
+/// the registry, the store and the proxy. Volumes and bind mounts are kept.
+/// `DELETE` on the service still pauses, so an older CLI or TUI never
+/// removes one by accident.
+pub(crate) async fn remove_service(
+    State(state): State<Arc<AppState>>,
+    Path(name): Path<String>,
+    Query(q): Query<RemoveQuery>,
+) -> axum::response::Response {
+    if !state.services.read().await.contains_key(&name) {
+        return (StatusCode::NOT_FOUND, format!("service '{name}' not found")).into_response();
+    }
+    match crate::removal::remove(&state, &name, q.force).await {
+        Ok(kept) => Json(serde_json::json!({ "removed": name, "kept": kept })).into_response(),
+        Err(e) => {
+            error!("remove {name} failed: {e:#}");
+            (StatusCode::CONFLICT, format!("remove {name}: {e:#}")).into_response()
+        }
+    }
 }
 
 /// Resume a paused service (`orca start`): clears the stopped mark and deploys

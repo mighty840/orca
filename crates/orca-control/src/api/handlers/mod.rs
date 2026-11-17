@@ -19,8 +19,8 @@ pub(crate) mod secrets;
 pub(crate) mod token_rotation;
 
 pub(crate) use ops::{
-    cluster_backups, cluster_networks, logs, promote, redeploy, rollback, scale, start_service,
-    stop_all, stop_project, stop_service, trigger_cluster_backup,
+    cluster_backups, cluster_networks, logs, promote, redeploy, remove_service, rollback, scale,
+    start_service, stop_all, stop_project, stop_service, trigger_cluster_backup,
 };
 
 /// Health check endpoint.

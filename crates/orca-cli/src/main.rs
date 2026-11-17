@@ -120,6 +120,11 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
+        Command::Rm { service, force } => {
+            for s in service {
+                handlers::ops::handle_rm(&s, force, cli.api.clone()).await?;
+            }
+        }
         Command::Start { service } => {
             for s in service {
                 handlers::ops::handle_start(&s, cli.api.clone()).await?;
