@@ -30,6 +30,7 @@ mod persist;
 pub(crate) mod placement;
 pub mod proto;
 pub mod raft;
+pub mod rate_limit;
 pub mod reconciler;
 mod relocate;
 mod remote_deploy;

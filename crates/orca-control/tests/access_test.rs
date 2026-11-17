@@ -16,6 +16,10 @@ const DEPLOYER: &str = "deployer-token";
 const SENTINEL: &str = "pw-sentinel-9f2";
 
 async fn start() -> (u16, Arc<AppState>) {
+    start_with(Default::default()).await
+}
+
+async fn start_with(limit: orca_core::config::ApiRateLimitConfig) -> (u16, Arc<AppState>) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let token = |name: &str, value: &str, role| ApiToken {
@@ -34,6 +38,7 @@ async fn start() -> (u16, Arc<AppState>) {
             token("dashboard", VIEWER, Role::Viewer),
             token("gitea-ci", DEPLOYER, Role::Deployer),
         ],
+        api_rate_limit: limit,
         ..Default::default()
     };
     let state = Arc::new(AppState::new(
@@ -208,4 +213,43 @@ async fn whoami_on_a_cluster_without_tokens_is_anonymous_admin() {
     assert_eq!(me["role"], "admin");
     assert_eq!(me["open"], true);
     assert_eq!(me["legacy"], false);
+}
+
+#[tokio::test]
+async fn an_enabled_rate_limit_holds_per_token_and_reads_are_free() {
+    let (port, _) = start_with(orca_core::config::ApiRateLimitConfig {
+        enabled: true,
+        mutations_per_minute: 2,
+    })
+    .await;
+    let scale = |token| call(port, "POST", "/api/v1/services/web/scale", Some(token));
+
+    assert_ne!(scale(DEPLOYER).await.0, 429);
+    assert_ne!(scale(DEPLOYER).await.0, 429);
+    let (status, body) = scale(DEPLOYER).await;
+    assert_eq!(status, 429, "{body}");
+    assert!(body.contains("gitea-ci"), "{body}");
+    assert_ne!(
+        scale(ADMIN).await.0,
+        429,
+        "another token has its own bucket"
+    );
+    for _ in 0..5 {
+        assert_eq!(
+            call(port, "GET", "/api/v1/status", Some(DEPLOYER)).await.0,
+            200
+        );
+    }
+
+    let (_, body) = call(port, "GET", "/api/v1/audit", Some(ADMIN)).await;
+    assert!(body.contains("429"), "the refusal is audited: {body}");
+}
+
+#[tokio::test]
+async fn the_rate_limit_is_off_by_default() {
+    let (port, _) = start().await;
+    for _ in 0..100 {
+        let (status, _) = call(port, "POST", "/api/v1/services/web/scale", Some(DEPLOYER)).await;
+        assert_ne!(status, 429);
+    }
 }

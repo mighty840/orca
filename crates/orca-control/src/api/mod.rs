@@ -96,6 +96,11 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .merge(webhook::webhook_router())
         .merge(cluster_handlers::cluster_router())
+        // Innermost: needs the caller, and its 429s are audited.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::rate_limit::rate_limit_middleware,
+        ))
         // Inside auth, so it sees the caller; auth records its denials.
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

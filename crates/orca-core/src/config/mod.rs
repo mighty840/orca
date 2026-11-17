@@ -1,4 +1,5 @@
 mod ai;
+mod api_limits;
 mod cluster;
 mod resolve_secrets;
 mod service;
@@ -14,6 +15,7 @@ pub use ai::{
     AiAlertConfig, AiConfig, AlertDeliveryChannels, AutoRemediateConfig, EmailChannelConfig,
     SmtpTls,
 };
+pub use api_limits::ApiRateLimitConfig;
 pub use cluster::NetworkConfig;
 pub use cluster::{
     AlertChannelConfig, ApiToken, CleanupConfig, ClusterConfig, ClusterMeta, DeployConfig,

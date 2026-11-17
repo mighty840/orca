@@ -56,6 +56,23 @@ A `[[token]]` or `api_tokens` entry whose `${secrets.X}` doesn't resolve, or
 that is empty, is dropped with an error; it is never loaded as the literal
 string. Agents must join with the cluster token or another admin token.
 
+### API rate limit
+
+Off by default. When enabled, each token may make `mutations_per_minute`
+mutating API requests (deploys, stops, scales, secret writes, ...): a burst
+of that many, then one every `60 / mutations_per_minute` seconds. Reads are
+never limited, nor are agent registration and heartbeats. Over the limit the
+API answers `429` with `Retry-After`.
+
+```toml
+[api_rate_limit]
+enabled = true
+mutations_per_minute = 60   # the default
+```
+
+The limit is per token name, so every client using one token (for example
+the cluster token, shared by the CLI on the master) shares one budget.
+
 ### Deploy & Reconciliation
 
 Optional `cluster.toml` blocks controlling how deploys are acknowledged, how

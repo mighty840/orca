@@ -66,11 +66,17 @@ impl AuditLog {
     }
 }
 
-/// Whether a request to `route` with `method` is recorded.
-fn audited(method: &str, route: &str) -> bool {
+/// Whether a request changes something, leaving out agent chatter. Also
+/// what `rate_limit` counts.
+pub(crate) fn is_mutation(method: &str, route: &str) -> bool {
     let mutating = method != "GET" && method != "HEAD" && method != "OPTIONS";
-    let exec = route.ends_with("/exec");
-    (mutating || exec) && !NOT_AUDITED.contains(&route)
+    mutating && !NOT_AUDITED.contains(&route)
+}
+
+/// Whether a request to `route` with `method` is recorded: mutations, and
+/// exec, which runs a command in a container.
+fn audited(method: &str, route: &str) -> bool {
+    is_mutation(method, route) || (route.ends_with("/exec") && !NOT_AUDITED.contains(&route))
 }
 
 /// The route template and the `{name}`-style segment of a request, if it is

@@ -56,6 +56,9 @@ pub struct ClusterConfig {
     /// (HSTS on HTTPS + nosniff + Referrer-Policy); see [`SecurityHeadersConfig`].
     #[serde(default)]
     pub security_headers: Option<SecurityHeadersConfig>,
+    /// Per-token limit on mutating API requests (#80). Off by default.
+    #[serde(default)]
+    pub api_rate_limit: super::ApiRateLimitConfig,
 }
 
 /// Security response headers the proxy adds to every response it returns —
