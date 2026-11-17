@@ -149,6 +149,11 @@ A manual scale is kept until `replicas` changes in `service.toml`.
 Pause one or more services. The config is retained and the service stays
 paused across master restarts and agent reconnects.
 
+For a service on an agent, `orca stop` waits for the agent to confirm that
+its container is down, and fails if it does not confirm within 60 seconds
+(agents older than v0.3.2 never confirm, so upgrade them with the master).
+An offline node gets the stop when it reconnects.
+
 ```bash
 orca stop api
 orca stop api worker          # Stop multiple services in one call
@@ -162,6 +167,22 @@ Resume one or more paused services.
 orca start api
 orca start api worker
 ```
+
+### `orca rm`
+Remove one or more services for good: stop their containers on whichever
+node runs them, then drop them from the registry, the store and the proxy.
+Volumes and bind mounts are kept, and the command lists them. Use
+`orca stop` to pause a service instead.
+
+```bash
+orca rm dxblog-app
+orca rm old-api old-worker
+orca rm old-api --force       # Remove even if still declared, or the stop is unconfirmed
+```
+
+Without `--force`, `orca rm` refuses a service that `[reconcile].config_dir`
+still declares (the declarative loop would deploy it again), and one whose
+agent could not confirm the stop. Requires an admin token.
 
 ### `orca redeploy`
 Force-pull the image and recreate one or more services, even when the spec hasn't changed.

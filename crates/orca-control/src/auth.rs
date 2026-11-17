@@ -54,6 +54,8 @@ const ROUTE_POLICY: &[(&str, &str, &str)] = &[
     // --- admin only -------------------------------------------------------
     // Runs an arbitrary command inside any container.
     ("GET", "/api/v1/services/{name}/exec", ADMIN_ONLY),
+    // `orca rm` deletes a service from the registry and the store (#315).
+    ("POST", "/api/v1/services/{name}/remove", ADMIN_ONLY),
     // Secret values, and the inventory of which keys exist and who uses them.
     ("GET", "/api/v1/secrets", "secrets"),
     ("GET", "/api/v1/secrets/usage", "secrets"),

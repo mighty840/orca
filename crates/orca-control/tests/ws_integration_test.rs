@@ -298,6 +298,7 @@ async fn ws_domain_discovered_updates_service_config() {
     {
         let mut services = state.services.write().await;
         let config = orca_core::config::ServiceConfig {
+            adopted: false,
             restart_policy: None,
             name: "dashboard".into(),
             project: None,

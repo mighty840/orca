@@ -146,6 +146,25 @@ impl OrcaClient {
         Ok(())
     }
 
+    /// Remove a service for good (#315). Returns what was kept on disk.
+    pub async fn remove(&self, service: &str, force: bool) -> anyhow::Result<Vec<String>> {
+        #[derive(Deserialize)]
+        struct Removed {
+            kept: Vec<String>,
+        }
+        let resp = self
+            .auth(
+                self.client
+                    .post(self.url(&format!("/api/v1/services/{service}/remove?force={force}"))),
+            )
+            .send()
+            .await?;
+        if !resp.status().is_success() {
+            anyhow::bail!("{}", resp.text().await.unwrap_or_default());
+        }
+        Ok(resp.json::<Removed>().await?.kept)
+    }
+
     /// Resume a paused service to its configured replica count.
     pub async fn start(&self, service: &str) -> anyhow::Result<()> {
         self.auth(

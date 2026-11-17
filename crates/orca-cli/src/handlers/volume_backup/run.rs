@@ -114,7 +114,8 @@ async fn backup_bind_mounts(
     backup_dir: &str,
     report: &mut BackupReport,
 ) {
-    let mounts = bind_mounts::list_unbacked_bind_mounts(docker).await;
+    let mut mounts = bind_mounts::list_unbacked_bind_mounts(docker).await;
+    bind_mounts::add_declared(&mut mounts, &bind_mounts::load_declared());
     if mounts.is_empty() {
         return;
     }

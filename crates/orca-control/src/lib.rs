@@ -1,9 +1,11 @@
+mod adopted;
 pub mod adoption;
 mod alert_context;
 pub mod alerts;
 pub mod api;
 mod api_listen;
 pub mod auth;
+mod backup_mounts;
 pub mod backup_scheduler;
 pub(crate) mod canary;
 pub mod certs;
@@ -21,12 +23,15 @@ pub(crate) mod instance;
 pub(crate) mod master_node;
 pub mod metrics;
 pub(crate) mod operations;
+mod persist;
 pub(crate) mod placement;
 pub mod proto;
 pub mod raft;
 pub mod reconciler;
 mod relocate;
 mod remote_deploy;
+mod remote_stop;
+pub mod removal;
 mod restore;
 pub mod routes;
 pub mod scheduler;
@@ -126,6 +131,7 @@ pub async fn run_server_with_acme(
             Ok(services) if !services.is_empty() => {
                 info!("Restoring {} persisted services", services.len());
                 for config in services.values() {
+                    let config = &restore::mark_if_adopted(&state, config);
                     // Paused services come back registered-but-not-started, so
                     // the watchdog/reconciler never auto-start them.
                     if stopped.contains(&config.name) {

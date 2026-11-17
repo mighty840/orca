@@ -19,7 +19,6 @@ use std::time::Duration;
 use tracing::{info, warn};
 
 use orca_core::config::{ServiceConfig, ServicesConfig};
-use orca_core::ws_types::MasterMessage;
 
 use crate::state::AppState;
 
@@ -158,67 +157,16 @@ pub async fn apply_config_dir(state: &AppState, dir: &str) {
 
     // Persist applied configs so they survive a master restart (same path as
     // a CLI deploy).
-    if let Some(store) = &state.store {
-        for cfg in &changed {
-            if deployed.contains(&cfg.name)
-                && let Err(e) = store.set_service(&cfg.name, cfg)
-            {
-                warn!("declarative reconcile: persist {} failed: {e}", cfg.name);
-            }
-        }
-    }
+    crate::persist::persist_recorded(state, &changed, &deployed, &errors, "declarative reconcile")
+        .await;
     for e in errors {
         warn!("declarative reconcile error: {e}");
     }
 }
 
-/// Fully remove a service that's no longer declared: stop its workloads, drop
-/// it from the registry + persisted store, and clear its routes. Unlike
-/// `stop` (which pauses), this is a real removal triggered by the service
-/// disappearing from `service.toml`.
+/// Fully remove a service that's no longer declared in `service.toml`.
+/// Unlike `stop` (which pauses), this is a real removal.
 async fn prune_service(state: &AppState, name: &str) {
     info!("Declaratively pruning '{name}' (removed from service.toml)");
-
-    // A pin naming the master itself is local: broadcasting Stop to the
-    // agents would leave its container running, unmanaged (#176).
-    let is_remote = {
-        let services = state.services.read().await;
-        services
-            .get(name)
-            .is_some_and(|s| crate::placement::placed_on_agent(&s.config))
-    };
-
-    if is_remote {
-        // Tell agents to stop the container (idempotent — only the agent that
-        // hosts it acts). Stopping it also prevents the adoption reconciler
-        // from re-registering it (it only adopts *running* containers).
-        let agents = state.ws_agents.read().await;
-        for tx in agents.values() {
-            let _ = tx
-                .send(MasterMessage::Stop {
-                    service_name: name.to_string(),
-                })
-                .await;
-        }
-    } else {
-        // Local: scale to 0 tears down the containers.
-        let _ = crate::reconciler::scale(state, name, 0).await;
-    }
-
-    state.services.write().await.remove(name);
-    if let Some(store) = &state.store {
-        let _ = store.remove_service(name);
-        let _ = store.unmark_stopped(name);
-    }
-    {
-        let mut routes = state.route_table.write().await;
-        routes.retain(|_, targets| {
-            targets.retain(|t| t.service_name != name);
-            !targets.is_empty()
-        });
-    }
-    {
-        let mut triggers = state.wasm_triggers.write().await;
-        triggers.retain(|t| t.service_name != name);
-    }
+    let _ = crate::removal::remove_service(state, name, false).await;
 }

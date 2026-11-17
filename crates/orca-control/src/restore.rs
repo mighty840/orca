@@ -8,6 +8,28 @@ use tracing::info;
 use crate::state::{self, AppState, InstanceState};
 use crate::{reconciler, routes};
 
+/// Mark a record that an older adoption stored without the `adopted` flag
+/// (#313), and store the mark, so nothing recreates the service from it.
+pub(crate) fn mark_if_adopted(
+    state: &AppState,
+    config: &orca_core::config::ServiceConfig,
+) -> orca_core::config::ServiceConfig {
+    let mut config = config.clone();
+    if crate::adopted::mark_legacy_record(&mut config) {
+        tracing::warn!(
+            service = %config.name,
+            "stored config looks like an orphan adoption (no env, volume or mounts): orca \
+             will not recreate this service until it is deployed from its service.toml"
+        );
+        if let Some(store) = &state.store
+            && let Err(e) = store.set_service(&config.name, &config)
+        {
+            tracing::warn!(service = %config.name, "failed to store the adopted mark: {e}");
+        }
+    }
+    config
+}
+
 /// Check if Docker containers already exist for a persisted service.
 /// If they do, populate in-memory state from existing containers.
 /// Otherwise, fall back to full reconciliation.

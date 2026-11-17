@@ -180,3 +180,57 @@ async fn different_services_still_deploy_in_parallel() {
         started.elapsed()
     );
 }
+
+/// Queues over a plain mock whose `orca-web` container runs but that the
+/// agent does not track (it restarted since the deploy).
+async fn untracked_web() -> (
+    Arc<MockRuntime>,
+    ServiceQueues,
+    mpsc::Receiver<AgentMessage>,
+) {
+    let runtime = Arc::new(MockRuntime::new());
+    runtime
+        .set_status("orca-web", WorkloadStatus::Running)
+        .await;
+    let (out_tx, results) = mpsc::channel(8);
+    let (domain_tx, _domains) = mpsc::channel(8);
+    let queues = ServiceQueues::new(OpContext {
+        runtime: runtime.clone(),
+        agent: Arc::new(AgentClient::new("http://127.0.0.1:9".into(), 1)),
+        domain_tx,
+        out_tx,
+    });
+    (runtime, queues, results)
+}
+
+async fn stop_result(results: &mut mpsc::Receiver<AgentMessage>) -> (bool, Option<String>) {
+    match tokio::time::timeout(Duration::from_secs(2), results.recv()).await {
+        Ok(Some(AgentMessage::StopResult { success, error, .. })) => (success, error),
+        other => panic!("expected a StopResult, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn a_stop_removes_an_untracked_container_and_confirms_it() {
+    // #309: a freshly started agent tracks nothing, so Stop did nothing.
+    let (runtime, queues, mut results) = untracked_web().await;
+
+    queues.submit("web", ServiceOp::Stop);
+
+    assert_eq!(stop_result(&mut results).await, (true, None));
+    assert_eq!(runtime.count(MockOpKind::Stop).await, 1);
+    assert_eq!(runtime.count(MockOpKind::Remove).await, 1);
+}
+
+#[tokio::test]
+async fn a_container_that_keeps_running_is_reported() {
+    let (runtime, queues, mut results) = untracked_web().await;
+    runtime.fail_next(MockOpKind::Stop).await;
+    runtime.fail_next(MockOpKind::Remove).await;
+
+    queues.submit("web", ServiceOp::Stop);
+
+    let (success, error) = stop_result(&mut results).await;
+    assert!(!success);
+    assert_eq!(error.as_deref(), Some("orca-web is still running"));
+}

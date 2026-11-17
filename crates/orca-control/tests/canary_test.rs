@@ -37,6 +37,7 @@ fn test_app_state() -> Arc<AppState> {
 
 fn canary_config(name: &str, image: &str) -> ServiceConfig {
     ServiceConfig {
+        adopted: false,
         restart_policy: None,
         name: name.to_string(),
         project: None,

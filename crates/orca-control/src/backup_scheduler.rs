@@ -56,17 +56,27 @@ pub fn spawn_backup_scheduler(
 /// Send a `BackupRequest` to every connected agent so they back up their
 /// local volumes to the same targets as the master.
 async fn dispatch_agent_backups(state: &AppState, config: &BackupConfig) {
-    let agents = state.ws_agents.read().await;
+    // Sessions first, then the maps, so no other lock is taken while the
+    // agents map is read-locked (the PR #65 stall).
+    let agents: Vec<_> = state
+        .ws_agents
+        .read()
+        .await
+        .iter()
+        .map(|(id, s)| (*id, s.clone()))
+        .collect();
     if agents.is_empty() {
         return;
     }
     let service_hooks = collect_service_hooks(state).await;
     info!("Dispatching backup request to {} agent(s)", agents.len());
-    for (node_id, tx) in agents.iter() {
+    for (node_id, tx) in &agents {
+        let declared_mounts = crate::backup_mounts::declared_mounts(state, Some(*node_id)).await;
         if let Err(e) = tx
             .send(MasterMessage::BackupRequest {
                 config: Box::new(config.clone()),
                 service_hooks: service_hooks.clone(),
+                declared_mounts,
             })
             .await
         {
@@ -100,7 +110,8 @@ pub(crate) async fn run_master_backup(state: &Arc<AppState>, config: &BackupConf
     // The master's databases need their pre-hooks too (#198): this call used
     // to pass none, so only agents could ever run one.
     let hooks = collect_service_hooks(state).await;
-    let (success, message) = invoke_subprocess(config, &hooks).await;
+    let mounts = crate::backup_mounts::declared_mounts(state, None).await;
+    let (success, message) = invoke_subprocess(config, &hooks, &mounts).await;
     if !success {
         crate::alerts::alert_backup_failure(state, "master", &message).await;
     }
@@ -115,8 +126,10 @@ pub(crate) async fn run_master_backup(state: &Arc<AppState>, config: &BackupConf
 async fn invoke_subprocess(
     config: &BackupConfig,
     hooks: &std::collections::HashMap<String, String>,
+    mounts: &std::collections::HashMap<String, Vec<String>>,
 ) -> (bool, String) {
     let hooks_json = serde_json::to_string(hooks).unwrap_or_default();
+    let mounts_json = serde_json::to_string(mounts).unwrap_or_default();
     let config_json = match serde_json::to_string(config) {
         Ok(j) => j,
         Err(e) => {
@@ -137,6 +150,7 @@ async fn invoke_subprocess(
         .args(["backup", "all"])
         .env("ORCA_BACKUP_CONFIG_JSON", &config_json)
         .env("ORCA_SERVICE_HOOKS_JSON", &hooks_json)
+        .env("ORCA_DECLARED_MOUNTS_JSON", &mounts_json)
         .output()
         .await
     {

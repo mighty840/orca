@@ -372,16 +372,7 @@ async fn handle_infra_deploy(state: &AppState) -> anyhow::Result<usize> {
     let count = changed.len();
     let (deployed, errors) = reconciler::reconcile(state, &changed).await;
 
-    // Persist deployed services to store
-    if let Some(store) = &state.store {
-        for config in &changed {
-            if deployed.contains(&config.name)
-                && let Err(e) = store.set_service(&config.name, config)
-            {
-                tracing::warn!("Failed to persist {}: {e}", config.name);
-            }
-        }
-    }
+    crate::persist::persist_recorded(state, &changed, &deployed, &errors, "infra deploy").await;
 
     if !errors.is_empty() {
         warn!("Infra deploy: {} errors: {:?}", errors.len(), errors);

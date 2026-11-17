@@ -4,6 +4,7 @@ use super::*;
 
 fn base_config() -> ServiceConfig {
     ServiceConfig {
+        adopted: false,
         restart_policy: None,
         name: "test-svc".into(),
         project: None,

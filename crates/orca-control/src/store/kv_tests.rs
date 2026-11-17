@@ -29,6 +29,7 @@ fn register_and_get_node() {
 fn set_and_get_service() {
     let store = temp_store();
     let config = ServiceConfig {
+        adopted: false,
         restart_policy: None,
         name: "web".into(),
         project: None,
@@ -119,6 +120,7 @@ fn snapshot_captures_all_state() {
         .unwrap();
     store
         .apply(&RaftEntry::SetService(Box::new(ServiceConfig {
+            adopted: false,
             restart_policy: None,
             name: "api".into(),
             project: None,

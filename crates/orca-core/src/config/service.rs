@@ -175,6 +175,13 @@ pub struct ServiceConfig {
     /// next manual redeploy (#121, motivated by the #120 incident).
     #[serde(default)]
     pub restart_policy: Option<String>,
+    /// Registered by orphan adoption from a running container's labels, not
+    /// deployed from a `service.toml` (#313). Such a record has no env,
+    /// volume or mounts, so orca observes the container but never recreates
+    /// it from this config; a deploy from file replaces it. Not meant to be
+    /// set in `service.toml`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub adopted: bool,
 }
 
 impl ServiceConfig {

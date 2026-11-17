@@ -82,6 +82,18 @@ pub enum Command {
         service: Vec<String>,
     },
 
+    /// Remove one or more services for good: stop them and forget them.
+    /// Volumes and bind mounts are kept. Use `stop` to pause instead.
+    Rm {
+        /// Service name(s)
+        #[arg(required = true, add = ArgValueCandidates::new(crate::completion::services))]
+        service: Vec<String>,
+        /// Remove even if `[reconcile].config_dir` still declares it, or its
+        /// stop could not be confirmed
+        #[arg(long)]
+        force: bool,
+    },
+
     /// Start (resume) one or more paused services
     Start {
         /// Service name(s)

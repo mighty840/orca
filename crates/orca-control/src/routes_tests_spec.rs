@@ -6,6 +6,7 @@ use orca_core::types::Replicas;
 
 fn minimal_config(image: Option<String>, module: Option<String>) -> ServiceConfig {
     ServiceConfig {
+        adopted: false,
         restart_policy: None,
         name: "test-svc".to_string(),
         project: None,

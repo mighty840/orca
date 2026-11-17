@@ -86,6 +86,21 @@ pub(super) async fn handle_agent_message(
                 let _ = tx.send(());
             }
         }
+        AgentMessage::StopResult {
+            service_name,
+            success,
+            error,
+        } => {
+            let result = if success {
+                Ok(())
+            } else {
+                Err(error.unwrap_or_else(|| "stop failed".to_string()))
+            };
+            // No waiter when a relocation sent the stop.
+            if let Some(tx) = state.pending_stops.write().await.remove(&service_name) {
+                let _ = tx.send(result);
+            }
+        }
         AgentMessage::DeployResult {
             service_name,
             success,

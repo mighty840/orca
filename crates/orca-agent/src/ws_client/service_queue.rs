@@ -81,7 +81,7 @@ fn spawn_worker(service: String, ctx: OpContext) -> mpsc::UnboundedSender<Servic
                     )
                     .await
                 }
-                ServiceOp::Stop => ctx.agent.stop_service(ctx.runtime.as_ref(), &service).await,
+                ServiceOp::Stop => stop_and_report(&ctx, &service).await,
                 ServiceOp::RestartIfUnhealthy(id) => {
                     super::health_watch::restart_if_unhealthy(ctx.runtime.as_ref(), &service, &id)
                         .await
@@ -90,6 +90,29 @@ fn spawn_worker(service: String, ctx: OpContext) -> mpsc::UnboundedSender<Servic
         }
     });
     tx
+}
+
+/// Stop the service and tell the master whether its container is down
+/// (#309), so `orca stop` returns only once it is.
+async fn stop_and_report(ctx: &OpContext, service: &str) {
+    ctx.agent.stop_service(ctx.runtime.as_ref(), service).await;
+    let probe = orca_core::runtime::WorkloadHandle {
+        runtime_id: format!("orca-{service}"),
+        name: format!("orca-{service}"),
+        metadata: Default::default(),
+    };
+    let still_running = matches!(
+        ctx.runtime.status(&probe).await,
+        Ok(orca_core::types::WorkloadStatus::Running)
+    );
+    let _ = ctx
+        .out_tx
+        .send(AgentMessage::StopResult {
+            service_name: service.to_string(),
+            success: !still_running,
+            error: still_running.then(|| format!("orca-{service} is still running")),
+        })
+        .await;
 }
 
 #[cfg(test)]

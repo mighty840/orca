@@ -12,6 +12,7 @@ use e2e_helpers::{cleanup_containers, real_app_state};
 
 fn nginx_config() -> orca_core::config::ServiceConfig {
     orca_core::config::ServiceConfig {
+        adopted: false,
         restart_policy: None,
         name: "e2e-restart".to_string(),
         project: None,

@@ -9,6 +9,10 @@ use orca_core::types::WorkloadSpec;
 
 use crate::state::AppState;
 
+/// In the error of a deploy the agent received but did not finish in time:
+/// its container usually came up anyway (#313, see `persist`).
+pub(crate) const COMPLETION_TIMEOUT: &str = "did not complete within";
+
 /// Send a deploy command to a remote agent node and await the result.
 ///
 /// The wait is split into two phases so a slow image pull is never reported as
@@ -103,7 +107,7 @@ pub(crate) async fn queue_remote_deploy(
         Err(_) => {
             state.pending_deploys.write().await.remove(&spec.name);
             anyhow::bail!(
-                "deploy of {} did not complete within {}s on agent {node_id} (image pull may still be running — raise deploy.completion_timeout_secs if the image is large)",
+                "deploy of {} {COMPLETION_TIMEOUT} {}s on agent {node_id} (image pull may still be running — raise deploy.completion_timeout_secs if the image is large)",
                 spec.name,
                 completion_timeout.as_secs()
             )

@@ -121,6 +121,11 @@ pub(crate) async fn reconcile_service(
         Replicas::Fixed(n) => *n,
         Replicas::Auto => 1,
     };
+    // An adopted record lacks env and volumes: creating from it is how
+    // working databases came back empty (#313). Stopping is still fine.
+    if desired > 0 {
+        crate::adopted::refuse_recreate(config)?;
+    }
 
     let mut spec = service_config_to_spec(config)?;
 
@@ -134,6 +139,24 @@ pub(crate) async fn reconcile_service(
             .await
             .map_err(|e| anyhow::anyhow!("build failed for {}: {e}", config.name))?;
         spec.image = image_tag;
+    }
+
+    // Scaling to 0 is a stop on the agent that runs it. The idempotency
+    // check below leaves out replicas, so it took a stop for "same spec" and
+    // the agent's containers kept running (#309).
+    if desired == 0
+        && crate::placement::placed_on_agent(config)
+        && let Some(node) = crate::remote_stop::stop_target(state, config).await?
+    {
+        use crate::remote_stop::StopOutcome;
+        return match crate::remote_stop::stop_on_agent(state, config, node).await? {
+            StopOutcome::Confirmed | StopOutcome::Queued => Ok(ReconcileOutcome::Changed),
+            StopOutcome::Unconfirmed => anyhow::bail!(
+                "node {node} did not confirm the stop of {}; check it there with `docker ps` \
+                 (an agent older than v0.3.2 never confirms)",
+                config.name
+            ),
+        };
     }
 
     // Check if placement targets a specific remote node. If the service runs

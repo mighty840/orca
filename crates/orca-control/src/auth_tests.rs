@@ -81,6 +81,11 @@ fn parameterised_routes_resolve_by_template_not_substring() {
 fn an_unmatched_request_is_admin_only() {
     // The fallback has no MatchedPath; it must not be a way around the table.
     assert_eq!(required_action("GET", None), ADMIN_ONLY);
+    // `orca rm` deletes a service from the store: admins only (#315).
+    assert_eq!(
+        required_action("POST", Some("/api/v1/services/{name}/remove")),
+        ADMIN_ONLY
+    );
 }
 
 #[test]

@@ -238,14 +238,17 @@ async fn dispatch_to_agents(
         return Vec::new();
     }
     let service_hooks = collect_service_hooks(state).await;
-    let agents = state.ws_agents.read().await;
     let mut sent_to = Vec::with_capacity(targets.len());
     for id in targets {
-        if let Some(tx) = agents.get(id) {
+        // Mounts first, then the session: no lock is held while sending.
+        let declared_mounts = crate::backup_mounts::declared_mounts(state, Some(*id)).await;
+        let tx = state.ws_agents.read().await.get(id).cloned();
+        if let Some(tx) = tx {
             let ok = tx
                 .send(MasterMessage::BackupRequest {
                     config: Box::new(config.clone()),
                     service_hooks: service_hooks.clone(),
+                    declared_mounts,
                 })
                 .await
                 .is_ok();

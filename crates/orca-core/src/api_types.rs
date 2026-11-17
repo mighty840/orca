@@ -339,6 +339,7 @@ mod tests {
     fn deploy_request_serialization_roundtrip() {
         let req = DeployRequest {
             services: vec![ServiceConfig {
+                adopted: false,
                 restart_policy: None,
                 name: "web".into(),
                 project: None,

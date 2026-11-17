@@ -60,6 +60,16 @@ pub async fn handle_stop(service: Option<String>, api: String) -> anyhow::Result
     Ok(())
 }
 
+/// Remove a service for good (`orca rm`, #315).
+pub async fn handle_rm(service: &str, force: bool, api: String) -> anyhow::Result<()> {
+    let kept = OrcaClient::new(api).remove(service, force).await?;
+    println!("Removed service: {service}");
+    for k in kept {
+        println!("  kept {k}");
+    }
+    Ok(())
+}
+
 /// Resume a paused service to its configured replica count.
 pub async fn handle_start(service: &str, api: String) -> anyhow::Result<()> {
     let client = OrcaClient::new(api);
