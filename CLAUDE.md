@@ -13,7 +13,7 @@ cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test  # Fu
 
 ## Architecture
 
-Cargo workspace with 8 crates:
+Cargo workspace with 9 crates:
 
 | Crate | Type | Purpose |
 |-------|------|---------|
@@ -22,13 +22,14 @@ Cargo workspace with 8 crates:
 | `orca-control` | lib | API server, reconciler, shared state |
 | `orca-proxy` | lib | Reverse proxy + Wasm trigger routing |
 | `orca-ai` | lib | LLM backend, conversational alerts, monitor |
-| `orca-cli` | bin | Single `orca` binary (all commands) |
-| `orca-tui` | bin | TUI dashboard (stub, M3) |
+| `orca-mcp` | lib | Read-only MCP server (tools, resources, prompts) over the HTTP API; `orca mcp` on stdio |
+| `orca-cli` | bin | Single `orca` binary (all commands); published as `mallorca` |
+| `orca-tui` | lib | TUI dashboard (`orca tui`) |
 | `orca-web` | bin | Web dashboard (stub, M3) |
 
 **Key abstraction:** The `Runtime` trait in `orca-core` is implemented by `ContainerRuntime` (Docker/bollard) and `WasmRuntime` (wasmtime). The reconciler dispatches to the correct runtime based on `RuntimeKind`.
 
-**Dependency flow:** `core` <- `agent` <- `control` <- `cli`. `proxy` depends only on `core`. `ai` depends only on `core`.
+**Dependency flow:** `core` <- `agent` <- `control` <- `cli`. `control` also depends on `ai` and `proxy`. `proxy`, `ai`, `mcp` and `tui` depend only on `core`; `cli` uses all of them.
 
 ## Conventions
 
