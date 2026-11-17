@@ -18,28 +18,36 @@ fn outside_policy() -> HashSet<&'static str> {
         .collect()
 }
 
-/// Every `.route("<path>"` literal in the mounted router sources, including
-/// ones whose path sits on the line after `.route(`.
+/// Every `.route("<path>"` and `.nest_service("<path>"` literal in the
+/// mounted router sources, including ones whose path sits on the next line.
 fn mounted_route_paths() -> HashSet<String> {
     let sources = [
         include_str!("api/mod.rs"),
         include_str!("webhook.rs"),
         include_str!("cluster_handlers.rs"),
+        include_str!("mcp_mount.rs"),
     ];
     let mut paths = HashSet::new();
     for src in sources {
-        let mut rest = src;
-        while let Some(at) = rest.find(".route(") {
-            rest = &rest[at + ".route(".len()..];
-            let trimmed = rest.trim_start();
-            if let Some(after_quote) = trimmed.strip_prefix('"')
-                && let Some(end) = after_quote.find('"')
-            {
-                paths.insert(after_quote[..end].to_string());
-            }
+        for call in [".route(", ".nest_service("] {
+            collect_paths(src, call, &mut paths);
         }
     }
     paths
+}
+
+/// The string literal right after each `call` in `src`.
+fn collect_paths(src: &str, call: &str, paths: &mut HashSet<String>) {
+    let mut rest = src;
+    while let Some(at) = rest.find(call) {
+        rest = &rest[at + call.len()..];
+        let trimmed = rest.trim_start();
+        if let Some(after_quote) = trimmed.strip_prefix('"')
+            && let Some(end) = after_quote.find('"')
+        {
+            paths.insert(after_quote[..end].to_string());
+        }
+    }
 }
 
 // --- lookups ----------------------------------------------------------------
@@ -127,7 +135,9 @@ fn viewer_keeps_its_read_only_routes() {
 #[test]
 fn viewer_cannot_change_anything() {
     for (method, route, _) in ROUTE_POLICY {
-        if *method != "GET" && *route != "/api/v1/ask" {
+        // `/api/v1/ask` and `/mcp` take a POST to read: each API call MCP
+        // makes for it is checked again as the caller (#80).
+        if *method != "GET" && *route != "/api/v1/ask" && *route != "/mcp" {
             assert!(
                 !Role::Viewer.can(required_action(method, Some(route))),
                 "viewer may {method} {route}"

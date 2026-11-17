@@ -36,6 +36,11 @@ const ROUTE_POLICY: &[(&str, &str, &str)] = &[
     ("GET", "/api/v1/services/{name}/logs", "logs"),
     ("GET", "/api/v1/cluster/info", "cluster_info"),
     ("GET", "/api/v1/whoami", "status"),
+    // The MCP endpoint (#80). Each API call it makes for a request is
+    // checked again as that request's caller.
+    ("POST", "/mcp", "status"),
+    ("GET", "/mcp", "status"),
+    ("DELETE", "/mcp", "status"),
     ("GET", "/api/v1/services/{name}", "status"),
     ("GET", "/api/v1/services/{name}/history", "status"),
     ("GET", "/api/v1/cluster/backups", "status"),

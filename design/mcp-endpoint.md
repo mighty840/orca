@@ -479,6 +479,17 @@ rate limit and audit cover mutations and exec only, so MCP reads are not audited
   - a foreign `Host` is rejected;
   - audit events carry `X-Orca-Client: mcp-http`.
 
+*Status (2026-11-17): implemented on `feat/80-mcp-http`, stacked on PR 2. `/mcp` is a
+`nest_service` behind `auth_middleware` only (not the audit or rate-limit layers: the
+outer POSTs are not mutations, and each inner call is checked, audited and limited by
+its own route). `OrcaMcp` resolves its caller per request from the `Principal` that
+auth put in the request's `Parts`, and calls the authed router with `oneshot`,
+forwarding that request's `Authorization`. Sessions use rmcp's default
+`LocalSessionManager` (legacy session mode, SSE answers), which keeps older clients
+working. The read budget is per token name, shared by its sessions
+(`[mcp] reads_per_minute`, default 60). `max_resource_bytes` is not configurable (the
+256 KiB cap is fixed).*
+
 **PR 4: safe mutating tools (5.2)** plus server-side `?dry_run=true` on redeploy.
 - Tests:
   - a default `dry_run` never mutates (the mock records no POST without `dry_run`);

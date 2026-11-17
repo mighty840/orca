@@ -110,7 +110,12 @@ pub fn router(state: Arc<AppState>) -> Router {
             state.clone(),
             auth_middleware,
         ))
-        .with_state(state);
+        .with_state(state.clone());
 
-    public.merge(authed)
+    // `/mcp` calls back into the authed router, as its caller (#80).
+    let app = public.merge(authed.clone());
+    match crate::mcp_mount::router(&state, authed) {
+        Some(mcp) => app.merge(mcp),
+        None => app,
+    }
 }

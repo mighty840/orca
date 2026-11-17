@@ -50,6 +50,30 @@ together; a prompt makes two or three. Over the limit a tool returns an
 error saying when to retry, and the call never reaches the master. Change
 it with `--reads-per-minute`.
 
+## Remote clients: `/mcp` on the master
+
+The master can serve the same tools over Streamable HTTP at `/mcp`, for
+clients that connect by URL instead of starting a command:
+
+```toml
+[mcp]
+enabled = true
+allowed_hosts = ["100.80.5.14"]   # Host headers to accept, besides loopback
+                                  # and cluster.domain; a port is optional
+reads_per_minute = 60             # per token, across its sessions
+```
+
+Point the client at `http://<master>:6880/mcp` with an
+`Authorization: Bearer <token>` header. Each request is checked as its own
+token, and so is every API call made for it, exactly as if the client had
+called the API.
+
+- `/mcp` is never served on a cluster with no API tokens, even when enabled.
+- A request whose `Host` is not allowed is rejected (DNS-rebinding
+  protection).
+- Port 6880 is plain HTTP. Reach it over your mesh network, or publish it
+  through orca's proxy with TLS.
+
 ## What the client sees
 
 | Tool | Resource | Reads |

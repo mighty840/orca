@@ -8,7 +8,9 @@
 //! limited there; `orca mcp` limits its own reads, see [`limits`].) See
 //! `design/mcp-endpoint.md`.
 
+mod args;
 pub mod backend;
+pub mod caller;
 pub mod catalog;
 pub mod limits;
 pub mod output;
@@ -21,7 +23,8 @@ use orca_core::api_types::WhoAmI;
 use rmcp::ServiceExt;
 
 pub use backend::{ApiBackend, BackendError, HttpBackend};
-pub use limits::{Limited, READS_PER_MINUTE};
+pub use caller::{Caller, Connector};
+pub use limits::{Limited, READS_PER_MINUTE, ReadBudget};
 pub use server::OrcaMcp;
 
 /// Ask the API who `backend`'s token belongs to.

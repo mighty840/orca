@@ -19,24 +19,23 @@ use crate::backend::{ApiBackend, BackendError};
 /// The default reads per minute.
 pub const READS_PER_MINUTE: u32 = 60;
 
-/// An [`ApiBackend`] that refuses calls over `per_minute`.
-pub struct Limited {
-    inner: Arc<dyn ApiBackend>,
+/// A token bucket of API reads. One per `orca mcp` process; on the
+/// master's `/mcp`, one per token, shared by all its sessions.
+pub struct ReadBudget {
     per_minute: u32,
     bucket: Mutex<(f64, Instant)>,
 }
 
-impl Limited {
-    pub fn new(inner: Arc<dyn ApiBackend>, per_minute: u32) -> Self {
+impl ReadBudget {
+    pub fn new(per_minute: u32) -> Self {
         let per_minute = per_minute.max(1);
         Self {
-            inner,
             per_minute,
             bucket: Mutex::new((f64::from(per_minute), Instant::now())),
         }
     }
 
-    /// Take one call, or say how long until one is available.
+    /// Take one read, or say how long until one is available.
     async fn take(&self) -> Result<(), Duration> {
         let capacity = f64::from(self.per_minute);
         let per_sec = capacity / 60.0;
@@ -54,12 +53,28 @@ impl Limited {
     }
 }
 
+/// An [`ApiBackend`] that refuses calls over its [`ReadBudget`].
+pub struct Limited {
+    inner: Arc<dyn ApiBackend>,
+    budget: Arc<ReadBudget>,
+}
+
+impl Limited {
+    pub fn new(inner: Arc<dyn ApiBackend>, per_minute: u32) -> Self {
+        Self::with_budget(inner, Arc::new(ReadBudget::new(per_minute)))
+    }
+
+    pub fn with_budget(inner: Arc<dyn ApiBackend>, budget: Arc<ReadBudget>) -> Self {
+        Self { inner, budget }
+    }
+}
+
 #[async_trait]
 impl ApiBackend for Limited {
     async fn get(&self, path_and_query: &str) -> Result<String, BackendError> {
-        if let Err(wait) = self.take().await {
+        if let Err(wait) = self.budget.take().await {
             return Err(BackendError::Limited {
-                per_minute: self.per_minute,
+                per_minute: self.budget.per_minute,
                 retry_secs: wait.as_secs().max(1),
             });
         }
