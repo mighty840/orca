@@ -1,6 +1,7 @@
 //! An audit trail of API calls (#80, shared with #259's activity feed).
 //!
-//! Every mutating request and every exec is recorded, allowed or denied,
+//! Every mutating request, every exec and every call made through MCP is
+//! recorded, allowed or denied,
 //! with the caller's token name, the route template, the status and the
 //! latency. Never the query string or the body: they can carry secrets.
 //! Events go to `tracing` (target `orca::audit`). Those with a known caller
@@ -75,8 +76,17 @@ pub(crate) fn is_mutation(method: &str, route: &str) -> bool {
 
 /// Whether a request to `route` with `method` is recorded: mutations, and
 /// exec, which runs a command in a container.
-fn audited(method: &str, route: &str) -> bool {
-    is_mutation(method, route) || (route.ends_with("/exec") && !NOT_AUDITED.contains(&route))
+fn audited(method: &str, route: &str, client: Option<&str>) -> bool {
+    is_mutation(method, route)
+        || (route.ends_with("/exec") && !NOT_AUDITED.contains(&route))
+        || client.is_some_and(is_mcp)
+}
+
+/// A call made through MCP (#80): every one is audited, reads included,
+/// since a model reading logs is worth a record. On `/mcp` the master sets
+/// the header itself; `orca mcp` (stdio) sets it on its own requests.
+fn is_mcp(client: &str) -> bool {
+    client.starts_with("mcp-")
 }
 
 /// The route template and the `{name}`-style segment of a request, if it is
@@ -87,7 +97,11 @@ fn describe(request: &Request) -> Option<(String, Option<String>)> {
         .get::<MatchedPath>()?
         .as_str()
         .to_owned();
-    if !audited(request.method().as_str(), &route) {
+    let client = request
+        .headers()
+        .get("x-orca-client")
+        .and_then(|v| v.to_str().ok());
+    if !audited(request.method().as_str(), &route, client) {
         return None;
     }
     // The segment where the template has its first `{...}` placeholder.

@@ -15,12 +15,13 @@ fn event(n: u64) -> AuditEvent {
 
 #[test]
 fn mutations_and_exec_are_audited_reads_and_agent_chatter_are_not() {
-    assert!(audited("POST", "/api/v1/services/{name}/redeploy"));
-    assert!(audited("DELETE", "/api/v1/secrets/{key}"));
-    assert!(audited("GET", "/api/v1/services/{name}/exec"));
-    assert!(!audited("GET", "/api/v1/status"));
-    assert!(!audited("POST", "/api/v1/cluster/heartbeat"));
-    assert!(!audited("POST", "/api/v1/cluster/register"));
+    assert!(audited("POST", "/api/v1/services/{name}/redeploy", None));
+    assert!(audited("DELETE", "/api/v1/secrets/{key}", None));
+    assert!(audited("GET", "/api/v1/services/{name}/exec", None));
+    assert!(!audited("GET", "/api/v1/status", None));
+    assert!(!audited("GET", "/api/v1/status", Some("cli")));
+    assert!(!audited("POST", "/api/v1/cluster/heartbeat", None));
+    assert!(!audited("POST", "/api/v1/cluster/register", None));
 }
 
 #[test]
@@ -37,6 +38,16 @@ fn requests_without_a_valid_token_cannot_flush_the_buffer() {
     let kept = log.recent(usize::MAX);
     assert_eq!(kept.len(), 1);
     assert_eq!(kept[0].principal.as_deref(), Some("ci"));
+}
+
+#[test]
+fn reads_made_through_mcp_are_audited() {
+    assert!(audited(
+        "GET",
+        "/api/v1/services/{name}/logs",
+        Some("mcp-http")
+    ));
+    assert!(audited("GET", "/api/v1/status", Some("mcp-stdio")));
 }
 
 #[test]

@@ -25,6 +25,11 @@ pub struct McpConfig {
     /// present and not listed is refused.
     #[serde(default)]
     pub allowed_origins: Vec<String>,
+    /// Accept the cluster token and other legacy `api_tokens` entries on
+    /// `/mcp`. They are admin and, for the cluster token, the agents' join
+    /// credential, so they are refused by default; use a `[[token]]`.
+    #[serde(default)]
+    pub allow_cluster_token: bool,
     /// API reads each token may make through `/mcp` per minute.
     #[serde(default = "default_reads_per_minute")]
     pub reads_per_minute: u32,
@@ -36,6 +41,7 @@ impl Default for McpConfig {
             enabled: false,
             allowed_hosts: Vec::new(),
             allowed_origins: Vec::new(),
+            allow_cluster_token: false,
             reads_per_minute: default_reads_per_minute(),
         }
     }

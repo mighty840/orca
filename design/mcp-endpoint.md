@@ -482,16 +482,18 @@ rate limit and audit cover mutations and exec only, so MCP reads are not audited
 *Status (2026-11-17): implemented on `feat/80-mcp-http`, stacked on PR 2. `/mcp` is a
 `nest_service` behind `auth_middleware` only, not the audit or rate-limit layers (the
 outer POSTs carry reads). Each inner call is role-checked by its own route; they are all
-GETs, so the master neither audits nor rate-limits them, and MCP over HTTP leaves no
-audit record (**open, for the maintainer to decide**); the per-token read budget is the
-only limit. `OrcaMcp` resolves its caller per request from the `Principal` that
+GETs, so the master does not rate-limit them (the per-token read budget is the limit),
+but it audits them: any request with `X-Orca-Client: mcp-*` is audited, reads included.
+On `/mcp` the master sets that header itself, so a remote client cannot avoid it;
+`orca mcp` sets `mcp-stdio`. `OrcaMcp` resolves its caller per request from the `Principal` that
 auth put in the request's `Parts`, and calls the authed router with `oneshot`,
 forwarding that request's `Authorization`. Sessions use rmcp's default
 `LocalSessionManager` (legacy session mode, SSE answers; idle sessions close after 300 s,
 uninitialized ones after 60 s), which keeps older clients working. `Host` is checked
 against loopback, `cluster.domain` and `[mcp] allowed_hosts`; `Origin` validation is
 enforced, so a present `Origin` not in `[mcp] allowed_origins` (empty by default) is
-refused. Legacy tokens (the cluster token) are accepted on `/mcp`, unlike stdio. The read budget is per token name, shared by its sessions
+refused. Legacy tokens (the cluster token) are refused on `/mcp` with 403, as on stdio,
+unless `[mcp] allow_cluster_token = true`. The read budget is per token name, shared by its sessions
 (`[mcp] reads_per_minute`, default 60). `max_resource_bytes` is not configurable (the
 256 KiB cap is fixed).*
 

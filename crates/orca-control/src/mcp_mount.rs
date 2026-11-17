@@ -52,6 +52,12 @@ pub(crate) fn router(state: &Arc<AppState>, api: Router) -> Option<Router> {
         tracing::warn!("[mcp] is enabled but no API tokens are configured: /mcp is not served");
         return None;
     }
+    if state.cluster_config.token.is_empty() && !cfg.allow_cluster_token {
+        tracing::warn!(
+            "[mcp] is enabled but only legacy api_tokens are configured, and /mcp refuses \
+             them: add a [[token]] (orca token create --name mcp --role viewer)"
+        );
+    }
     let connector = Arc::new(HttpConnector {
         api,
         per_minute: cfg.reads_per_minute,
@@ -74,11 +80,42 @@ pub(crate) fn router(state: &Arc<AppState>, api: Router) -> Option<Router> {
     Some(
         Router::new()
             .nest_service("/mcp", service)
+            // Inside auth, which attached the caller.
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                refuse_legacy_tokens,
+            ))
             .layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 crate::auth::auth_middleware,
             )),
     )
+}
+
+/// Refuse the cluster token and other legacy `api_tokens` entries unless
+/// `[mcp] allow_cluster_token`: they are admin, and the cluster token is
+/// also the agents' join credential, so it should not sit in an AI
+/// client's config. `orca mcp` refuses them the same way.
+async fn refuse_legacy_tokens(
+    axum::extract::State(state): axum::extract::State<Arc<AppState>>,
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let legacy = request
+        .extensions()
+        .get::<Principal>()
+        .is_some_and(|p| p.legacy);
+    if legacy && !state.cluster_config.mcp.allow_cluster_token {
+        return (
+            axum::http::StatusCode::FORBIDDEN,
+            "/mcp refuses the cluster token and other legacy api_tokens entries: use a \
+             [[token]] (orca token create --name mcp --role viewer), or set \
+             [mcp] allow_cluster_token = true",
+        )
+            .into_response();
+    }
+    next.run(request).await
 }
 
 /// Loopback, `cluster.domain`, and `[mcp] allowed_hosts`.

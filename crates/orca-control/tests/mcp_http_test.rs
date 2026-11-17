@@ -206,11 +206,61 @@ async fn mcp_needs_a_valid_token_and_a_known_host() {
 }
 
 #[tokio::test]
-async fn a_cluster_with_only_the_cluster_token_serves_mcp() {
-    let port = start_with(enabled(), false, vec!["cluster-token".into()]).await;
+async fn the_cluster_token_is_refused_unless_allowed() {
+    let port = start_with(enabled(), true, vec!["cluster-token".into()]).await;
+    assert_eq!(
+        Session::new(port, Some("cluster-token")).initialize().await,
+        403
+    );
+    assert_eq!(Session::new(port, Some(VIEWER)).initialize().await, 200);
+
+    // A cluster with only the cluster token: /mcp is served (and warns),
+    // and the token works once allowed.
+    let allowed = McpConfig {
+        allow_cluster_token: true,
+        ..enabled()
+    };
+    let port = start_with(allowed, false, vec!["cluster-token".into()]).await;
     assert_eq!(
         Session::new(port, Some("cluster-token")).initialize().await,
         200
+    );
+}
+
+#[tokio::test]
+async fn every_api_call_made_through_mcp_is_audited_as_the_caller() {
+    let port = start_with(enabled(), true, vec!["admin-token".into()]).await;
+    let mut s = Session::new(port, Some(VIEWER));
+    s.initialize().await;
+    s.tool("get_status").await;
+    s.tool("secrets_inventory").await; // refused: still recorded
+
+    let events: Vec<Value> = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{port}/api/v1/audit"))
+        .bearer_auth("admin-token")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let seen: Vec<(&str, &str, u64, &str)> = events
+        .iter()
+        .map(|e| {
+            (
+                e["principal"].as_str().unwrap_or("-"),
+                e["route"].as_str().unwrap(),
+                e["status"].as_u64().unwrap(),
+                e["client"].as_str().unwrap_or("-"),
+            )
+        })
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            ("claude", "/api/v1/secrets/usage", 403, "mcp-http"),
+            ("claude", "/api/v1/status", 200, "mcp-http"),
+        ]
     );
 }
 

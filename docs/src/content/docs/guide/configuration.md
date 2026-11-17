@@ -83,6 +83,7 @@ on the API port; never on a cluster without API tokens.
 enabled = true
 allowed_hosts = ["orca.example.com"]   # besides loopback and cluster.domain
 allowed_origins = []                   # browser origins; none by default
+allow_cluster_token = false            # refuse legacy api_tokens on /mcp
 reads_per_minute = 60                  # per token
 ```
 

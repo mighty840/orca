@@ -24,7 +24,8 @@ admin-only, and so is any route not listed here.
 | `GET` | `/api/v1/whoami` | `status` | The caller's token name, role and allowed actions |
 | `GET` | `/api/v1/audit?limit=` | admin | Recent audited calls, newest first |
 
-Every mutating request and every exec is audited, allowed or denied: the
+Every mutating request, every exec, and every call made through
+[MCP](/guide/mcp) (`X-Orca-Client: mcp-*`) is audited, allowed or denied: the
 caller's token name, the route template, the `{name}` it targets, the status,
 the latency and the `X-Orca-Client` header. The query string and the body are
 never recorded. Events go to the log (target `orca::audit`). The newest 1000

@@ -40,9 +40,10 @@ admin, and the cluster token is also what agents join with. Pass
 
 Every call is an ordinary API request made with that token, so the master's
 role checks apply: a viewer is offered only what a viewer may read, and the
-secrets inventory needs an admin token. These are reads, so they are not in
-the [audit log](/reference/api) and not counted by `[api_rate_limit]`, which
-cover changes only.
+secrets inventory needs an admin token. Each of those calls is recorded in
+the master's [audit log](/reference/api) under the token's name, with client
+`mcp-stdio`; reads are not counted by `[api_rate_limit]`, which covers
+changes only.
 
 `orca mcp` limits its own reads instead: 60 API calls per minute by default
 (a burst of 60, then one per second), for tools, resources and prompts
@@ -72,8 +73,12 @@ called the API.
 - A request whose `Host` is not allowed is rejected (DNS-rebinding
   protection), and so is one from a browser page: a request carrying an
   `Origin` header is refused unless `[mcp] allowed_origins` lists it.
-- Reads are limited per token (`reads_per_minute`), but, as reads, they are
-  not in the audit log.
+- Every API call made for a request is in the audit log, under the
+  caller's token, with client `mcp-http`. The master sets that, so a remote
+  client cannot leave it out.
+- Reads are limited per token (`reads_per_minute`).
+- The cluster token (and any legacy `api_tokens` entry) is refused with
+  403, as with `orca mcp`; set `allow_cluster_token = true` to accept it.
 - Port 6880 is plain HTTP. Reach it over your mesh network, or publish it
   through orca's proxy with TLS.
 
