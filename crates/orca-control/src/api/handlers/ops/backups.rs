@@ -246,6 +246,7 @@ async fn dispatch_to_agents(
                 .send(MasterMessage::BackupRequest {
                     config: Box::new(config.clone()),
                     service_hooks: service_hooks.clone(),
+                    declared_mounts: crate::backup_mounts::declared_mounts(state, Some(*id)).await,
                 })
                 .await
                 .is_ok();

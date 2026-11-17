@@ -256,10 +256,21 @@ fn backup_request_service_hooks_default_empty() {
             targets: vec![],
         }),
         service_hooks: HashMap::new(),
+        declared_mounts: HashMap::from([("blog".into(), vec!["/srv/blog:/data".into()])]),
     };
     let json = serde_json::to_string(&msg).unwrap();
     let back: MasterMessage = serde_json::from_str(&json).unwrap();
     assert!(matches!(back, MasterMessage::BackupRequest { .. }));
+
+    // A master older than #312 sends no `declared_mounts`.
+    let old = json.replace(r#","declared_mounts":{"blog":["/srv/blog:/data"]}"#, "");
+    assert_ne!(old, json, "the field was on the wire");
+    match serde_json::from_str::<MasterMessage>(&old).unwrap() {
+        MasterMessage::BackupRequest {
+            declared_mounts, ..
+        } => assert!(declared_mounts.is_empty()),
+        other => panic!("{other:?}"),
+    }
 }
 
 /// #210: the rotate message carries the token on the wire, but logging the

@@ -8,7 +8,9 @@
 //! service had bind mounts and *no* named volume, so the volume backup said
 //! "nothing to do" and exited clean). We inspect the running orca service
 //! containers — Docker is the source of truth for what is actually mounted —
-//! and surface every bind mount as a warning.
+//! and surface every bind mount as a warning. Paused services have no
+//! containers, so the master also passes the mounts their configs declare
+//! (#312).
 
 use bollard::Docker;
 use bollard::container::ListContainersOptions;
@@ -58,6 +60,48 @@ pub(crate) async fn list_unbacked_bind_mounts(docker: &Docker) -> Vec<UnbackedMo
     out
 }
 
+/// Add the bind mounts the services' configs declare (#312) that no
+/// container showed: a paused service's containers are removed, so
+/// pausing everything for a cold backup left every bind mount out. Entries
+/// are `/host:/container[:opts]`, as in `service.toml`.
+pub(crate) fn add_declared(
+    found: &mut Vec<UnbackedMount>,
+    declared: &std::collections::HashMap<String, Vec<String>>,
+) {
+    let mut services: Vec<_> = declared.iter().collect();
+    services.sort();
+    for (service, mounts) in services {
+        for m in mounts {
+            let mut parts = m.splitn(3, ':');
+            let (Some(host), Some(container)) = (parts.next(), parts.next()) else {
+                continue;
+            };
+            if !host.starts_with('/') {
+                continue; // a named volume: the volume backup has it
+            }
+            let known = found
+                .iter()
+                .any(|f| f.service == *service && f.host_path == host);
+            if !known {
+                found.push(UnbackedMount {
+                    service: service.clone(),
+                    host_path: host.to_string(),
+                    container_path: container.to_string(),
+                });
+            }
+        }
+    }
+}
+
+/// The declared bind mounts the master passed in `ORCA_DECLARED_MOUNTS_JSON`.
+/// Empty for a manual `orca backup all`, which sees containers only.
+pub(crate) fn load_declared() -> std::collections::HashMap<String, Vec<String>> {
+    std::env::var("ORCA_DECLARED_MOUNTS_JSON")
+        .ok()
+        .and_then(|j| serde_json::from_str(&j).ok())
+        .unwrap_or_default()
+}
+
 /// Derive the orca service name from a container's Docker names. Containers
 /// are named `orca-{service}` (with a leading `/` in the API). Returns `None`
 /// for non-orca containers and the transient `orca-backup-*` helpers we spawn
@@ -95,6 +139,39 @@ mod tests {
         assert_eq!(
             service_from_names(Some(&["/orca-backup-12345".to_string()])),
             None
+        );
+    }
+
+    #[test]
+    fn declared_mounts_of_a_service_without_containers_are_added_once() {
+        let mut found = vec![UnbackedMount {
+            service: "app".into(),
+            host_path: "/srv/app".into(),
+            container_path: "/app".into(),
+        }];
+        let declared = std::collections::HashMap::from([
+            ("app".to_string(), vec!["/srv/app:/app:ro".to_string()]),
+            (
+                "blog".to_string(),
+                vec!["/srv/blog:/data".to_string(), "cache:/c".to_string()],
+            ),
+        ]);
+
+        add_declared(&mut found, &declared);
+
+        let hosts: Vec<_> = found
+            .iter()
+            .map(|m| {
+                (
+                    m.service.as_str(),
+                    m.host_path.as_str(),
+                    m.container_path.as_str(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            hosts,
+            [("app", "/srv/app", "/app"), ("blog", "/srv/blog", "/data")]
         );
     }
 

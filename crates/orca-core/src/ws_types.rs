@@ -112,6 +112,11 @@ pub enum MasterMessage {
         /// service_name → pre_hook shell command, populated from ServiceConfig.backup.
         #[serde(default)]
         service_hooks: HashMap<String, String>,
+        /// service_name → its host bind mounts (`/host:/container[:opts]`)
+        /// on this node, from the configs, so paused services whose
+        /// containers are gone are still backed up (#312).
+        #[serde(default)]
+        declared_mounts: HashMap<String, Vec<String>>,
     },
     /// Ask an agent to enumerate its local backup snapshots and respond with
     /// `AgentMessage::BackupStatusReport`. Request/response correlation via

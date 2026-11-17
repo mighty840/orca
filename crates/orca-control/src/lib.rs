@@ -5,6 +5,7 @@ pub mod alerts;
 pub mod api;
 mod api_listen;
 pub mod auth;
+mod backup_mounts;
 pub mod backup_scheduler;
 pub(crate) mod canary;
 pub mod certs;

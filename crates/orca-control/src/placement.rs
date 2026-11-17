@@ -35,7 +35,7 @@ pub(crate) enum PlacementResolution {
 /// Exact-identity match of a placement pin against a single node — never a
 /// substring. A pin matches when it equals the node ID, the full
 /// `ip:port` address, the address's host portion, or the `hostname` label.
-fn node_matches_pin(node: &RegisteredNode, pin: &str) -> bool {
+pub(crate) fn node_matches_pin(node: &RegisteredNode, pin: &str) -> bool {
     if pin == node.address || pin == node.node_id.to_string() {
         return true;
     }

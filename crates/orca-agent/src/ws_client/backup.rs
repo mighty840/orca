@@ -11,6 +11,7 @@ pub(super) async fn run_agent_backup(
     node_id: u64,
     config: orca_core::backup::BackupConfig,
     service_hooks: std::collections::HashMap<String, String>,
+    declared_mounts: std::collections::HashMap<String, Vec<String>>,
     out_tx: mpsc::Sender<AgentMessage>,
 ) {
     let config_json = match serde_json::to_string(&config) {
@@ -47,10 +48,12 @@ pub(super) async fn run_agent_backup(
     cache_backup_config(&config_json);
 
     let hooks_json = serde_json::to_string(&service_hooks).unwrap_or_default();
+    let mounts_json = serde_json::to_string(&declared_mounts).unwrap_or_default();
     match tokio::process::Command::new(&exe)
         .args(["backup", "all"])
         .env("ORCA_BACKUP_CONFIG_JSON", &config_json)
         .env("ORCA_SERVICE_HOOKS_JSON", &hooks_json)
+        .env("ORCA_DECLARED_MOUNTS_JSON", &mounts_json)
         .output()
         .await
     {
