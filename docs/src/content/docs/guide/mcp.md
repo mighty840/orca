@@ -24,21 +24,25 @@ Then configure the client to start `orca mcp`. For Claude Desktop
   "mcpServers": {
     "orca": {
       "command": "orca",
-      "args": ["mcp", "--api", "http://master:6880", "--token", "<the viewer token>"]
+      "args": ["mcp", "--api", "http://master:6880"],
+      "env": { "ORCA_TOKEN": "<the viewer token>" }
     }
   }
 }
 ```
 
-`--token` falls back to `ORCA_TOKEN`, then `~/.orca/cluster.token`. The
+Pass the token in `ORCA_TOKEN` rather than `--token`: command-line arguments
+are visible to every user on the machine. Without either, `orca mcp` reads
+`~/.orca/cluster.token`. The
 cluster token (and any legacy `api_tokens` entry) is **refused**: it is
 admin, and the cluster token is also what agents join with. Pass
 `--allow-cluster-token` to use it anyway.
 
 Every call is an ordinary API request made with that token, so the master's
-role checks, [audit log](/reference/api) and rate limit apply. A viewer is
-offered only what a viewer may read; the secrets inventory needs an admin
-token.
+role checks apply: a viewer is offered only what a viewer may read, and the
+secrets inventory needs an admin token. These are reads, so they are not in
+the [audit log](/reference/api) and not counted by `[api_rate_limit]`, which
+cover changes only.
 
 ## What the client sees
 

@@ -80,6 +80,10 @@ fn api() -> MockApi {
     );
     bodies.insert("/api/v1/alerts".to_string(), Ok(r#"{"alerts":[]}"#.into()));
     bodies.insert("/api/v1/secrets/usage".to_string(), Err(403));
+    bodies.insert(
+        "/api/v1/alerts/a1".to_string(),
+        Ok(r#"{"id":"a1","service":"web","messages":[{"content":"token=abcdef0123456789abcdef"}]}"#.into()),
+    );
     MockApi {
         bodies,
         seen: Mutex::new(Vec::new()),
@@ -198,4 +202,31 @@ async fn the_diagnose_prompt_fences_logs_as_data() {
     assert!(!text.contains("hunter2hunter2"), "{text}");
     // The logs contain a ``` line; the fence around them is longer.
     assert!(text.contains("````"), "{text}");
+}
+
+#[tokio::test]
+async fn explain_alert_adds_the_alerts_service_and_masks_the_alert_text() {
+    let api = Arc::new(api());
+    let client = connect(api.clone(), Role::Viewer).await;
+    let prompt = client
+        .get_prompt(
+            GetPromptRequestParams::new("explain_alert").with_arguments(args(&[("id", "a1")])),
+        )
+        .await
+        .unwrap();
+    let text = serde_json::to_string(&prompt.messages[0]).unwrap();
+    assert!(text.contains("Service web"), "{text}");
+    assert!(!text.contains("abcdef0123456789abcdef"), "{text}");
+    let seen = api.seen.lock().unwrap().clone();
+    assert_eq!(seen, ["/api/v1/alerts/a1", "/api/v1/services/web"]);
+}
+
+#[tokio::test]
+async fn a_prompt_without_its_required_argument_is_an_error() {
+    let client = connect(Arc::new(api()), Role::Viewer).await;
+    let err = client
+        .get_prompt(GetPromptRequestParams::new("diagnose"))
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("service"), "{err}");
 }

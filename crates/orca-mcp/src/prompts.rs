@@ -156,3 +156,23 @@ fn only_failing(status: &Value) -> String {
     }
     serde_json::to_string_pretty(&failing).unwrap_or_default()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_degraded_and_stopped_services_are_listed() {
+        let status = serde_json::json!({ "services": [
+            { "name": "a", "status": "running" },
+            { "name": "b", "status": "degraded" },
+            { "name": "c", "status": "paused" },
+            { "name": "d", "status": "stopped" },
+        ]});
+        let out = only_failing(&status);
+        assert!(out.contains("\"b\"") && out.contains("\"d\""), "{out}");
+        assert!(!out.contains("\"a\"") && !out.contains("\"c\""), "{out}");
+        let healthy = serde_json::json!({ "services": [{ "name": "a", "status": "running" }] });
+        assert!(only_failing(&healthy).starts_with("(none"));
+    }
+}

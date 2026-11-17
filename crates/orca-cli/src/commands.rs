@@ -191,8 +191,8 @@ pub enum Command {
     /// prompts. Point Claude Desktop, an IDE or an agent at `orca mcp`.
     Mcp {
         /// API token to act as (default: ORCA_TOKEN, then
-        /// ~/.orca/cluster.token). Use a viewer token: create one with
-        /// `orca token create --name mcp --role viewer`.
+        /// ~/.orca/cluster.token). Prefer ORCA_TOKEN: arguments are visible
+        /// in `ps`. Use a viewer token: `orca token create --name mcp --role viewer`.
         #[arg(long)]
         token: Option<String>,
         /// Accept the cluster token or another legacy `api_tokens` entry.

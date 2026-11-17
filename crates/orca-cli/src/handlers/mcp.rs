@@ -16,9 +16,20 @@ pub async fn handle_mcp(
     let api = crate::handlers::ops::resolve_api(api);
     let token = crate::handlers::server::read_token(token);
     let backend: Arc<dyn ApiBackend> = Arc::new(HttpBackend::new(&api, token));
-    let me = orca_mcp::whoami(backend.as_ref())
-        .await
-        .map_err(|e| anyhow::anyhow!("cannot ask {api} who this token is: {e}"))?;
+    let me = match orca_mcp::whoami(backend.as_ref()).await {
+        Ok(me) => me,
+        Err(e)
+            if matches!(
+                e.downcast_ref::<orca_mcp::BackendError>(),
+                Some(orca_mcp::BackendError::Status { status: 404, .. })
+            ) =>
+        {
+            bail!(
+                "the master at {api} is too old for `orca mcp` (it has no /api/v1/whoami); upgrade it"
+            )
+        }
+        Err(e) => bail!("cannot ask {api} who this token is: {e}"),
+    };
     if me.legacy && !allow_cluster_token {
         bail!(
             "refusing to serve MCP with '{}', a legacy api_tokens entry: it is admin, and the \

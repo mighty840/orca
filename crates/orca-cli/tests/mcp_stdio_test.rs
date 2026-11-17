@@ -117,3 +117,18 @@ async fn the_cluster_token_is_refused_by_default() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("--allow-cluster-token"), "{stderr}");
 }
+
+#[tokio::test]
+async fn an_unreachable_api_fails_on_stderr_and_leaves_stdout_empty() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let api = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
+    drop(listener);
+    let out = orca_mcp(&api, VIEWER_TOKEN).output().await.unwrap();
+    assert!(!out.status.success());
+    assert!(
+        out.stdout.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    assert!(String::from_utf8_lossy(&out.stderr).contains("cannot ask"));
+}

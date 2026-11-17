@@ -9,7 +9,17 @@ pub const MAX_BYTES: usize = 256 * 1024;
 
 /// JSON fields holding text from containers or people (failure details,
 /// alert messages), which can quote credentials.
-const FREE_TEXT_KEYS: &[&str] = &["message", "content", "detail", "error", "text", "logs"];
+/// `FailureInfo.message`, `AlertMessage.content` and `.suggested_command`;
+/// the tests build them from the real types, so a rename fails there.
+const FREE_TEXT_KEYS: &[&str] = &[
+    "message",
+    "content",
+    "suggested_command",
+    "detail",
+    "error",
+    "text",
+    "logs",
+];
 
 /// Logs: every line redacted; over the cap, the newest lines are kept.
 pub fn logs(body: &str) -> String {
@@ -87,18 +97,46 @@ pub fn fenced(label: &str, text: &str) -> String {
 mod tests {
     use super::*;
 
+    const LEAK: &str = "password=hunter2xyz";
+
     #[test]
-    fn credentials_in_failure_text_are_masked_but_names_are_kept() {
+    fn credentials_in_a_status_failure_are_masked_but_names_are_kept() {
+        let failure: orca_core::api_types::FailureInfo =
+            serde_json::from_value(serde_json::json!({
+                "reason": "Error",
+                "message": format!("connect failed: {LEAK}"),
+                "exit_code": 1,
+                "observed_at": "2026-11-17T00:00:00Z",
+            }))
+            .expect("a FailureInfo");
         let body = serde_json::json!({
             "services": [{
                 "name": "api-with-a-name-longer-than-thirty-two-chars",
-                "last_failure": { "message": "connect failed: password=hunter2xyz" },
+                "last_failure": failure,
             }]
         })
         .to_string();
         let out = json(&body);
         assert!(!out.contains("hunter2xyz"), "{out}");
         assert!(out.contains("api-with-a-name-longer-than-thirty-two-chars"));
+    }
+
+    #[test]
+    fn credentials_in_an_alert_conversation_are_masked() {
+        let alert: orca_core::types::AlertConversation =
+            serde_json::from_value(serde_json::json!({
+                "id": "0193f0a4-7c1e-7000-8000-000000000001", "service": "web",
+                "severity": "critical", "state": "investigating",
+                "started_at": "2026-11-17T00:00:00Z", "resolved_at": null,
+                "messages": [{
+                    "timestamp": "2026-11-17T00:00:00Z", "sender": "orca",
+                    "content": format!("the log shows {LEAK}"),
+                    "suggested_command": format!("psql 'postgres://u:{LEAK}@db'"),
+                }],
+            }))
+            .expect("an AlertConversation");
+        let out = json(&serde_json::to_string(&alert).unwrap());
+        assert!(!out.contains("hunter2xyz"), "{out}");
     }
 
     #[test]

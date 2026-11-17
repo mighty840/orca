@@ -21,6 +21,10 @@ pub trait ApiBackend: Send + Sync {
     async fn get(&self, path_and_query: &str) -> Result<String, BackendError>;
 }
 
+/// How long one API call may take. Log tails from a remote node go through
+/// the agent, so this is generous.
+pub const REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// The orca API over HTTP with a bearer token: what `orca mcp` uses.
 pub struct HttpBackend {
     base_url: String,
@@ -30,10 +34,16 @@ pub struct HttpBackend {
 
 impl HttpBackend {
     pub fn new(base_url: &str, token: Option<String>) -> Self {
+        // A hung master must not hang the client's tool call forever.
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(REQUEST_TIMEOUT)
+            .build()
+            .unwrap_or_default();
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
             token,
-            client: reqwest::Client::new(),
+            client,
         }
     }
 }

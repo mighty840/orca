@@ -3,8 +3,9 @@
 //! Read-only: the cluster's services, logs, nodes, alerts and backups as
 //! MCP resources and tools, plus prompt templates for diagnosis. Every call
 //! is an `/api/v1` request made with the caller's token, so the master's
-//! role checks, audit log and rate limit apply unchanged. See
-//! `design/mcp-endpoint.md`.
+//! role checks apply unchanged. (Its audit log and rate limit cover
+//! mutations and exec only, so these reads are neither audited nor
+//! limited.) See `design/mcp-endpoint.md`.
 
 pub mod backend;
 pub mod catalog;
