@@ -1,5 +1,6 @@
 //! #80 PR 3: `/mcp` on the master, over raw JSON-RPC as a remote client
-//! sends it.
+//! sends it. Needs the `mcp` feature.
+#![cfg(feature = "mcp")]
 
 use std::collections::HashMap;
 use std::sync::Arc;

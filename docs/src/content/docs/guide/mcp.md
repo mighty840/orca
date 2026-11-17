@@ -70,6 +70,9 @@ token, and so is every API call made for it, exactly as if the client had
 called the API.
 
 - `/mcp` is never served on a cluster with no API tokens, even when enabled.
+- The released `orca` binary includes `/mcp`. To build one without it (and
+  without the MCP HTTP stack), use `cargo build --no-default-features`;
+  `orca mcp` over stdio is always included.
 - A request whose `Host` is not allowed is rejected (DNS-rebinding
   protection), and so is one from a browser page: a request carrying an
   `Origin` header is refused unless `[mcp] allowed_origins` lists it.

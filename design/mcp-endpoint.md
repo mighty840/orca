@@ -485,7 +485,9 @@ outer POSTs carry reads). Each inner call is role-checked by its own route; they
 GETs, so the master does not rate-limit them (the per-token read budget is the limit),
 but it audits them: any request with `X-Orca-Client: mcp-*` is audited, reads included.
 On `/mcp` the master sets that header itself, so a remote client cannot avoid it;
-`orca mcp` sets `mcp-stdio`. `OrcaMcp` resolves its caller per request from the `Principal` that
+`orca mcp` sets `mcp-stdio`. The `/mcp` mount and its rmcp HTTP stack are behind
+orca-control's `mcp` feature (off for the library); mallorca enables it by default
+through its `mcp-http` feature, and a build without it warns if `[mcp]` is enabled. `OrcaMcp` resolves its caller per request from the `Principal` that
 auth put in the request's `Parts`, and calls the authed router with `oneshot`,
 forwarding that request's `Authorization`. Sessions use rmcp's default
 `LocalSessionManager` (legacy session mode, SSE answers; idle sessions close after 300 s,

@@ -11,6 +11,11 @@ authors.workspace = true
 name = "orca"
 path = "src/main.rs"
 
+[features]
+default = ["mcp-http"]
+# The master's /mcp endpoint (#80). `orca mcp` (stdio) is always built.
+mcp-http = ["orca-control/mcp"]
+
 [dependencies]
 orca-core = { workspace = true }
 orca-ai = { workspace = true }

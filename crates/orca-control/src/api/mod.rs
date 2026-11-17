@@ -114,8 +114,23 @@ pub fn router(state: Arc<AppState>) -> Router {
 
     // `/mcp` calls back into the authed router, as its caller (#80).
     let app = public.merge(authed.clone());
-    match crate::mcp_mount::router(&state, authed) {
+    match mcp_router(&state, authed) {
         Some(mcp) => app.merge(mcp),
         None => app,
     }
+}
+
+#[cfg(feature = "mcp")]
+fn mcp_router(state: &Arc<AppState>, authed: Router) -> Option<Router> {
+    crate::mcp_mount::router(state, authed)
+}
+
+#[cfg(not(feature = "mcp"))]
+fn mcp_router(state: &Arc<AppState>, _authed: Router) -> Option<Router> {
+    if state.cluster_config.mcp.enabled {
+        tracing::warn!(
+            "[mcp] is enabled, but this orca was built without the `mcp` feature: /mcp is not served"
+        );
+    }
+    None
 }
