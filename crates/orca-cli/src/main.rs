@@ -37,6 +37,8 @@ async fn main() -> anyhow::Result<()> {
     clap_complete::CompleteEnv::with_factory(Cli::command).complete();
 
     let cli = Cli::parse();
+    // `orca mcp` speaks the protocol on stdout: nothing else may go there.
+    let mcp = matches!(cli.command, Command::Mcp { .. });
 
     // Set up structured logging — console + optional file output for crash analysis.
     // Set ORCA_LOG_FILE=path to also log to a file in JSON format.
@@ -54,10 +56,23 @@ async fn main() -> anyhow::Result<()> {
             .with_writer(std::sync::Mutex::new(file));
         use tracing_subscriber::layer::SubscriberExt;
         use tracing_subscriber::util::SubscriberInitExt;
+        let console =
+            tracing_subscriber::fmt::layer().with_writer(move || -> Box<dyn std::io::Write> {
+                if mcp {
+                    Box::new(std::io::stderr())
+                } else {
+                    Box::new(std::io::stdout())
+                }
+            });
         tracing_subscriber::registry()
             .with(env_filter)
-            .with(tracing_subscriber::fmt::layer())
+            .with(console)
             .with(file_layer)
+            .init();
+    } else if mcp {
+        tracing_subscriber::fmt()
+            .with_env_filter(env_filter)
+            .with_writer(std::io::stderr)
             .init();
     } else {
         tracing_subscriber::fmt().with_env_filter(env_filter).init();
@@ -120,6 +135,10 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
+        Command::Mcp {
+            token,
+            allow_cluster_token,
+        } => handlers::mcp::handle_mcp(&cli.api, token.as_deref(), allow_cluster_token).await?,
         Command::Rm { service, force } => {
             for s in service {
                 handlers::ops::handle_rm(&s, force, cli.api.clone()).await?;

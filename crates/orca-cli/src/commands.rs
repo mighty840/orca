@@ -186,6 +186,22 @@ pub enum Command {
         setup_key: Option<String>,
     },
 
+    /// Serve orca to an AI client over the Model Context Protocol (stdio).
+    /// Read-only: services, logs, nodes, alerts, backups, and diagnosis
+    /// prompts. Point Claude Desktop, an IDE or an agent at `orca mcp`.
+    Mcp {
+        /// API token to act as (default: ORCA_TOKEN, then
+        /// ~/.orca/cluster.token). Use a viewer token: create one with
+        /// `orca token create --name mcp --role viewer`.
+        #[arg(long)]
+        token: Option<String>,
+        /// Accept the cluster token or another legacy `api_tokens` entry.
+        /// Those are admin and, for the cluster token, the agents' join
+        /// credential, so they are refused by default.
+        #[arg(long)]
+        allow_cluster_token: bool,
+    },
+
     /// Manage API tokens
     Token {
         #[command(subcommand)]

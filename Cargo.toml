@@ -9,6 +9,7 @@ members = [
     "crates/orca-tui",
     "crates/orca-web",
     "crates/orca-proxy",
+    "crates/orca-mcp",
 ]
 
 exclude = ["examples/wasm-hello"]
@@ -41,6 +42,7 @@ incremental = false
 orca-core = { path = "crates/orca-core", version = "0.3.1" }
 orca-ai = { path = "crates/orca-ai", version = "0.3.1" }
 orca-proxy = { path = "crates/orca-proxy", version = "0.3.1" }
+orca-mcp = { path = "crates/orca-mcp", version = "0.3.1" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

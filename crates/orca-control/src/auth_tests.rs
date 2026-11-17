@@ -197,3 +197,19 @@ fn the_route_scanner_finds_multi_line_routes() {
         assert!(mounted.contains(route), "scanner missed {route}");
     }
 }
+
+/// #80: each MCP operation calls a mounted route, and the permission it
+/// declares (which decides whether it is offered to a token) is the one the
+/// route requires.
+#[test]
+fn the_mcp_catalog_matches_the_route_policy() {
+    let mounted = mounted_route_paths();
+    for (tool, method, route, action) in orca_mcp::routes() {
+        assert!(mounted.contains(route), "{tool}: {route} is not mounted");
+        assert_eq!(
+            required_action(method, Some(route)),
+            action,
+            "{tool}: {method} {route}"
+        );
+    }
+}

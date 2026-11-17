@@ -32,6 +32,7 @@ export const nav: NavSection[] = [
     label: 'AI Ops',
     items: [
       { text: 'AI Assistant', link: '/guide/ai-ops' },
+      { text: 'MCP Server', link: '/guide/mcp' },
     ],
   },
   {
