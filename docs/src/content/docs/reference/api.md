@@ -27,9 +27,10 @@ admin-only, and so is any route not listed here.
 Every mutating request and every exec is audited, allowed or denied: the
 caller's token name, the route template, the `{name}` it targets, the status,
 the latency and the `X-Orca-Client` header. The query string and the body are
-never recorded. Events go to the log (target `orca::audit`) and the newest
-1000 are kept in memory for `GET /api/v1/audit`; they do not survive a restart.
-Agent registration and heartbeats are not audited.
+never recorded. Events go to the log (target `orca::audit`). The newest 1000
+with a valid token are also kept in memory for `GET /api/v1/audit` (requests
+without one are logged only); they do not survive a restart. Agent
+registration and heartbeats are not audited.
 
 ### Services
 
@@ -47,7 +48,6 @@ Agent registration and heartbeats are not audited.
 | `POST` | `/api/v1/services/{name}/promote` | `deploy` | Promote canary |
 | `POST` | `/api/v1/services/{name}/rollback` | `rollback` | Rollback deploy |
 | `DELETE` | `/api/v1/services/{name}` | `stop` | Stop (pause) service |
-| `POST` | `/api/v1/services/{name}/remove?force=` | admin | Remove a service for good (`orca rm`) |
 | `DELETE` | `/api/v1/projects/{project}` | `stop` | Stop all in project |
 | `POST` | `/api/v1/stop` | `stop` | Stop ALL services |
 
@@ -193,9 +193,9 @@ GET /api/v1/status
 `status` is the service's entry from `GET /api/v1/status`. `config` is the
 service's configuration, safe for a viewer token:
 
-- env keys are listed; a value is shown only when it is exactly one
-  `${secrets.KEY}` reference, otherwise it reads `***`
-- `secret_refs` lists every secret the env references
+- env keys are listed; values read `***`, except that a caller with the
+  `secrets` permission sees a value that is exactly one `${secrets.KEY}`
+  reference, and `secret_refs`, every secret the env references
 - `cmd`, the backup pre-hook and build settings are reduced to `true`/`false`
   (they can carry credentials); TLS paths are left out
 

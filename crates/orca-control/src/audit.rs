@@ -3,8 +3,9 @@
 //! Every mutating request and every exec is recorded, allowed or denied,
 //! with the caller's token name, the route template, the status and the
 //! latency. Never the query string or the body: they can carry secrets.
-//! Events go to `tracing` (target `orca::audit`) and to a bounded in-memory
-//! buffer served at `GET /api/v1/audit`; durable storage is #82's job.
+//! Events go to `tracing` (target `orca::audit`). Those with a known caller
+//! also go to a bounded in-memory buffer served at `GET /api/v1/audit`;
+//! durable storage is #82's job.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
@@ -45,6 +46,12 @@ impl AuditLog {
             client = event.client.as_deref().unwrap_or("-"),
             "api call"
         );
+        // Logged, not buffered: anyone can send requests without a valid
+        // token (or to the signed GitHub webhook), and enough of them would
+        // push every operator's events out of the buffer.
+        if event.principal.is_none() {
+            return;
+        }
         let mut events = self.events.lock().unwrap_or_else(|e| e.into_inner());
         if events.len() == CAPACITY {
             events.pop_front();

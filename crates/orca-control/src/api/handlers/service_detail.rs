@@ -4,15 +4,29 @@
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use orca_core::api_types::{DeployRecordView, ServiceConfigView, ServiceDetail};
 
+use crate::auth::Principal;
 use crate::state::AppState;
+
+/// The masked view of `config` for `caller`.
+fn view_for(
+    caller: Option<&Principal>,
+    config: &orca_core::config::ServiceConfig,
+) -> ServiceConfigView {
+    let mut view = ServiceConfigView::from(config);
+    if !caller.is_some_and(|p| p.role.can("secrets")) {
+        view.hide_secret_refs();
+    }
+    view
+}
 
 pub(crate) async fn service_detail(
     State(state): State<Arc<AppState>>,
+    caller: Option<Extension<Principal>>,
     Path(name): Path<String>,
 ) -> Response {
     super::refresh_observed_statuses(&state).await;
@@ -24,7 +38,7 @@ pub(crate) async fn service_detail(
     let failures = state.last_failures.read().await;
     Json(ServiceDetail {
         status: super::status_view::service_status(svc, &stats, &failures),
-        config: ServiceConfigView::from(&svc.config),
+        config: view_for(caller.as_deref(), &svc.config),
     })
     .into_response()
 }
@@ -32,6 +46,7 @@ pub(crate) async fn service_detail(
 /// Recorded deploys, newest first. Kept in memory: empty after a restart.
 pub(crate) async fn service_history(
     State(state): State<Arc<AppState>>,
+    caller: Option<Extension<Principal>>,
     Path(name): Path<String>,
 ) -> Response {
     if !state.services.read().await.contains_key(&name) {
@@ -45,7 +60,7 @@ pub(crate) async fn service_history(
         .map(|r| DeployRecordView {
             deploy_id: r.deploy_id.clone(),
             timestamp: r.timestamp,
-            config: ServiceConfigView::from(&r.config),
+            config: view_for(caller.as_deref(), &r.config),
         })
         .collect();
     Json(records).into_response()

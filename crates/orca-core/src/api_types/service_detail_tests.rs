@@ -41,6 +41,15 @@ fn env_keys_stay_and_only_whole_references_are_shown() {
 }
 
 #[test]
+fn hiding_references_masks_every_value_but_empty_ones() {
+    let mut view = ServiceConfigView::from(&config_with_secrets_everywhere());
+    view.hide_secret_refs();
+    assert_eq!(view.env["REF"], MASKED);
+    assert_eq!(view.env["EMPTY"], "");
+    assert!(view.secret_refs.is_empty());
+}
+
+#[test]
 fn a_value_that_only_looks_like_one_reference_is_masked() {
     for v in ["${secrets.A}${secrets.B}", "${secrets.A}x}", "${secrets.}"] {
         assert_eq!(mask_value(v), MASKED, "{v}");

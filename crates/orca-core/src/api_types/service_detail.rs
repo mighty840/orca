@@ -5,7 +5,8 @@
 //! patched: `cmd`, the backup pre-hook, build settings and TLS paths can carry
 //! secrets too, so they are left out or reduced to a flag. Env keys are
 //! shown; a value is shown only when it is a single `${secrets...}`
-//! reference, which names a secret without revealing it.
+//! reference, which names a secret without revealing it, and only to a
+//! caller allowed the `secrets` action (see `hide_secret_refs`).
 
 use std::collections::BTreeMap;
 
@@ -155,6 +156,19 @@ impl From<&ServiceConfig> for ServiceConfigView {
             backup_hook: c.backup.as_ref().is_some_and(|b| b.pre_hook.is_some()),
             adopted: c.adopted,
         }
+    }
+}
+
+impl ServiceConfigView {
+    /// For a caller who may not see the secrets inventory (which keys exist
+    /// and who uses them is `secrets`, admin only): mask the references too.
+    pub fn hide_secret_refs(&mut self) {
+        for v in self.env.values_mut() {
+            if !v.is_empty() {
+                *v = MASKED.to_string();
+            }
+        }
+        self.secret_refs.clear();
     }
 }
 

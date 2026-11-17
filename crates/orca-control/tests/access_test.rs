@@ -129,14 +129,14 @@ async fn mutations_and_denials_are_audited_reads_are_not() {
         .iter()
         .map(|e| (e["principal"].clone(), e["status"].as_u64().unwrap()))
         .collect();
-    // Newest first; the status read is not there, nor the audit reads.
-    assert_eq!(seen.len(), 3, "{events:?}");
-    assert_eq!(seen[0], (Value::Null, 401));
-    assert_eq!(seen[1], (Value::from("dashboard"), 403));
-    assert_eq!(seen[2].0, Value::from("gitea-ci"));
-    assert_eq!(events[2]["route"], "/api/v1/services/{name}/scale");
-    assert_eq!(events[2]["target"], "web");
-    assert_eq!(events[2]["client"], "test");
+    // Newest first. Not there: the status read, the audit reads, and the
+    // request without a token (logged only, so it cannot flush the buffer).
+    assert_eq!(seen.len(), 2, "{events:?}");
+    assert_eq!(seen[0], (Value::from("dashboard"), 403));
+    assert_eq!(seen[1].0, Value::from("gitea-ci"));
+    assert_eq!(events[1]["route"], "/api/v1/services/{name}/scale");
+    assert_eq!(events[1]["target"], "web");
+    assert_eq!(events[1]["client"], "test");
 }
 
 #[tokio::test]
@@ -149,7 +149,17 @@ async fn a_viewer_reads_a_service_and_its_history_without_secrets() {
     let detail: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(detail["status"]["name"], "web");
     assert_eq!(detail["config"]["env"]["DB_PASSWORD"], "***");
+    // Which secrets a service uses is the `secrets` inventory: admins only.
+    assert_eq!(detail["config"]["env"]["API_KEY"], "***");
+    assert_eq!(detail["config"]["secret_refs"], serde_json::json!([]));
+    let (_, body) = call(port, "GET", "/api/v1/services/web", Some(ADMIN)).await;
+    assert!(!body.contains(SENTINEL), "{body}");
+    let detail: Value = serde_json::from_str(&body).unwrap();
     assert_eq!(detail["config"]["env"]["API_KEY"], "${secrets.API_KEY}");
+    assert_eq!(
+        detail["config"]["secret_refs"],
+        serde_json::json!(["API_KEY"])
+    );
 
     let (status, body) = call(port, "GET", "/api/v1/services/web/history", Some(VIEWER)).await;
     assert_eq!(status, 200);
@@ -167,4 +177,35 @@ async fn a_viewer_reads_a_service_and_its_history_without_secrets() {
             .0,
         404
     );
+}
+
+#[tokio::test]
+async fn whoami_on_a_cluster_without_tokens_is_anonymous_admin() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let state = Arc::new(AppState::new(
+        ClusterConfig::default(),
+        Arc::new(orca_core::testing::MockRuntime::new()),
+        None,
+        Arc::new(RwLock::new(HashMap::new())),
+        Arc::new(RwLock::new(Vec::new())),
+    ));
+    let app = orca_control::api::router(state);
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+        .unwrap()
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let (status, body) = call(port, "GET", "/api/v1/whoami", None).await;
+    assert_eq!(status, 200);
+    let me: Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(me["name"], "anonymous");
+    assert_eq!(me["role"], "admin");
+    assert_eq!(me["open"], true);
+    assert_eq!(me["legacy"], false);
 }
