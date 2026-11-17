@@ -35,7 +35,8 @@ admin-only, and so is any route not listed here.
 | `POST` | `/api/v1/services/{name}/redeploy` | `deploy` | Pull the image and recreate |
 | `POST` | `/api/v1/services/{name}/promote` | `deploy` | Promote canary |
 | `POST` | `/api/v1/services/{name}/rollback` | `rollback` | Rollback deploy |
-| `DELETE` | `/api/v1/services/{name}` | `stop` | Stop service |
+| `DELETE` | `/api/v1/services/{name}` | `stop` | Stop (pause) service |
+| `POST` | `/api/v1/services/{name}/remove?force=` | admin | Remove a service for good (`orca rm`) |
 | `DELETE` | `/api/v1/projects/{project}` | `stop` | Stop all in project |
 | `POST` | `/api/v1/stop` | `stop` | Stop ALL services |
 
