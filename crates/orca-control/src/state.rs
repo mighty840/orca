@@ -382,6 +382,7 @@ mod tests {
 
     fn minimal_config(replicas: Replicas) -> ServiceConfig {
         ServiceConfig {
+            adopted: false,
             restart_policy: None,
             name: "test-svc".to_string(),
             project: None,

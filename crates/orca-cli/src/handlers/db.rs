@@ -64,6 +64,7 @@ async fn handle_create(
     };
 
     let service = ServiceConfig {
+        adopted: false,
         restart_policy: None,
         name: name.to_string(),
         project: None,

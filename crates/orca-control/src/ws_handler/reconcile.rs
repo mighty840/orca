@@ -71,6 +71,18 @@ pub(super) async fn send_reconcile(
         // A paused service is not expected anywhere: including it made every
         // agent reconnect redeploy it, undoing `orca stop` (#227).
         .filter(|svc| !svc.stopped)
+        // An adopted record has no env or volumes; recreating from it on
+        // rejoin replaced working containers with hollow ones (#313).
+        .filter(|svc| {
+            if svc.config.adopted {
+                warn!(
+                    "Reconcile for node {node_id}: leaving out {}: it was adopted from a \
+                     running container and has no full config; deploy it from its service.toml",
+                    svc.config.name
+                );
+            }
+            !svc.config.adopted
+        })
         .filter(|svc| {
             svc.config
                 .placement

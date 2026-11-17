@@ -52,16 +52,7 @@ pub(crate) async fn deploy(
 
     let (deployed, errors) = reconciler::reconcile(&state, &req.services).await;
 
-    // Persist deployed services to store
-    if let Some(store) = &state.store {
-        for config in &req.services {
-            if deployed.contains(&config.name)
-                && let Err(e) = store.set_service(&config.name, config)
-            {
-                tracing::warn!("Failed to persist {}: {e}", config.name);
-            }
-        }
-    }
+    crate::persist::persist_recorded(&state, &req.services, &deployed, "deploy").await;
 
     let status_code = if errors.is_empty() {
         StatusCode::OK

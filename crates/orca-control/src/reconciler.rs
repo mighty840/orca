@@ -121,6 +121,11 @@ pub(crate) async fn reconcile_service(
         Replicas::Fixed(n) => *n,
         Replicas::Auto => 1,
     };
+    // An adopted record lacks env and volumes: creating from it is how
+    // working databases came back empty (#313). Stopping is still fine.
+    if desired > 0 {
+        crate::adopted::refuse_recreate(config)?;
+    }
 
     let mut spec = service_config_to_spec(config)?;
 

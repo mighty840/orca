@@ -37,6 +37,7 @@ fn make_state(token: &str) -> Arc<AppState> {
 
 fn make_config(name: &str) -> ServiceConfig {
     ServiceConfig {
+        adopted: false,
         restart_policy: None,
         name: name.into(),
         project: None,

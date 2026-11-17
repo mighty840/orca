@@ -83,6 +83,7 @@ fn convert_service(name: &str, svc: &ComposeService, network: &str) -> ServiceCo
     let aliases = vec![name.to_string()];
 
     ServiceConfig {
+        adopted: false,
         restart_policy: None,
         name: name.to_string(),
         project: None,
@@ -234,6 +235,7 @@ services:
     fn services_to_toml_roundtrip() {
         let config = ServicesConfig {
             service: vec![ServiceConfig {
+                adopted: false,
                 restart_policy: None,
                 name: "test".to_string(),
                 project: None,

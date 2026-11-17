@@ -1,6 +1,7 @@
 //! The re-sync an agent gets on (re)connect: #227 (a paused service must not
 //! be in it, or every reconnect undoes `orca stop`) and #311 (dependencies
-//! first, the agent deploys the list in order).
+//! first, the agent deploys the list in order), and #313 (an adopted record
+//! is never replayed, and a deploy whose ack was lost is still stored).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -139,4 +140,75 @@ async fn the_resync_lists_dependencies_before_their_dependents() {
         }
         other => panic!("expected a Reconcile, got {other:?}"),
     }
+}
+
+fn adopted(name: &str) -> ServiceConfig {
+    let mut c = pinned(name);
+    c.adopted = true;
+    c
+}
+
+#[tokio::test]
+async fn an_adopted_service_is_left_out_of_the_resync() {
+    // #313: the re-sync after a reboot recreated six adopted services with
+    // no env and no volume.
+    let state = state_with_agent().await;
+    {
+        let mut services = state.services.write().await;
+        services.insert("web".into(), ServiceState::from_config(pinned("web")));
+        let pg = adopted("macli-postgres");
+        services.insert(pg.name.clone(), ServiceState::from_config(pg));
+    }
+    let (tx, mut rx) = mpsc::channel(4);
+
+    send_reconcile(&state, AGENT, &tx).await;
+
+    match rx.try_recv() {
+        Ok(MasterMessage::Reconcile { expected }) => {
+            let names: Vec<&str> = expected.iter().map(|s| s.name.as_str()).collect();
+            assert_eq!(names, ["web"]);
+        }
+        other => panic!("expected a Reconcile, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn an_adopted_service_is_not_recreated_from_its_record() {
+    // Redeploy, start and dependents' restarts all replay the stored config.
+    let state = state_with_agent().await;
+    let pg = adopted("macli-postgres");
+    state
+        .services
+        .write()
+        .await
+        .insert(pg.name.clone(), ServiceState::from_config(pg.clone()));
+
+    let err = crate::reconciler::reconcile_service(&state, &pg)
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(err.contains("deploy it from its service.toml"), "{err}");
+}
+
+#[tokio::test]
+async fn an_agent_deploy_that_reported_an_error_is_still_stored() {
+    // #313's first cause: the deploy reached the agent but reported an
+    // error, so it was never stored; after a master restart orphan adoption
+    // registered the container with a hollow config.
+    let dir = tempfile::tempdir().unwrap();
+    let store = Arc::new(crate::store::ClusterStore::open(&dir.path().join("s.redb")).unwrap());
+    let state = state_with_agent().await.with_store(store.clone());
+    let mut web = pinned("web");
+    web.env
+        .insert("DATABASE_URL".into(), "postgres://db".into());
+
+    // The agent is registered but has no WS session: the dispatch fails
+    // after the master recorded the config.
+    let (deployed, errors) = crate::reconciler::reconcile(&state, &[web.clone()]).await;
+    assert!(deployed.is_empty() && errors.len() == 1, "{errors:?}");
+
+    crate::persist::persist_recorded(&state, &[web], &deployed, "test").await;
+    let stored = store.get_service("web").unwrap().expect("stored");
+    assert_eq!(stored.env["DATABASE_URL"], "postgres://db");
 }

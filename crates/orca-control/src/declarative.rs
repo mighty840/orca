@@ -158,15 +158,7 @@ pub async fn apply_config_dir(state: &AppState, dir: &str) {
 
     // Persist applied configs so they survive a master restart (same path as
     // a CLI deploy).
-    if let Some(store) = &state.store {
-        for cfg in &changed {
-            if deployed.contains(&cfg.name)
-                && let Err(e) = store.set_service(&cfg.name, cfg)
-            {
-                warn!("declarative reconcile: persist {} failed: {e}", cfg.name);
-            }
-        }
-    }
+    crate::persist::persist_recorded(state, &changed, &deployed, "declarative reconcile").await;
     for e in errors {
         warn!("declarative reconcile error: {e}");
     }

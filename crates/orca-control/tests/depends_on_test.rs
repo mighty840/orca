@@ -8,6 +8,7 @@ use orca_core::types::Replicas;
 
 fn make_service(name: &str, depends_on: Vec<&str>) -> ServiceConfig {
     ServiceConfig {
+        adopted: false,
         restart_policy: None,
         name: name.to_string(),
         project: None,

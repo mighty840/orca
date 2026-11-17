@@ -91,6 +91,7 @@ mod tests {
 
     fn test_config(name: &str, image: &str) -> ServiceConfig {
         ServiceConfig {
+            adopted: false,
             restart_policy: None,
             name: name.to_string(),
             project: None,
