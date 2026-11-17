@@ -79,11 +79,13 @@ async fn rm_refuses_a_service_the_declarative_loop_would_redeploy() {
         "[[service]]\nname = \"web\"\nimage = \"nginx:latest\"\n",
     )
     .unwrap();
-    let mut cluster = ClusterConfig::default();
-    cluster.reconcile = Some(
-        serde_json::from_value(serde_json::json!({ "config_dir": file.to_str().unwrap() }))
-            .unwrap(),
-    );
+    let cluster = ClusterConfig {
+        reconcile: Some(
+            serde_json::from_value(serde_json::json!({ "config_dir": file.to_str().unwrap() }))
+                .unwrap(),
+        ),
+        ..Default::default()
+    };
     let (state, _store_dir) = master(Arc::new(MockRuntime::new()), cluster);
     deploy(&state, "web").await;
 
