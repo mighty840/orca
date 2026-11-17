@@ -120,3 +120,55 @@ async fn cluster_info_requires_auth_and_surfaces_gpus() {
     assert_eq!(node["net_tx"], 600, "net_tx missing");
     assert_eq!(node["drain"], true, "drain missing");
 }
+
+/// #80: the typed response keeps the exact keys the hand-built JSON had, and
+/// every `RegisteredNode` field plus `gpus` on each node.
+#[tokio::test]
+async fn cluster_info_keys_match_the_previous_wire_format() {
+    let port = start().await;
+    let json: serde_json::Value = reqwest::Client::new()
+        .get(format!("http://127.0.0.1:{port}/api/v1/cluster/info"))
+        .bearer_auth(TOKEN)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let keys = |v: &serde_json::Value| {
+        let mut k: Vec<String> = v.as_object().unwrap().keys().cloned().collect();
+        k.sort();
+        k
+    };
+    assert_eq!(
+        keys(&json),
+        [
+            "acme_email",
+            "cluster_name",
+            "commit",
+            "domain",
+            "node_count",
+            "nodes",
+            "version"
+        ]
+    );
+    let node = RegisteredNode {
+        peer_ip: None,
+        node_id: 1,
+        address: "a".into(),
+        labels: HashMap::new(),
+        last_heartbeat: chrono::Utc::now(),
+        drain: false,
+        cpu_percent: 0.0,
+        memory_bytes: 0,
+        memory_total: 0,
+        disk_used: 0,
+        disk_total: 0,
+        net_rx: 0,
+        net_tx: 0,
+    };
+    let mut expected = keys(&serde_json::to_value(&node).unwrap());
+    expected.push("gpus".into());
+    expected.sort();
+    assert_eq!(keys(&json["nodes"][0]), expected);
+}

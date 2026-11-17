@@ -6,17 +6,7 @@ use super::*;
 
 /// Actions `Role::can` understands. A typo in `ROUTE_POLICY` would otherwise
 /// silently make a route admin-only.
-const KNOWN_ACTIONS: &[&str] = &[
-    "status",
-    "logs",
-    "cluster_info",
-    "deploy",
-    "stop",
-    "scale",
-    "rollback",
-    "secrets",
-    ADMIN_ONLY,
-];
+const KNOWN_ACTIONS: &[&str] = crate::auth_principal::ACTIONS;
 
 /// Routes that authenticate outside the middleware and so are not in the
 /// policy table: exempt paths, and the agent WebSocket (admin-gated itself).

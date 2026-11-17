@@ -21,6 +21,15 @@ admin-only, and so is any route not listed here.
 |--------|------|------------|-------------|
 | `GET` | `/api/v1/health` | none | Cluster health check |
 | `GET` | `/metrics` | `status` | Prometheus metrics |
+| `GET` | `/api/v1/whoami` | `status` | The caller's token name, role and allowed actions |
+| `GET` | `/api/v1/audit?limit=` | admin | Recent audited calls, newest first |
+
+Every mutating request and every exec is audited, allowed or denied: the
+caller's token name, the route template, the `{name}` it targets, the status,
+the latency and the `X-Orca-Client` header. The query string and the body are
+never recorded. Events go to the log (target `orca::audit`) and the newest
+1000 are kept in memory for `GET /api/v1/audit`; they do not survive a restart.
+Agent registration and heartbeats are not audited.
 
 ### Services
 
@@ -28,6 +37,8 @@ admin-only, and so is any route not listed here.
 |--------|------|------------|-------------|
 | `POST` | `/api/v1/deploy` | `deploy` | Deploy services |
 | `GET` | `/api/v1/status?project=` | `status` | Service status |
+| `GET` | `/api/v1/services/{name}` | `status` | One service's status and configuration, env values masked |
+| `GET` | `/api/v1/services/{name}/history` | `status` | Recorded deploys, newest first (in memory) |
 | `GET` | `/api/v1/services/{name}/logs` | `logs` | Container logs (`tail`, `follow`) |
 | `GET` | `/api/v1/services/{name}/exec` | admin | Interactive exec (WebSocket) |
 | `POST` | `/api/v1/services/{name}/scale` | `scale` | Scale replicas |
@@ -175,6 +186,22 @@ GET /api/v1/status
   ]
 }
 ```
+
+## Service Detail
+
+`GET /api/v1/services/{name}` returns `{ "status": ..., "config": ... }`.
+`status` is the service's entry from `GET /api/v1/status`. `config` is the
+service's configuration, safe for a viewer token:
+
+- env keys are listed; a value is shown only when it is exactly one
+  `${secrets.KEY}` reference, otherwise it reads `***`
+- `secret_refs` lists every secret the env references
+- `cmd`, the backup pre-hook and build settings are reduced to `true`/`false`
+  (they can carry credentials); TLS paths are left out
+
+`GET /api/v1/services/{name}/history` returns the recorded deploys with the
+same masked `config`, newest first. The history is kept in memory and is
+empty after a master restart.
 
 ## Token Rotation
 
