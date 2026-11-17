@@ -1,5 +1,6 @@
-//! #227: a paused service must not be in an agent's re-sync, or every
-//! reconnect redeploys it and undoes `orca stop`.
+//! The re-sync an agent gets on (re)connect: #227 (a paused service must not
+//! be in it, or every reconnect undoes `orca stop`) and #311 (dependencies
+//! first, the agent deploys the list in order).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -108,4 +109,34 @@ async fn placeholders_do_not_match_a_pin_that_is_a_prefix_of_the_agent() {
         "not the agent's"
     );
     assert_eq!(services["on-agent"].instances.len(), 1);
+}
+
+#[tokio::test]
+async fn the_resync_lists_dependencies_before_their_dependents() {
+    // #311: `app-prod` started 3s before `app-pg-prod` existed and exited
+    // on ENOTFOUND. Names chosen so name order alone would be wrong too.
+    let state = state_with_agent().await;
+    {
+        let mut services = state.services.write().await;
+        let mut app = pinned("a-app");
+        app.depends_on = vec!["z-db".into(), "m-cache".into()];
+        let mut db = pinned("z-db");
+        db.depends_on = vec!["on-master".into()]; // not on this node
+        let mut cache = pinned("m-cache");
+        cache.depends_on = vec!["z-db".into()];
+        for c in [app, db, cache] {
+            services.insert(c.name.clone(), ServiceState::from_config(c));
+        }
+    }
+    let (tx, mut rx) = mpsc::channel(4);
+
+    send_reconcile(&state, AGENT, &tx).await;
+
+    match rx.try_recv() {
+        Ok(MasterMessage::Reconcile { expected }) => {
+            let names: Vec<&str> = expected.iter().map(|s| s.name.as_str()).collect();
+            assert_eq!(names, ["z-db", "m-cache", "a-app"]);
+        }
+        other => panic!("expected a Reconcile, got {other:?}"),
+    }
 }

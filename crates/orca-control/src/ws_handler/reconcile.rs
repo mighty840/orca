@@ -66,7 +66,7 @@ pub(super) async fn send_reconcile(
 
     // Collect all services whose placement targets this node
     let services = state.services.read().await;
-    let expected: Vec<Box<orca_core::types::WorkloadSpec>> = services
+    let mut configs: Vec<orca_core::config::ServiceConfig> = services
         .values()
         // A paused service is not expected anywhere: including it made every
         // agent reconnect redeploy it, undoing `orca stop` (#227).
@@ -81,26 +81,35 @@ pub(super) async fn send_reconcile(
                         == crate::placement::PlacementResolution::Node(node_id)
                 })
         })
-        .filter_map(
-            |svc| match crate::routes::service_config_to_spec(&svc.config) {
-                Ok(spec) => Some(Box::new(spec)),
-                Err(e) => {
-                    // Left out of the Reconcile, so the agent keeps whatever it
-                    // runs now. Say why instead of skipping it silently.
-                    warn!(
-                        "Reconcile for node {node_id}: skipping {}: {e:#}",
-                        svc.config.name
-                    );
-                    None
-                }
-            },
-        )
+        .map(|svc| svc.config.clone())
         .collect();
     // Release both read guards before the channel send below — holding a
     // read across an await lets a queued writer (heartbeats write
     // registered_nodes constantly) block every subsequent reader.
     drop(services);
     drop(nodes);
+
+    // The agent deploys the list in order, one after another. HashMap order
+    // started an app before the database it depends on (#311); sort by name
+    // first so the order is the same on every reconnect.
+    configs.sort_by(|a, b| a.name.cmp(&b.name));
+    let expected: Vec<Box<orca_core::types::WorkloadSpec>> = crate::topo_sort::topo_sort(&configs)
+        .iter()
+        .filter_map(
+            |config| match crate::routes::service_config_to_spec(config) {
+                Ok(spec) => Some(Box::new(spec)),
+                Err(e) => {
+                    // Left out of the Reconcile, so the agent keeps whatever it
+                    // runs now. Say why instead of skipping it silently.
+                    warn!(
+                        "Reconcile for node {node_id}: skipping {}: {e:#}",
+                        config.name
+                    );
+                    None
+                }
+            },
+        )
+        .collect();
 
     if expected.is_empty() {
         return;
