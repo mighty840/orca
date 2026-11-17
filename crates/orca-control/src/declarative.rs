@@ -157,7 +157,8 @@ pub async fn apply_config_dir(state: &AppState, dir: &str) {
 
     // Persist applied configs so they survive a master restart (same path as
     // a CLI deploy).
-    crate::persist::persist_recorded(state, &changed, &deployed, "declarative reconcile").await;
+    crate::persist::persist_recorded(state, &changed, &deployed, &errors, "declarative reconcile")
+        .await;
     for e in errors {
         warn!("declarative reconcile error: {e}");
     }

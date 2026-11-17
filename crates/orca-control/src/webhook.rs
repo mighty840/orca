@@ -372,7 +372,7 @@ async fn handle_infra_deploy(state: &AppState) -> anyhow::Result<usize> {
     let count = changed.len();
     let (deployed, errors) = reconciler::reconcile(state, &changed).await;
 
-    crate::persist::persist_recorded(state, &changed, &deployed, "infra deploy").await;
+    crate::persist::persist_recorded(state, &changed, &deployed, &errors, "infra deploy").await;
 
     if !errors.is_empty() {
         warn!("Infra deploy: {} errors: {:?}", errors.len(), errors);

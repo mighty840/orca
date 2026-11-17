@@ -5,20 +5,28 @@ use tracing::warn;
 
 use crate::state::AppState;
 
-/// Store each config that was deployed, and each agent-placed config the
-/// master recorded although its deploy reported an error.
+/// Store each config that was deployed, and each agent-placed config whose
+/// deploy the agent received but did not finish in time.
 ///
 /// A remote deploy records the config in memory before it is dispatched,
-/// so that a lost ack cannot leave it stale. When the ack or completion then
-/// timed out, the container usually came up anyway, but the config was never
-/// stored: after a master restart the service was unknown, and orphan
-/// adoption registered its container with a hollow config (#313).
+/// so that a lost ack cannot leave it stale. When the completion then timed
+/// out (a slow pull), the container usually came up anyway, but the config
+/// was never stored: after a master restart the service was unknown, and
+/// orphan adoption registered its container with a hollow config (#313).
+/// A deploy the agent rejected, or never got, keeps the stored config.
 pub(crate) async fn persist_recorded(
     state: &AppState,
     configs: &[ServiceConfig],
     deployed: &[String],
+    errors: &[String],
     context: &str,
 ) {
+    let timed_out = |name: &str| {
+        let prefix = format!("{name}: ");
+        errors
+            .iter()
+            .any(|e| e.starts_with(&prefix) && e.contains(crate::remote_deploy::COMPLETION_TIMEOUT))
+    };
     let Some(store) = &state.store else {
         return;
     };
@@ -28,7 +36,8 @@ pub(crate) async fn persist_recorded(
             .iter()
             .filter(|cfg| {
                 deployed.contains(&cfg.name)
-                    || (crate::placement::placed_on_agent(cfg)
+                    || (timed_out(&cfg.name)
+                        && crate::placement::placed_on_agent(cfg)
                         && services
                             .get(&cfg.name)
                             .is_some_and(|s| s.config.spec_matches(cfg)))

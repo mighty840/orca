@@ -56,18 +56,27 @@ pub fn spawn_backup_scheduler(
 /// Send a `BackupRequest` to every connected agent so they back up their
 /// local volumes to the same targets as the master.
 async fn dispatch_agent_backups(state: &AppState, config: &BackupConfig) {
-    let agents = state.ws_agents.read().await;
+    // Sessions first, then the maps, so no other lock is taken while the
+    // agents map is read-locked (the PR #65 stall).
+    let agents: Vec<_> = state
+        .ws_agents
+        .read()
+        .await
+        .iter()
+        .map(|(id, s)| (*id, s.clone()))
+        .collect();
     if agents.is_empty() {
         return;
     }
     let service_hooks = collect_service_hooks(state).await;
     info!("Dispatching backup request to {} agent(s)", agents.len());
-    for (node_id, tx) in agents.iter() {
+    for (node_id, tx) in &agents {
+        let declared_mounts = crate::backup_mounts::declared_mounts(state, Some(*node_id)).await;
         if let Err(e) = tx
             .send(MasterMessage::BackupRequest {
                 config: Box::new(config.clone()),
                 service_hooks: service_hooks.clone(),
-                declared_mounts: crate::backup_mounts::declared_mounts(state, Some(*node_id)).await,
+                declared_mounts,
             })
             .await
         {

@@ -52,7 +52,7 @@ pub(crate) async fn deploy(
 
     let (deployed, errors) = reconciler::reconcile(&state, &req.services).await;
 
-    crate::persist::persist_recorded(&state, &req.services, &deployed, "deploy").await;
+    crate::persist::persist_recorded(&state, &req.services, &deployed, &errors, "deploy").await;
 
     let status_code = if errors.is_empty() {
         StatusCode::OK
