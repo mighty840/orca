@@ -65,6 +65,10 @@ async fn paused_services_are_left_out_of_the_resync() {
         paused.stopped = true;
         paused.desired_replicas = 0;
         services.insert("portal-acme".into(), paused);
+        // Scaled to 0 without pausing (#309): not expected either.
+        let mut scaled = ServiceState::from_config(pinned("portal-old"));
+        scaled.desired_replicas = 0;
+        services.insert("portal-old".into(), scaled);
     }
     let (tx, mut rx) = mpsc::channel(4);
 
@@ -192,23 +196,43 @@ async fn an_adopted_service_is_not_recreated_from_its_record() {
 }
 
 #[tokio::test]
-async fn an_agent_deploy_that_reported_an_error_is_still_stored() {
-    // #313's first cause: the deploy reached the agent but reported an
-    // error, so it was never stored; after a master restart orphan adoption
-    // registered the container with a hollow config.
+async fn an_agent_deploy_that_timed_out_is_stored_and_a_rejected_one_is_not() {
+    // #313's likely first cause: the agent got the deploy but did not finish
+    // in time, so it was never stored; after a master restart orphan
+    // adoption registered the container with a hollow config.
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(crate::store::ClusterStore::open(&dir.path().join("s.redb")).unwrap());
     let state = state_with_agent().await.with_store(store.clone());
+    let old = pinned("api");
+    store.set_service("api", &old).unwrap();
     let mut web = pinned("web");
     web.env
         .insert("DATABASE_URL".into(), "postgres://db".into());
+    let mut api = pinned("api");
+    api.env.insert("BROKEN".into(), "1".into());
+    // The remote arm records a config before it dispatches it.
+    for c in [&web, &api] {
+        state
+            .services
+            .write()
+            .await
+            .insert(c.name.clone(), ServiceState::from_config(c.clone()));
+    }
+    let errors = [
+        format!(
+            "web: deploy of web {} 600s on agent 42",
+            crate::remote_deploy::COMPLETION_TIMEOUT
+        ),
+        "api: deploy failed on agent 42: pull access denied".to_string(),
+    ];
 
-    // The agent is registered but has no WS session: the dispatch fails
-    // after the master recorded the config.
-    let (deployed, errors) = crate::reconciler::reconcile(&state, &[web.clone()]).await;
-    assert!(deployed.is_empty() && errors.len() == 1, "{errors:?}");
+    crate::persist::persist_recorded(&state, &[web, api], &[], &errors, "test").await;
 
-    crate::persist::persist_recorded(&state, &[web], &deployed, "test").await;
     let stored = store.get_service("web").unwrap().expect("stored");
     assert_eq!(stored.env["DATABASE_URL"], "postgres://db");
+    let kept = store.get_service("api").unwrap().expect("still there");
+    assert!(
+        kept.env.is_empty(),
+        "a rejected deploy keeps the stored config"
+    );
 }

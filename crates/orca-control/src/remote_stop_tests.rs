@@ -154,3 +154,97 @@ async fn an_offline_agent_gets_the_stop_when_it_reconnects() {
     assert_eq!(pending[&AGENT][0]["action"], "stop");
     assert_eq!(pending[&AGENT][0]["service_name"], "web");
 }
+
+#[tokio::test]
+async fn a_service_on_a_drained_node_can_still_be_stopped() {
+    // Drained before a migration; deploy targeting refuses drained nodes.
+    let state = master().await;
+    state
+        .services
+        .write()
+        .await
+        .get_mut("web")
+        .unwrap()
+        .instances
+        .clear();
+    state
+        .registered_nodes
+        .write()
+        .await
+        .get_mut(&AGENT)
+        .unwrap()
+        .drain = true;
+    let seen = connect_agent(&state, true).await;
+
+    stop(&state, "web").await.unwrap();
+
+    assert_eq!(*seen.read().await, ["stop web"]);
+}
+
+#[tokio::test]
+async fn a_node_that_left_the_registry_gets_the_stop_queued_by_its_placeholder() {
+    let state = master().await;
+    state.registered_nodes.write().await.clear();
+
+    stop(&state, "web").await.unwrap();
+
+    assert_eq!(
+        state.pending_commands.read().await[&AGENT][0]["action"],
+        "stop"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unconfirmed_stop_is_an_error_not_a_pause() {
+    // An agent older than v0.3.2: it gets the stop and never answers.
+    let state = master().await;
+    let (tx, _rx) = mpsc::channel(8);
+    state.ws_agents.write().await.insert(
+        AGENT,
+        AgentSession {
+            tx,
+            session_id: 1,
+            shutdown: Arc::new(Notify::new()),
+        },
+    );
+
+    let err = stop(&state, "web").await.unwrap_err().to_string();
+
+    assert!(err.contains("did not confirm"), "{err}");
+    assert!(!state.services.read().await["web"].stopped);
+}
+
+#[tokio::test]
+async fn rm_refuses_while_the_agent_is_offline_unless_forced() {
+    // The record would be gone while the container runs on; the adoption
+    // scan would find it again.
+    let state = master().await;
+
+    let err = crate::removal::remove(&state, "web", false)
+        .await
+        .unwrap_err();
+    assert!(format!("{err:#}").contains("offline"), "{err:#}");
+    assert!(state.services.read().await.contains_key("web"));
+
+    crate::removal::remove(&state, "web", true).await.unwrap();
+    assert!(state.services.read().await.is_empty());
+}
+
+#[tokio::test]
+async fn rm_on_a_connected_agent_stops_it_there() {
+    let state = master().await;
+    let seen = connect_agent(&state, true).await;
+    state.deploy_history.write().await.record(&pinned("web"));
+    state.deploy_history.write().await.record(&pinned("web"));
+
+    crate::removal::remove(&state, "web", false).await.unwrap();
+
+    assert_eq!(*seen.read().await, ["stop web"]);
+    let err = crate::operations::rollback(&state, "web")
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("no previous deploy"),
+        "rm forgets the history"
+    );
+}

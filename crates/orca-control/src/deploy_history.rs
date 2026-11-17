@@ -74,6 +74,12 @@ impl DeployHistory {
         Some(&history[history.len() - 2])
     }
 
+    /// Drop a removed service's history, so `orca rollback` cannot bring it
+    /// back (#315).
+    pub fn forget(&mut self, service_name: &str) {
+        self.entries.remove(service_name);
+    }
+
     /// List all deploy records for a service (oldest first).
     pub fn list(&self, service_name: &str) -> &[DeployRecord] {
         self.entries

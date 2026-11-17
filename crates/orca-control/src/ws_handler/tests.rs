@@ -81,3 +81,37 @@ fn ws_query_deserializes_without_a_token() {
     assert_eq!(q.token, None);
     assert_eq!(q.node_id, 42);
 }
+
+/// #309: the agent's StopResult wakes the `orca stop` waiting for it.
+#[tokio::test]
+async fn a_stop_result_from_the_agent_resolves_the_waiting_stop() {
+    let state = crate::state::AppState::new(
+        orca_core::config::ClusterConfig::default(),
+        std::sync::Arc::new(orca_core::testing::MockRuntime::new()),
+        None,
+        std::sync::Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        std::sync::Arc::new(tokio::sync::RwLock::new(Vec::new())),
+    );
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel();
+    state
+        .pending_stops
+        .write()
+        .await
+        .insert("web".into(), done_tx);
+    let text = serde_json::to_string(&orca_core::ws_types::AgentMessage::StopResult {
+        service_name: "web".into(),
+        success: false,
+        error: Some("orca-web is still running".into()),
+    })
+    .unwrap();
+    let (tx, _rx) = tokio::sync::mpsc::channel(1);
+
+    messages::handle_agent_message(&state, 42, &text, &tx)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        done_rx.await.unwrap(),
+        Err("orca-web is still running".into())
+    );
+}

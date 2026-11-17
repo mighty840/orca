@@ -47,7 +47,7 @@ pub(crate) async fn remove_service(
     };
     if let Err(e) = stop_workloads(state, &config).await {
         if strict {
-            return Err(e.context(format!("stopping {name}; nothing was removed")));
+            return Err(e.context(format!("{name} was not removed")));
         }
         warn!("removing {name}: stopping its workloads failed: {e:#}");
     }
@@ -55,6 +55,7 @@ pub(crate) async fn remove_service(
     state.services.write().await.remove(name);
     state.last_failures.write().await.remove(name);
     state.failed_deploys.write().await.remove(name);
+    state.deploy_history.write().await.forget(name);
     if let Some(store) = &state.store {
         if let Err(e) = store.remove_service(name) {
             warn!("removing {name} from the store failed: {e}");
@@ -80,10 +81,20 @@ pub(crate) async fn remove_service(
 async fn stop_workloads(state: &AppState, config: &ServiceConfig) -> anyhow::Result<()> {
     let mut stopped = config.clone();
     stopped.replicas = Replicas::Fixed(0);
-    match crate::placement::find_target_node(state, config).await {
-        Ok(Some(node)) => crate::remote_stop::stop_on_agent(state, &stopped, node)
-            .await
-            .map(|_| ()),
+    use crate::remote_stop::StopOutcome;
+    match crate::remote_stop::stop_target(state, config).await {
+        Ok(Some(node)) => match crate::remote_stop::stop_on_agent(state, &stopped, node).await? {
+            StopOutcome::Confirmed => Ok(()),
+            // Removed now, the record is gone while the container may run
+            // on; the adoption scan would find it again.
+            StopOutcome::Queued => anyhow::bail!(
+                "node {node} is offline, so the stop of {} could not be confirmed",
+                config.name
+            ),
+            StopOutcome::Unconfirmed => {
+                anyhow::bail!("node {node} did not confirm the stop of {}", config.name)
+            }
+        },
         Ok(None) => crate::reconciler::scale(state, &config.name, 0).await,
         // The pin no longer resolves (node gone, renamed, ambiguous): tell
         // every agent; only the one that hosts the container acts (#176).

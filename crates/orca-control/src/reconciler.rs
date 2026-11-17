@@ -141,17 +141,29 @@ pub(crate) async fn reconcile_service(
         spec.image = image_tag;
     }
 
+    // Scaling to 0 is a stop on the agent that runs it. The idempotency
+    // check below leaves out replicas, so it took a stop for "same spec" and
+    // the agent's containers kept running (#309).
+    if desired == 0
+        && crate::placement::placed_on_agent(config)
+        && let Some(node) = crate::remote_stop::stop_target(state, config).await?
+    {
+        use crate::remote_stop::StopOutcome;
+        return match crate::remote_stop::stop_on_agent(state, config, node).await? {
+            StopOutcome::Confirmed | StopOutcome::Queued => Ok(ReconcileOutcome::Changed),
+            StopOutcome::Unconfirmed => anyhow::bail!(
+                "node {node} did not confirm the stop of {}; check it there with `docker ps` \
+                 (an agent older than v0.3.2 never confirms)",
+                config.name
+            ),
+        };
+    }
+
     // Check if placement targets a specific remote node. If the service runs
     // somewhere else (its placement changed), stop it there first (#177).
     let target = find_target_node(state, config).await?;
     crate::relocate::stop_if_moved(state, &config.name, target).await;
     if let Some(target_node_id) = target {
-        // Scaling to 0 is a stop on the agent. The idempotency check below
-        // leaves out replicas, so it took a stop for "same spec" and the
-        // agent's containers kept running (#309).
-        if desired == 0 {
-            return crate::remote_stop::stop_on_agent(state, config, target_node_id).await;
-        }
         // Idempotency (#120): the LOCAL branch below has always skipped
         // when the spec is unchanged and instances are running; the remote
         // branch dispatched unconditionally — so any caller that reconciles
