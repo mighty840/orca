@@ -198,12 +198,8 @@ impl ApiBackend for InProcess {
             .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 0))))
             .body(Body::empty())
             .map_err(|e| BackendError::Transport(e.to_string()))?;
-        let response = self
-            .api
-            .clone()
-            .oneshot(request)
-            .await
-            .map_err(|e| BackendError::Transport(e.to_string()))?;
+        // A Router's error type is Infallible.
+        let Ok(response) = self.api.clone().oneshot(request).await;
         let status = response.status();
         let bytes = axum::body::to_bytes(response.into_body(), MAX_BODY)
             .await
