@@ -34,6 +34,14 @@ pub enum AgentMessage {
         success: bool,
         error: Option<String>,
     },
+    /// Reply to `MasterMessage::Stop` (#309): whether the service's
+    /// containers are down. Masters older than this message log it as
+    /// unknown and ignore it.
+    StopResult {
+        service_name: String,
+        success: bool,
+        error: Option<String>,
+    },
     LogChunk {
         request_id: String,
         service_name: String,

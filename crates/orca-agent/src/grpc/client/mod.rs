@@ -360,8 +360,11 @@ impl AgentClient {
     }
 
     /// Stop a service by name (used by WS client).
+    ///
+    /// A freshly started agent tracks nothing, so the service's container is
+    /// also looked up by its name, `orca-{service}` (#309).
     pub async fn stop_service(&self, runtime: &dyn Runtime, service_name: &str) {
-        let handles: Vec<_> = {
+        let mut handles: Vec<_> = {
             let workloads = self.workloads.read().await;
             workloads
                 .iter()
@@ -369,6 +372,9 @@ impl AgentClient {
                 .map(|(id, _)| id.clone())
                 .collect()
         };
+        if handles.is_empty() {
+            handles.push(format!("orca-{service_name}"));
+        }
         for id in &handles {
             let handle = orca_core::runtime::WorkloadHandle {
                 runtime_id: id.clone(),

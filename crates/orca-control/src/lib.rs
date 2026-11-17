@@ -29,6 +29,7 @@ pub mod raft;
 pub mod reconciler;
 mod relocate;
 mod remote_deploy;
+mod remote_stop;
 mod restore;
 pub mod routes;
 pub mod scheduler;

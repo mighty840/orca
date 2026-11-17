@@ -146,6 +146,12 @@ pub(crate) async fn reconcile_service(
     let target = find_target_node(state, config).await?;
     crate::relocate::stop_if_moved(state, &config.name, target).await;
     if let Some(target_node_id) = target {
+        // Scaling to 0 is a stop on the agent. The idempotency check below
+        // leaves out replicas, so it took a stop for "same spec" and the
+        // agent's containers kept running (#309).
+        if desired == 0 {
+            return crate::remote_stop::stop_on_agent(state, config, target_node_id).await;
+        }
         // Idempotency (#120): the LOCAL branch below has always skipped
         // when the spec is unchanged and instances are running; the remote
         // branch dispatched unconditionally — so any caller that reconciles

@@ -92,17 +92,20 @@ pub async fn start(state: &AppState, service_name: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Stop all services.
+/// Stop all services, concurrently: a stop on an agent waits for it to
+/// confirm (#309), and an agent too old to confirm makes each one wait out
+/// the timeout.
 pub async fn stop_all(state: &AppState) -> anyhow::Result<()> {
     let names: Vec<String> = {
         let services = state.services.read().await;
         services.keys().cloned().collect()
     };
-    for name in &names {
+    let stops = names.iter().map(|name| async move {
         if let Err(e) = stop(state, name).await {
             tracing::error!("Failed to stop {name}: {e}");
         }
-    }
+    });
+    futures_util::future::join_all(stops).await;
     Ok(())
 }
 
