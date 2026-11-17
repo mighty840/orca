@@ -75,3 +75,37 @@ async fn a_restart_queued_twice_happens_once() {
     assert_eq!(runtime.count(MockOpKind::Stop).await, 1);
     assert_eq!(runtime.count(MockOpKind::Start).await, 1);
 }
+
+#[tokio::test]
+async fn an_exited_container_whose_last_health_check_failed_is_left_alone() {
+    // #310: `docker stop` by hand; Docker keeps the last `unhealthy` status
+    // after the exit, and the watcher started the container again.
+    let (runtime, agent, queues) = agent_with(&[
+        ("c-1", "app", Some(ContainerHealth::Unhealthy)),
+        ("c-2", "db", Some(ContainerHealth::Unhealthy)),
+    ])
+    .await;
+    runtime.set_status("c-1", WorkloadStatus::Stopped).await;
+    runtime.set_status("c-2", WorkloadStatus::Failed).await;
+
+    queue_unhealthy(runtime.as_ref(), &agent, &queues).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    assert!(
+        runtime.recorded_ops().await.is_empty(),
+        "a stopped container must stay stopped"
+    );
+}
+
+#[tokio::test]
+async fn a_restart_queued_before_the_container_stopped_does_nothing() {
+    // The pass saw it running and unhealthy; the operator stopped it before
+    // the queued restart ran.
+    let (runtime, _agent, _queues) =
+        agent_with(&[("c-1", "app", Some(ContainerHealth::Unhealthy))]).await;
+    runtime.set_status("c-1", WorkloadStatus::Stopped).await;
+
+    restart_if_unhealthy(runtime.as_ref(), "app", "c-1").await;
+
+    assert_eq!(runtime.count(MockOpKind::Start).await, 0);
+}

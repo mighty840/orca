@@ -13,6 +13,7 @@ use std::time::Duration;
 use tracing::warn;
 
 use orca_core::runtime::{ContainerHealth, Runtime, WorkloadHandle};
+use orca_core::types::WorkloadStatus;
 
 use super::service_queue::{ServiceOp, ServiceQueues};
 use crate::grpc::AgentClient;
@@ -58,11 +59,16 @@ pub(super) async fn restart_if_unhealthy(runtime: &dyn Runtime, service: &str, i
     }
 }
 
+/// Whether the container runs and its health check fails. Docker keeps the
+/// last `Health.Status` after a container exits, so an operator's
+/// `docker stop` of a container whose check failed during shutdown still
+/// reads `unhealthy`; restarting that undid the stop (#310). Only a running
+/// container is restarted.
 async fn unhealthy(runtime: &dyn Runtime, handle: &WorkloadHandle) -> bool {
     matches!(
         runtime.health(handle).await,
         Ok(Some(ContainerHealth::Unhealthy))
-    )
+    ) && matches!(runtime.status(handle).await, Ok(WorkloadStatus::Running))
 }
 
 fn handle(id: &str, service: &str) -> WorkloadHandle {
