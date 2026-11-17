@@ -29,7 +29,7 @@ Cargo workspace with 9 crates:
 
 **Key abstraction:** The `Runtime` trait in `orca-core` is implemented by `ContainerRuntime` (Docker/bollard) and `WasmRuntime` (wasmtime). The reconciler dispatches to the correct runtime based on `RuntimeKind`.
 
-**Dependency flow:** `core` <- `agent` <- `control` <- `cli`. `control` also depends on `ai` and `proxy`. `proxy`, `ai`, `mcp` and `tui` depend only on `core`; `cli` uses all of them.
+**Dependency flow:** `core` <- `agent` <- `control` <- `cli`. `control` also depends on `ai` and `proxy`, and on `mcp` with its `mcp` feature (the master's `/mcp`; `cli` turns it on by default as `mcp-http`). `proxy`, `ai`, `mcp` and `tui` depend only on `core`; `cli` uses all of them.
 
 ## Conventions
 
