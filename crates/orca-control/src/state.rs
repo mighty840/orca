@@ -112,6 +112,10 @@ pub struct AppState {
     /// a short receipt-ack timeout (catch a dead agent fast) independently of
     /// the long completion timeout (cover multi-GB image pulls). See #88/#94.
     pub pending_deploy_acks: RwLock<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
+    /// Recent API calls, for `GET /api/v1/audit` (#80).
+    pub audit: crate::audit::AuditLog,
+    /// Per-token buckets for `[api_rate_limit]` (#80).
+    pub rate_limiter: crate::rate_limit::Limiter,
     /// Pending stop waiters: service_name → oneshot sender. Inserted by
     /// `remote_stop`, resolved by ws_handler on StopResult (#309).
     pub pending_stops: RwLock<HashMap<String, tokio::sync::oneshot::Sender<Result<(), String>>>>,
@@ -301,6 +305,8 @@ impl AppState {
             exec_sessions: RwLock::new(HashMap::new()),
             pending_deploys: RwLock::new(HashMap::new()),
             pending_stops: RwLock::new(HashMap::new()),
+            audit: Default::default(),
+            rate_limiter: Default::default(),
             pending_deploy_acks: RwLock::new(HashMap::new()),
             last_failures: RwLock::new(HashMap::new()),
             alerts: None,

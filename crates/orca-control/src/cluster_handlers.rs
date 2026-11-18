@@ -25,52 +25,7 @@ pub fn cluster_router() -> Router<Arc<AppState>> {
         )
 }
 
-pub async fn cluster_info(State(state): State<Arc<AppState>>) -> impl IntoResponse {
-    let nodes = state.registered_nodes.read().await;
-    // GPUs are declared in cluster.toml (`[[node.gpus]]`), not reported by
-    // heartbeats, so surface them here matched to each registered node by
-    // address (exact or host-portion — declared `ubuntu` matches registered
-    // `ubuntu:6881`). Enables `orca nodes --gpus`.
-    let host = |addr: &str| {
-        addr.rsplit_once(':')
-            .map(|(h, _)| h)
-            .unwrap_or(addr)
-            .to_string()
-    };
-    let node_list: Vec<serde_json::Value> = nodes
-        .values()
-        .map(|n| {
-            let gpus = state
-                .cluster_config
-                .node
-                .iter()
-                .find(|d| d.address == n.address || host(&d.address) == host(&n.address))
-                .map(|d| d.gpus.clone())
-                .unwrap_or_default();
-            // Serialize the WHOLE node, then enrich with GPUs. Hand-listing
-            // fields (as this did between #135 and now) silently dropped
-            // disk_used/disk_total/net_rx/net_tx — they're `#[serde(default)]`
-            // on the TUI side, so they read as 0 (blank) rather than erroring.
-            let mut obj = serde_json::to_value(n).unwrap_or_else(|_| serde_json::json!({}));
-            if let Some(map) = obj.as_object_mut() {
-                map.insert(
-                    "gpus".to_string(),
-                    serde_json::to_value(&gpus).unwrap_or_default(),
-                );
-            }
-            obj
-        })
-        .collect();
-    Json(serde_json::json!({
-        "cluster_name": state.cluster_config.cluster.name,
-        "domain": state.cluster_config.cluster.domain,
-        "acme_email": state.cluster_config.cluster.acme_email,
-        "version": env!("CARGO_PKG_VERSION"),
-        "commit": option_env!("ORCA_COMMIT").unwrap_or("unknown"),
-        "nodes": node_list,
-        "node_count": nodes.len(),
-    }))
-}
+pub use crate::cluster_info::cluster_info;
 
 #[derive(Deserialize)]
 pub struct RegisterRequest {

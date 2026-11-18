@@ -38,7 +38,16 @@ pub fn router(state: Arc<AppState>) -> Router {
             "/api/v1/services/{name}/start",
             post(handlers::start_service),
         )
-        .route("/api/v1/services/{name}", delete(handlers::stop_service))
+        .route(
+            "/api/v1/services/{name}",
+            delete(handlers::stop_service).get(handlers::service_detail::service_detail),
+        )
+        .route(
+            "/api/v1/services/{name}/history",
+            get(handlers::service_detail::service_history),
+        )
+        .route("/api/v1/whoami", get(handlers::access::whoami))
+        .route("/api/v1/audit", get(handlers::access::audit))
         .route(
             "/api/v1/services/{name}/remove",
             post(handlers::remove_service),
@@ -87,6 +96,16 @@ pub fn router(state: Arc<AppState>) -> Router {
         )
         .merge(webhook::webhook_router())
         .merge(cluster_handlers::cluster_router())
+        // Innermost: needs the caller, and its 429s are audited.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::rate_limit::rate_limit_middleware,
+        ))
+        // Inside auth, so it sees the caller; auth records its denials.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::audit::audit_middleware,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,

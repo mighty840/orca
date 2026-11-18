@@ -9,6 +9,8 @@ use axum::response::{IntoResponse, Response};
 use orca_core::config::Role;
 use subtle::ConstantTimeEq;
 
+pub use crate::auth_principal::Principal;
+use crate::auth_principal::resolve_principal;
 use crate::state::AppState;
 
 /// Paths that skip bearer token authentication.
@@ -18,7 +20,7 @@ const SKIP_AUTH_PATHS: &[&str] = &["/api/v1/health", "/api/v1/webhooks/github"];
 ///
 /// [`Role::can`] grants Admin every action and the other roles only the
 /// actions they list, so this needs no special case there.
-const ADMIN_ONLY: &str = "admin";
+pub(crate) const ADMIN_ONLY: &str = "admin";
 
 /// What each mounted route requires, keyed by method and route template
 /// (axum's [`MatchedPath`], e.g. `/api/v1/services/{name}/scale`).
@@ -33,6 +35,9 @@ const ROUTE_POLICY: &[(&str, &str, &str)] = &[
     ("GET", "/api/v1/status", "status"),
     ("GET", "/api/v1/services/{name}/logs", "logs"),
     ("GET", "/api/v1/cluster/info", "cluster_info"),
+    ("GET", "/api/v1/whoami", "status"),
+    ("GET", "/api/v1/services/{name}", "status"),
+    ("GET", "/api/v1/services/{name}/history", "status"),
     ("GET", "/api/v1/cluster/backups", "status"),
     ("GET", "/api/v1/cluster/networks", "status"),
     ("GET", "/api/v1/alerts", "status"),
@@ -54,6 +59,8 @@ const ROUTE_POLICY: &[(&str, &str, &str)] = &[
     // --- admin only -------------------------------------------------------
     // Runs an arbitrary command inside any container.
     ("GET", "/api/v1/services/{name}/exec", ADMIN_ONLY),
+    // Who did what, including denied requests (#80).
+    ("GET", "/api/v1/audit", ADMIN_ONLY),
     // `orca rm` deletes a service from the registry and the store (#315).
     ("POST", "/api/v1/services/{name}/remove", ADMIN_ONLY),
     // Secret values, and the inventory of which keys exist and who uses them.
@@ -103,7 +110,7 @@ fn required_action(method: &str, template: Option<&str>) -> &'static str {
 ///
 /// Length is not hidden (lengths are compared first), which is acceptable:
 /// a token's length is not secret, only its contents are.
-fn ct_eq(presented: &str, configured: &str) -> bool {
+pub(crate) fn ct_eq(presented: &str, configured: &str) -> bool {
     presented.as_bytes().ct_eq(configured.as_bytes()).into()
 }
 
@@ -152,7 +159,7 @@ pub(crate) fn resolve_token(state: &AppState, token: &str) -> Option<Role> {
 /// `[[token]]` entries with named roles.
 pub async fn auth_middleware(
     State(state): State<Arc<AppState>>,
-    request: Request,
+    mut request: Request,
     next: Next,
 ) -> Response {
     let no_legacy = state
@@ -164,6 +171,7 @@ pub async fn auth_middleware(
 
     // If no tokens configured, allow everything (backward compatible)
     if no_legacy && named_tokens.is_empty() {
+        request.extensions_mut().insert(Principal::anonymous());
         return next.run(request).await;
     }
 
@@ -174,12 +182,15 @@ pub async fn auth_middleware(
     }
 
     let Some(token) = bearer_token(request.headers()) else {
+        crate::audit::record_denied(&state, &request, None, StatusCode::UNAUTHORIZED);
         return (StatusCode::UNAUTHORIZED, "missing bearer token").into_response();
     };
 
-    let Some(role) = resolve_token(&state, token) else {
+    let Some(principal) = resolve_principal(&state, token) else {
+        crate::audit::record_denied(&state, &request, None, StatusCode::UNAUTHORIZED);
         return (StatusCode::UNAUTHORIZED, "invalid bearer token").into_response();
     };
+    let role = principal.role;
 
     let template = request
         .extensions()
@@ -187,8 +198,15 @@ pub async fn auth_middleware(
         .map(|m| m.as_str().to_owned());
     let action = required_action(request.method().as_str(), template.as_deref());
     if role.can(action) {
+        request.extensions_mut().insert(principal);
         return next.run(request).await;
     }
+    crate::audit::record_denied(
+        &state,
+        &request,
+        Some(&principal.name),
+        StatusCode::FORBIDDEN,
+    );
     (
         StatusCode::FORBIDDEN,
         format!(

@@ -7,8 +7,8 @@ cargo build                          # Build all crates
 cargo test                           # Unit + integration tests
 cargo test -- --ignored              # E2E tests (requires Docker)
 cargo fmt --all                      # Format
-cargo clippy -- -D warnings          # Lint
-cargo fmt --all && cargo clippy -- -D warnings && cargo test  # Full check
+cargo clippy --all-targets -- -D warnings  # Lint (as CI: tests and benches too)
+cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test  # Full check
 ```
 
 ## Architecture

@@ -7,6 +7,14 @@ use serde::{Deserialize, Serialize};
 use crate::config::ServiceConfig;
 use crate::types::RuntimeKind;
 
+mod access;
+mod cluster;
+mod service_detail;
+
+pub use access::{AuditEvent, WhoAmI};
+pub use cluster::{ClusterInfoResponse, ClusterNode};
+pub use service_detail::{DeployRecordView, ServiceConfigView, ServiceDetail};
+
 /// Request body for `POST /api/v1/deploy`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeployRequest {
