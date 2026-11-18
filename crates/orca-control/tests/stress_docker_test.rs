@@ -41,11 +41,17 @@ async fn boot() -> (u16, Arc<AppState>, tokio::task::JoinHandle<()>) {
     (port, st, h)
 }
 
+/// Force-remove the containers of services whose names start with `prefix`.
+/// The tests in this file run in parallel, so each one uses its own prefix,
+/// matched by no other test's containers: a cleanup must never remove
+/// containers another test is still using. (Docker's name filter matches
+/// anywhere in the name, so `stress-` would remove them all.)
 async fn cleanup(prefix: &str) {
+    let prefix = format!("orca-{prefix}");
     let dk = bollard::Docker::connect_with_local_defaults().unwrap();
     let opts = bollard::container::ListContainersOptions::<String> {
         all: true,
-        filters: HashMap::from([("name".into(), vec![prefix.into()])]),
+        filters: HashMap::from([("name".into(), vec![prefix])]),
         ..Default::default()
     };
     if let Ok(cs) = dk.list_containers(Some(opts)).await {
@@ -106,18 +112,18 @@ fn deploy_json(name: &str) -> serde_json::Value {
 #[tokio::test]
 #[ignore]
 async fn stress_rapid_deploy_undeploy() {
-    cleanup("orca-stress-").await;
+    cleanup("stress-rapid-").await;
     let (port, _st, _h) = boot().await;
     let c = http();
 
     for i in 1..=10 {
         let r = c
             .post(url(port, "/api/v1/deploy"))
-            .json(&deploy_json(&format!("stress-{i}")))
+            .json(&deploy_json(&format!("stress-rapid-{i}")))
             .send()
             .await
             .unwrap();
-        assert_eq!(r.status(), 200, "deploy stress-{i} failed");
+        assert_eq!(r.status(), 200, "deploy stress-rapid-{i} failed");
     }
     tokio::time::sleep(Duration::from_secs(10)).await;
 
@@ -131,17 +137,17 @@ async fn stress_rapid_deploy_undeploy() {
         .unwrap();
     let svcs = body["services"].as_array().unwrap();
     for i in 1..=10 {
-        let n = format!("stress-{i}");
+        let n = format!("stress-rapid-{i}");
         assert!(svcs.iter().any(|s| s["name"] == n), "missing {n}");
     }
 
     for i in 1..=10 {
         let r = c
-            .delete(url(port, &format!("/api/v1/services/stress-{i}")))
+            .delete(url(port, &format!("/api/v1/services/stress-rapid-{i}")))
             .send()
             .await
             .unwrap();
-        assert_eq!(r.status(), 200, "delete stress-{i} failed");
+        assert_eq!(r.status(), 200, "delete stress-rapid-{i} failed");
     }
     tokio::time::sleep(Duration::from_secs(3)).await;
 
@@ -154,7 +160,7 @@ async fn stress_rapid_deploy_undeploy() {
         .await
         .unwrap();
     for i in 1..=10 {
-        let n = format!("stress-{i}");
+        let n = format!("stress-rapid-{i}");
         if let Some(s) = body["services"]
             .as_array()
             .unwrap()
@@ -164,13 +170,13 @@ async fn stress_rapid_deploy_undeploy() {
             assert_eq!(s["running_replicas"], 0, "{n} still running");
         }
     }
-    cleanup("orca-stress-").await;
+    cleanup("stress-rapid-").await;
 }
 
 #[tokio::test]
 #[ignore]
 async fn stress_scale_to_10_and_back() {
-    cleanup("orca-stress-").await;
+    cleanup("stress-scale").await;
     let (port, st, _h) = boot().await;
     let c = http();
 
@@ -199,14 +205,14 @@ async fn stress_scale_to_10_and_back() {
     tokio::time::sleep(Duration::from_secs(5)).await;
     assert_eq!(st.services.read().await["stress-scale"].instances.len(), 1);
 
-    cleanup("orca-stress-").await;
+    cleanup("stress-scale").await;
 }
 
 #[tokio::test]
 #[ignore]
 async fn stress_container_churn_watchdog() {
     let _logs = capture_logs();
-    cleanup("orca-stress-").await;
+    cleanup("stress-churn").await;
     let ln = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = ln.local_addr().unwrap().port();
     let st = real_state(port).await;
@@ -257,13 +263,13 @@ async fn stress_container_churn_watchdog() {
         .runtime_id
         .clone();
     assert_ne!(first_id, final_id, "container ID should have changed");
-    cleanup("orca-stress-").await;
+    cleanup("stress-churn").await;
 }
 
 #[tokio::test]
 #[ignore]
 async fn stress_repeated_deploy_same_service() {
-    cleanup("orca-stress-").await;
+    cleanup("stress-idem").await;
     let (port, st, _h) = boot().await;
     let c = http();
     let body = deploy_json("stress-idem");
@@ -283,5 +289,5 @@ async fn stress_repeated_deploy_same_service() {
             "round {round}: expected 1 instance"
         );
     }
-    cleanup("orca-stress-").await;
+    cleanup("stress-idem").await;
 }
