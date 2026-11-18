@@ -5,6 +5,7 @@ pub mod error;
 pub mod fsutil;
 pub mod import;
 pub mod notifications;
+pub mod redact;
 pub mod runtime;
 pub mod secrets;
 pub mod testing;

@@ -459,6 +459,15 @@ New code goes in new files: `handlers/mod.rs` is already 253 lines, `api_types.r
   - an rmcp stdio round trip in `crates/orca-mcp/tests/stdio_test.rs` (rmcp `client` as a
     dev-dependency), checking that nothing but protocol reaches stdout.
 
+*Status (2026-11-17): implemented on `feat/80-mcp-stdio`, stacked on PR 1. Decisions:
+a new `orca-mcp` crate (Q1), its own small HTTP client (Q2), and `redact.rs` moved to
+`orca-core` with a re-export from `orca-ai` (Q6). rmcp is pinned to `=3.9.0` with
+`server` + `transport-io`. Differences from the plan above: one table (`catalog`)
+drives tools, resources and the `ROUTE_POLICY` test; a client-side read limit in `orca mcp`
+(`limits.rs`, 60 API calls/min by default, `--reads-per-minute`), because the master's
+rate limit and audit cover mutations and exec only, so MCP reads are not audited; no
+`orca://services/{name}/metrics` (the numbers are in `get_status`/`get_service`).*
+
 **PR 3: `/mcp` Streamable HTTP on the master.**
 - `[mcp]` config (`enabled` false by default, `allowed_hosts`, `max_resource_bytes`) in a
   new `orca-core/src/config/mcp.rs`, and `InProcessBackend` in a new

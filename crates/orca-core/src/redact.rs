@@ -1,4 +1,5 @@
-//! Mask secrets in log lines before they go to the model.
+//! Mask secrets in log lines before they go to a model: orca-ai's alert
+//! prompts, and the MCP server's logs and failure text (#80).
 //!
 //! Log tails regularly contain connection strings, bearer tokens and
 //! `PASSWORD=...` dumps. The model endpoint is another service, so nothing

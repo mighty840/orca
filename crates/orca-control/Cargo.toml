@@ -54,6 +54,8 @@ bollard = { workspace = true }
 tokio-tungstenite = "0.26"
 futures-util = "0.3"
 proptest = { workspace = true }
+# Checks the MCP catalog against ROUTE_POLICY (#80).
+orca-mcp = { workspace = true }
 
 [dev-dependencies.tempfile]
 version = "3"

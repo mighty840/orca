@@ -7,4 +7,6 @@ pub mod conversation;
 pub mod monitor;
 mod monitor_plan;
 pub mod ops;
-pub mod redact;
+/// Moved to `orca-core` so the MCP server can use it without the AI crate
+/// (#80); re-exported so `orca_ai::redact` paths keep working.
+pub use orca_core::redact;

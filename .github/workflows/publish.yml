@@ -55,6 +55,7 @@ jobs:
           publish orca-core
           publish orca-proxy
           publish orca-ai
+          publish orca-mcp
           publish orca-tui
           publish orca-agent
           publish orca-control

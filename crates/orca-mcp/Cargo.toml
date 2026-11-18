@@ -1,0 +1,24 @@
+[package]
+name = "orca-mcp"
+version.workspace = true
+edition.workspace = true
+description = "Model Context Protocol server for orca: read-only resources, tools and prompts over the orca API"
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+orca-core = { workspace = true }
+rmcp = { version = "=3.9.0", default-features = false, features = ["server", "transport-io"] }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+rmcp = { version = "=3.9.0", default-features = false, features = ["server", "client", "transport-io"] }
