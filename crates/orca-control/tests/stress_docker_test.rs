@@ -65,6 +65,30 @@ async fn cleanup(prefix: &str) {
     }
 }
 
+/// Logs from orca_control and orca_agent for this test, which the test
+/// harness prints only if the test fails. `#[tokio::test]` runs on one
+/// thread, so the tasks the test spawns log here too. `RUST_LOG` overrides
+/// the filter.
+fn capture_logs() -> tracing::subscriber::DefaultGuard {
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| "orca_control=debug,orca_agent=debug".into());
+    tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_test_writer()
+            .finish(),
+    )
+}
+
+/// The service's instances as (runtime id, status), for assertion messages.
+async fn instances(st: &AppState, name: &str) -> Vec<(String, orca_core::types::WorkloadStatus)> {
+    st.services.read().await[name]
+        .instances
+        .iter()
+        .map(|i| (i.handle.runtime_id.chars().take(12).collect(), i.status))
+        .collect()
+}
+
 fn http() -> reqwest::Client {
     reqwest::Client::new()
 }
@@ -181,6 +205,7 @@ async fn stress_scale_to_10_and_back() {
 #[tokio::test]
 #[ignore]
 async fn stress_container_churn_watchdog() {
+    let _logs = capture_logs();
     cleanup("orca-stress-").await;
     let ln = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = ln.local_addr().unwrap().port();
@@ -204,7 +229,7 @@ async fn stress_container_churn_watchdog() {
         .clone();
     let dk = bollard::Docker::connect_with_local_defaults().unwrap();
 
-    for _ in 0..5 {
+    for round in 0..5 {
         let cid = st.services.read().await["stress-churn"].instances[0]
             .handle
             .runtime_id
@@ -218,7 +243,13 @@ async fn stress_container_churn_watchdog() {
         }
         orca_control::watchdog::run_watchdog_cycle(&st).await;
         tokio::time::sleep(Duration::from_secs(3)).await;
-        assert_eq!(st.services.read().await["stress-churn"].instances.len(), 1);
+        let now = instances(&st, "stress-churn").await;
+        assert_eq!(
+            now.len(),
+            1,
+            "round {round}: after killing {cid:.12} and a watchdog cycle, expected 1 \
+             instance, got {now:?} (see the log above)"
+        );
     }
 
     let final_id = st.services.read().await["stress-churn"].instances[0]
