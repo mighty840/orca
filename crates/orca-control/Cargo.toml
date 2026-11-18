@@ -25,6 +25,9 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 uuid = { workspace = true }
 chrono = { workspace = true }
 async-trait = { workspace = true }
+# The /mcp endpoint (#80), behind the `mcp` feature.
+orca-mcp = { workspace = true, optional = true }
+rmcp = { version = "=3.9.0", default-features = false, features = ["server", "transport-streamable-http-server"], optional = true }
 tokio-util = { version = "0.7", features = ["io"] }
 tonic = { workspace = true }
 prost = { workspace = true }
@@ -47,15 +50,20 @@ base64 = "0.22.1"
 [build-dependencies]
 tonic-build = "0.13"
 
+[features]
+# Serve MCP at /mcp when [mcp] enables it (#80). Off for the library; the
+# `orca` binary turns it on by default.
+mcp = ["dep:orca-mcp", "dep:rmcp"]
+
 [dev-dependencies]
+# The route-policy test checks the MCP catalog with or without `mcp`.
+orca-mcp = { workspace = true }
 http-body-util = "0.1"
 tower = { workspace = true, features = ["util"] }
 bollard = { workspace = true }
 tokio-tungstenite = "0.26"
 futures-util = "0.3"
 proptest = { workspace = true }
-# Checks the MCP catalog against ROUTE_POLICY (#80).
-orca-mcp = { workspace = true }
 
 [dev-dependencies.tempfile]
 version = "3"

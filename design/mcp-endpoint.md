@@ -479,6 +479,26 @@ rate limit and audit cover mutations and exec only, so MCP reads are not audited
   - a foreign `Host` is rejected;
   - audit events carry `X-Orca-Client: mcp-http`.
 
+*Status (2026-11-17): implemented on `feat/80-mcp-http`, stacked on PR 2. `/mcp` is a
+`nest_service` behind `auth_middleware` only, not the audit or rate-limit layers (the
+outer POSTs carry reads). Each inner call is role-checked by its own route; they are all
+GETs, so the master does not rate-limit them (the per-token read budget is the limit),
+but it audits them: any request with `X-Orca-Client: mcp-*` is audited, reads included.
+On `/mcp` the master sets that header itself, so a remote client cannot avoid it;
+`orca mcp` sets `mcp-stdio`. The `/mcp` mount and its rmcp HTTP stack are behind
+orca-control's `mcp` feature (off for the library); mallorca enables it by default
+through its `mcp-http` feature, and a build without it warns if `[mcp]` is enabled. `OrcaMcp` resolves its caller per request from the `Principal` that
+auth put in the request's `Parts`, and calls the authed router with `oneshot`,
+forwarding that request's `Authorization`. Sessions use rmcp's default
+`LocalSessionManager` (legacy session mode, SSE answers; idle sessions close after 300 s,
+uninitialized ones after 60 s), which keeps older clients working. `Host` is checked
+against loopback, `cluster.domain` and `[mcp] allowed_hosts`; `Origin` validation is
+enforced, so a present `Origin` not in `[mcp] allowed_origins` (empty by default) is
+refused. Legacy tokens (the cluster token) are refused on `/mcp` with 403, as on stdio,
+unless `[mcp] allow_cluster_token = true`. The read budget is per token name, shared by its sessions
+(`[mcp] reads_per_minute`, default 60). `max_resource_bytes` is not configurable (the
+256 KiB cap is fixed).*
+
 **PR 4: safe mutating tools (5.2)** plus server-side `?dry_run=true` on redeploy.
 - Tests:
   - a default `dry_run` never mutates (the mock records no POST without `dry_run`);

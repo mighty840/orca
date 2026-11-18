@@ -73,6 +73,20 @@ mutations_per_minute = 60   # the default
 The limit is per token name, so every client using one token (for example
 the cluster token, shared by the CLI on the master) shares one budget.
 
+### MCP endpoint
+
+Off by default. Serves orca's read-only [MCP server](/guide/mcp) at `/mcp`
+on the API port; never on a cluster without API tokens.
+
+```toml
+[mcp]
+enabled = true
+allowed_hosts = ["orca.example.com"]   # besides loopback and cluster.domain
+allowed_origins = []                   # browser origins; none by default
+allow_cluster_token = false            # refuse legacy api_tokens on /mcp
+reads_per_minute = 60                  # per token
+```
+
 ### Deploy & Reconciliation
 
 Optional `cluster.toml` blocks controlling how deploys are acknowledged, how

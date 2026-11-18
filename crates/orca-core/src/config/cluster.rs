@@ -59,6 +59,9 @@ pub struct ClusterConfig {
     /// Per-token limit on mutating API requests (#80). Off by default.
     #[serde(default)]
     pub api_rate_limit: super::ApiRateLimitConfig,
+    /// The master's MCP endpoint at `/mcp` (#80). Off by default.
+    #[serde(default)]
+    pub mcp: super::McpConfig,
 }
 
 /// Security response headers the proxy adds to every response it returns —

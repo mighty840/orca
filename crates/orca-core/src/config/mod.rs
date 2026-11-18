@@ -1,6 +1,7 @@
 mod ai;
 mod api_limits;
 mod cluster;
+mod mcp;
 mod resolve_secrets;
 mod service;
 
@@ -22,6 +23,7 @@ pub use cluster::{
     FallbackConfig, NodeConfig, NodeGpuConfig, ObservabilityConfig, ReconcileConfig, Role,
     SecretsConfig, SecurityHeadersConfig,
 };
+pub use mcp::McpConfig;
 pub use service::{BuildConfig, ProbeConfig, ServiceConfig, ServicesConfig};
 
 // -- Load methods --

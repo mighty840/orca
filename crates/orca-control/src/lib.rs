@@ -24,6 +24,8 @@ pub mod health;
 pub(crate) mod in_flight;
 pub(crate) mod instance;
 pub(crate) mod master_node;
+#[cfg(feature = "mcp")]
+mod mcp_mount;
 pub mod metrics;
 pub(crate) mod operations;
 mod persist;
