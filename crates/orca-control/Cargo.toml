@@ -64,6 +64,8 @@ bollard = { workspace = true }
 tokio-tungstenite = "0.26"
 futures-util = "0.3"
 proptest = { workspace = true }
+# Captures the stress tests' logs (shown only when a test fails).
+tracing-subscriber = { workspace = true }
 
 [dev-dependencies.tempfile]
 version = "3"
