@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-18
+
+0.3.2 fixes the multi-node bugs found in the October platform migration and
+adds a read-only MCP endpoint, so AI clients can inspect a cluster. Upgrade
+agents together with the master.
+
+### Upgrade notes
+
+- **Upgrade agents together with the master.** An older agent never confirms
+  a stop, so `orca stop` and scaling to 0 on its services fail after 60s
+  (#309).
+- **Don't downgrade the master below 0.3.2.** An older master ignores the
+  `adopted` marking and replays the incomplete records again (#313).
+- **Nothing new is on by default.** `[api_rate_limit]` and `[mcp]` are off.
+  To use MCP, give it its own token:
+  `orca token create --name mcp --role viewer`.
+
+### Added
+
+- **`orca mcp`: a read-only MCP server over stdio (#80).** For Claude
+  Desktop, IDEs and agents. Every call is an `/api/v1` GET made with the
+  caller's token, so the master's role checks apply.
+  - 12 tools, also offered as `orca://` resources: status, service detail,
+    history, logs, cluster, networks, alerts, one alert, backups, webhooks,
+    secrets inventory and whoami. A client sees only what its token's role allows.
+  - Prompts `diagnose`, `failing_services`, `capacity_review` and
+    `explain_alert` gather the data for the client's model. Orca makes no
+    LLM call.
+  - Credentials in logs and failure text are masked, and that text is fenced
+    as untrusted data. Responses are capped at 256 KiB.
+  - At most 60 API reads per minute (`--reads-per-minute`).
+  - Refuses the cluster token unless `--allow-cluster-token`.
+  - Ships in a new crate, `orca-mcp`. See the [MCP guide](docs/src/content/docs/guide/mcp.md).
+- **`/mcp` on the master over Streamable HTTP (#80).** The same server for
+  clients that connect by URL. Off by default: `[mcp] enabled = true`.
+  - Served only when the cluster has API tokens. It refuses the cluster
+    token and other legacy `api_tokens` entries unless
+    `[mcp] allow_cluster_token = true`.
+  - Each call is checked by its own route, as a direct API call would be.
+  - The `Host` header must be loopback, `cluster.domain` or in
+    `[mcp] allowed_hosts`. Browser `Origin`s are refused unless listed in
+    `[mcp] allowed_origins`.
+  - One read budget per token (`[mcp] reads_per_minute`, default 60).
+  - Builds without it: `cargo build --no-default-features`.
+- **`orca rm <svc>... [--force]` (#315).** Removes a service for good: stops
+  its containers wherever they run and removes it from the registry, store,
+  stopped set, deploy history and proxy. Volumes and bind mounts are kept and
+  listed. Without `--force` it refuses a service `[reconcile].config_dir`
+  still declares, and one whose stop it couldn't confirm. Also
+  `POST /api/v1/services/{name}/remove?force=` (admin). `DELETE` still
+  pauses.
+- **`GET /api/v1/whoami` (#80).** The caller's token name, role and allowed
+  actions.
+- **Audit log (#80).** Every change and every exec, allowed or denied, with
+  the token name, route, target, status, latency and client, and every call
+  made through MCP, reads included. Never the query or body. Logged on
+  target `orca::audit` and kept in a 1000-event buffer at
+  `GET /api/v1/audit` (admin).
+- **`GET /api/v1/services/{name}` and `.../history` (#80).** A service's
+  status and an allowlisted view of its config. Env values and secret
+  references are masked, and `secret_refs` is admin only.
+- **Per-token rate limit on changes (#80).** `[api_rate_limit]`, off by
+  default, 60 mutating requests per minute when on. Over it the API answers
+  429 with `Retry-After`.
+
+### Fixed
+
+- **A stopped container is no longer restarted by the agent (#310).** Docker
+  keeps the last health status after a container exits, so the health
+  watcher undid a `docker stop` within 30s. It now restarts only running
+  containers.
+- **Agents start services in dependency order when they re-sync (#311).**
+  A dependency on another node, or paused, no longer holds back the services
+  after it.
+- **Adopted records no longer replay hollow configs (#313).** Orphan
+  adoption marks what it stores as `adopted`, and the master never creates
+  containers from such a record. Records from older versions are recognised
+  at boot and marked; the boot log names them. Deploy those services from
+  file. An agent deploy that hit the completion timeout is now stored, so a
+  master restart no longer forgets the service.
+- **Stopping an agent-placed service waits for the agent (#309).** Scaling
+  to 0 or `orca stop` waits up to 60s for the agent to confirm. If it
+  doesn't, the stop fails instead of marking the service paused while it
+  runs. Works on drained nodes; an offline node gets the stop queued.
+  Re-syncs leave out services scaled to 0, and stopping all services runs
+  concurrently.
+- **Backups include bind mounts of paused services (#312).** The master
+  sends each node the bind mounts its services declare.
+
 ## [0.3.1] - 2026-11-10
 
 0.3.1 is 0.3.0 with one proxy fix. No config or upgrade steps.
@@ -1075,7 +1164,8 @@ reviewed and hardened before merge (see the release PR for the review notes).
 - Basic CLI: `orca server`, `orca deploy`, `orca status`, `orca logs`.
 - TOML-based service configuration.
 
-[Unreleased]: https://github.com/mighty840/orca/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/mighty840/orca/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/mighty840/orca/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/mighty840/orca/compare/v0.3.0...v0.3.1
 [0.2.3]: https://github.com/mighty840/orca/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/mighty840/orca/compare/v0.2.1...v0.2.2
