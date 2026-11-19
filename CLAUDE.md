@@ -19,10 +19,10 @@ Cargo workspace with 9 crates:
 |-------|------|---------|
 | `orca-core` | lib | Types, config, `Runtime` trait, API types, errors |
 | `orca-agent` | lib | Docker + Wasm runtime implementations |
-| `orca-control` | lib | API server, reconciler, shared state |
+| `orca-control` | lib | API server, reconciler, shared state; mounts `/mcp` (feature `mcp`) |
 | `orca-proxy` | lib | Reverse proxy + Wasm trigger routing |
 | `orca-ai` | lib | LLM backend, conversational alerts, monitor |
-| `orca-mcp` | lib | Read-only MCP server (tools, resources, prompts) over the HTTP API; `orca mcp` on stdio |
+| `orca-mcp` | lib | Read-only MCP server (tools, resources, prompts) over the HTTP API: `orca mcp` on stdio, and the master's `/mcp` |
 | `orca-cli` | bin | Single `orca` binary (all commands); published as `mallorca` |
 | `orca-tui` | lib | TUI dashboard (`orca tui`) |
 | `orca-web` | bin | Web dashboard (stub, M3) |
